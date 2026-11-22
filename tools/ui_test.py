@@ -91,6 +91,27 @@ def run(viewport, tag):
         if pt: page.mouse.click(pt[0], pt[1]); page.wait_for_timeout(100)
         after = page.evaluate("(ti)=>{const f=window.__orb.G.house.draft.furn[ti];return [f.x,f.y]}", ti)
         if before == after: problems.append(f'{tag}: 家具を動かせない {page.inner_text("#isoside")[:200]}')
+        # 回す：その場で（ボタン）と、持ち上げてRキー
+        bi = page.evaluate("()=>window.__orb.G.house.draft.furn.findIndex(f=>f.t==='bed')")
+        r0 = page.evaluate("(i)=>window.__orb.G.house.draft.furn[i].r||0", bi)
+        page.click(f'[data-frotin="{bi}"]'); page.wait_for_timeout(80)
+        r1 = page.evaluate("(i)=>window.__orb.G.house.draft.furn[i].r||0", bi)
+        if r1 == r0: problems.append(f'{tag}: ベッドをその場で回せない {page.inner_text("#isoside")[:160]}')
+        hit = page.evaluate("""(i)=>{const {G,E}=window.__orb;const d=G.house.draft;const f=d.furn[i];
+          for(const [x,y] of E.W.furnCells(f)){for(const zz of [0.45,0.5,0.35]){const p=G.view.screenOf(x+0.5,y+0.5,d.z+zz);const g=G.view.pickAt(p[0],p[1]);if(g&&g.type==='furn'&&g.i===i)return p;}}return null}""", bi)
+        if hit:
+            page.mouse.click(hit[0], hit[1]); page.wait_for_timeout(80)
+            if page.evaluate("()=>window.__orb.G.build.sel") != bi: problems.append(f'{tag}: 3Dで家具を押しても持ち上がらない')
+            page.keyboard.press('r'); page.wait_for_timeout(60)
+            spot = page.evaluate("""(i)=>{const {G,E}=window.__orb;const d=G.house.draft,st=G.build;
+              for(const k in d.cells){const [x,y]=k.split(',').map(Number);const f={...d.furn[i],x,y,r:st.selR};if(E.W.furnProblem(d,f,i))continue;
+                const p=G.view.screenOf(x+0.5,y+0.5,d.z+0.1);const g=G.view.pickAt(p[0],p[1]);if(g&&(g.type==='floor'||(g.type==='furn'&&g.i===i))&&g.x===x&&g.y===y)return [p,st.selR];}return null}""", bi)
+            if spot:
+                page.mouse.click(spot[0][0], spot[0][1]); page.wait_for_timeout(80)
+                r2 = page.evaluate("(i)=>window.__orb.G.house.draft.furn[i].r||0", bi)
+                if r2 != spot[1] or page.evaluate("()=>window.__orb.G.build.sel") != -1: problems.append(f'{tag}: 持ち上げて回して置けない r={r2} want={spot[1]}')
+            else: problems.append(f'{tag}: 回したベッドを置ける場所が見つからない')
+        else: problems.append(f'{tag}: 3Dでベッドを押せる場所がない')
         page.screenshot(path=f'{OUT}/{tag}_5a_furn.png')
         page.click('[data-view="up"]'); page.wait_for_timeout(150)
         page.screenshot(path=f'{OUT}/{tag}_5b_preview.png')

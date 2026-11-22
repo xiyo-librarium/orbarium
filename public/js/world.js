@@ -525,7 +525,9 @@ export const FURN = {
   bed: { name: 'ベッド', group: 'bed', note: '1人用。', d: 2, cost: 0, color: '#F4F1E8' },
   table: { name: 'テーブルと椅子', group: 'table', note: '食べる・書く・人を呼ぶ。', d: 2, cost: 0, color: '#B98B58' }
 };
-export const furnCells = (f) => FURN[f.t].d === 1 ? [[f.x, f.y]] : f.r ? [[f.x, f.y], [f.x + 1, f.y]] : [[f.x, f.y], [f.x, f.y + 1]];
+/* 家具の向き r：0＝頭（奥）が北で南へのびる、1＝頭が西で東へ、2＝頭が南で北へ、3＝頭が東で西へ。(x,y) は頭のマス */
+export const FDIR = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+export const furnCells = (f) => { if (FURN[f.t].d === 1) return [[f.x, f.y]]; const [dx, dy] = FDIR[(f.r || 0) % 4]; return [[f.x, f.y], [f.x + dx, f.y + dy]]; };
 /* 扉から入ってすぐのマス（家具を置かない） */
 function doorCells(d) { const out = new Set(); for (const e in d.open) if (d.open[e] === 'door') for (const [x, y] of edgeCells(e)) if (d.cells[ck(x, y)]) out.add(ck(x, y)); return out; }
 export function furnProblem(d, f, skip = -1) {
@@ -538,6 +540,17 @@ export function furnProblem(d, f, skip = -1) {
   return null;
 }
 export function draftMoveFurn(d, i, x, y, r) { const f = { ...d.furn[i], x, y, r }; const p = furnProblem(d, f, i); if (p) return p; d.furn[i] = f; return null; }
+/* その場で90度回す。回した形が入らなければ、もとの場所に重なる近くの置き方を探す */
+export function draftRotateFurn(d, i, dir = 1) {
+  const f = d.furn[i], r = ((f.r || 0) + dir + 4) % 4;
+  if (FURN[f.t].d === 1) { d.furn[i] = { ...f, r }; return null; }
+  const old = furnCells(f), cand = [];
+  for (const [cx, cy] of old) for (const [ox, oy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) cand.push([cx + ox, cy + oy]);
+  // 頭を同じマス → もう一方のマスを軸に → 近くの順
+  const [dx, dy] = FDIR[r]; cand.splice(1, 0, [old[1][0] - dx, old[1][1] - dy]);
+  for (const [x, y] of cand) { const g = { ...f, x, y, r }; if (!furnProblem(d, g, i)) { d.furn[i] = g; return null; } }
+  return '回すと入らない（まわりをあけるか、動かしてから回す）';
+}
 export function draftSwapFurn(d, i, t) { if (FURN[t].group !== FURN[d.furn[i].t].group) return '種類がちがう'; d.furn[i].t = t; return null; }
 /* 最初の家具の置き方：水まわりは扉から遠い隅、ベッドは壁ぎわ、テーブルは窓のそば */
 export function autoFurnish(d, items = ['shower', 'toilet', 'bed', 'table']) {

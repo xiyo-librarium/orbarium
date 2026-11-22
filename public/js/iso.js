@@ -1,5 +1,5 @@
 /* 斜め上から見下ろす3D（アイソメトリック）。カメラは固定。回転ボタンを押したときだけ短くなめらかに回る */
-import { BLOCKS, N, h, at, WALLS, ROOFS, FLOORS, OPENINGS, FURN, HOUSE_H, houseOuterEdges, furnCells } from './world.js';
+import { BLOCKS, N, h, at, WALLS, ROOFS, FLOORS, OPENINGS, FURN, FDIR, HOUSE_H, houseOuterEdges, furnCells } from './world.js';
 
 const SIDE = [[1, 0], [0, 1], [-1, 0], [0, -1]];   // +x, +y, -x, -y
 function shade(hex, f) {
@@ -131,6 +131,7 @@ export function createView(canvas, world, opt = {}) {
     list.push({ depth: depth + z * 0.001 + ht * 0.0005, draw: (cx, pc) => {
       for (const sd of sides) {
         poly(cx, sd.pts, pc ? pc(sd.face) : sd.fill, alpha);
+        if (!pc && meta?.sideDecor) meta.sideDecor(cx, sd.pts, sd.face);
         if (!pc && meta?.lip) {   // 地面の側面：上に草のふち、1mごとに地層の線
           const [qa, qb] = sd.q, Pa = (zz) => P(qa === 0 || qa === 3 ? x0 : x1, qa === 0 || qa === 1 ? y0 : y1, zz), Pb = (zz) => P(qb === 0 || qb === 3 ? x0 : x1, qb === 0 || qb === 1 ? y0 : y1, zz);
           cx.globalAlpha = alpha; cx.fillStyle = meta.lip; cx.beginPath(); const A = Pa(z + ht), B = Pb(z + ht), C = Pb(z + ht - 0.16), D = Pa(z + ht - 0.16); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.lineTo(C[0], C[1]); cx.lineTo(D[0], D[1]); cx.closePath(); cx.fill();
@@ -185,7 +186,9 @@ export function createView(canvas, world, opt = {}) {
       const pts = [P(C[ia][0], C[ia][1], z), P(C[ib][0], C[ib][1], z), ...ed.slice().reverse().map(([px, py, pz]) => P(px, py, pz))];
       const sl = nx * S[0] + ny * S[1], mx = x + 0.5 + nx * 0.53, my = y + 0.5 + ny * 0.53;
       const sLit = sl > 0 && occ ? litAt(mx, my, top - Math.min(ht, 3) * 0.5) : sl > 0 ? 1 : 0;
-      const fill = lightCol(meta.side, sl, sLit, 0.94, true);
+      // 内側の1段の段差は草の土手、敷地の切り口と高い崖・掘った所は土
+      const bank = meta.lip && open[ei] && meta.drop && meta.drop[ei] === 1;
+      const fill = lightCol(bank ? meta.bank : meta.side, sl, sLit, bank ? 0.9 : 0.94, true);
       // 草のふち：厚みも少しゆらす
       const lip = open[ei] && meta.lip ? [...ed.map(([px, py, pz]) => P(px, py, pz)), ...ed.slice().reverse().map(([px, py, pz]) => P(px, py, pz - 0.1 - (wob(px + 0.13, py - 0.07) + 0.5) * 0.12))] : null;
       const lipFill = lightCol(color, (Math.max(0, sl) + lam) / 2, (sLit + lit) / 2, 0.93, true);
@@ -230,6 +233,8 @@ export function createView(canvas, world, opt = {}) {
       else {
         // 下が見えている辺（となりが低い・描く範囲の外）：0北 1東 2南 3西
         const open = [[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => { const nx = x + dx, ny = y + dy; return nx < x0 || nx > x1 || ny < y0 || ny > y1 || h(world, nx, ny) < g; });
+        meta.drop = [[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => { const nx = x + dx, ny = y + dy; return nx < x0 || nx > x1 || ny < y0 || ny > y1 ? 99 : g - h(world, nx, ny); });
+        meta.bank = '#' + hex3(col).map(c => Math.round(c * 0.86).toString(16).padStart(2, '0')).join('');
         terrainBox(list, x, y, floorLv, g - floorLv, col, meta, open);
       }
     }
@@ -249,15 +254,10 @@ export function createView(canvas, world, opt = {}) {
     for (const k in world.blocks) {
       const [x, y, z] = k.split(',').map(Number);
       if (x < x0 || x > x1 || y < y0 || y > y1) continue;
-      const b = world.blocks[k], d = BLOCKS[b.t];
-      const ht = d.overlay ? 0.14 : d.kind === 'roof' ? 0.35 : d.kind === 'pv' ? 0.12 : d.kind === 'pond' ? 0.9 : 1;
-      const inset = d.kind === 'tank' ? 0.12 : d.kind === 'tree' ? 0.15 : d.kind === 'pillar' ? 0.36 : d.kind === 'hedge' ? 0.05 : 0;
-      const zz = d.kind === 'roof' ? z : z;
-      const meta = { type: 'block', x, y, z, b, decor: decorFor(b, d) };
-      box(list, x, y, zz, ht, d.color, meta, b.p ? 0.45 : d.kind === 'pond' ? 0.85 : 1, inset);
+      const b = world.blocks[k]; drawBlock(list, x, y, z, b, BLOCKS[b.t], floorLv);
     }
     const hs = v.house || world.house, base = v.base;
-    if (hs) drawHouse(list, hs, base, x0, x1, y0, y1);
+    if (hs) drawHouse(list, hs, base, x0, x1, y0, y1, floorLv);
     if (v.rect) {
       const { xa, xb, ya, yb, ok } = v.rect, z = hs ? hs.z : 0;
       for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) rbox(list, x + 0.04, y + 0.04, x + 0.96, y + 0.96, Math.max(z, h(world, x, y)) + 0.02, 0.06, v.rect.mode === 'remove' ? '#D9534F' : ok(x, y) ? '#4C7BD9' : '#B9BDB8', { type: 'ghost' }, 0.55);
@@ -287,10 +287,114 @@ export function createView(canvas, world, opt = {}) {
       ctx.strokeStyle = 'rgba(255,170,40,.9)'; ctx.lineWidth = 2 * v.dpr; for (let i = 0; i < 8; i++) { const a2 = i * Math.PI / 4; ctx.beginPath(); ctx.moveTo(sx + Math.cos(a2) * 12 * v.dpr, sy + Math.sin(a2) * 12 * v.dpr); ctx.lineTo(sx + Math.cos(a2) * 16 * v.dpr, sy + Math.sin(a2) * 16 * v.dpr); ctx.stroke(); }
     }
   }
+  /* ---------- 形の部品：球・円柱・接地の影 ---------- */
+  const dep = (x, y, z, ht = 1) => { const g = geom(); return v.top ? (z + ht) * 10 : project(x + 0.5, y + 0.5, z, g)[2] + z * 0.001 + ht * 0.0005; };
+  function sunScreen() { const g = geom(), S = v.sun.dir, a = project(v.cx, v.cy, 0, g), b = project(v.cx + S[0], v.cy + S[1], S[2], g); const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [dx / l, dy / l]; }
+  function sphere(list, wx, wy, wz, r, color, meta, d, alpha = 1, squash = 1) {
+    const g = geom(), c = project(wx, wy, wz, g), R = r * (v.top ? g.s : g.tw * 0.72), lit = occ ? litAt(wx, wy, wz + r * 0.9) : 1, sd = sunScreen();
+    list.push({ depth: d, meta, draw: (cx, pc) => {
+      cx.beginPath(); cx.ellipse(c[0], c[1], R, R * squash, 0, 0, 7);
+      if (pc) { cx.fillStyle = pc(4); cx.fill(); return; }
+      const gr = cx.createRadialGradient(c[0] + sd[0] * R * 0.45, c[1] + sd[1] * R * 0.45 * squash, R * 0.08, c[0], c[1], R * 1.08);
+      gr.addColorStop(0, lightCol(color, 1.0, lit, 1.05)); gr.addColorStop(0.55, lightCol(color, 0.55, lit)); gr.addColorStop(1, lightCol(color, 0.05, lit, 0.8));
+      cx.globalAlpha = alpha; cx.fillStyle = gr; cx.fill(); cx.globalAlpha = 1;
+    } });
+  }
+  function cylinder(list, wx, wy, wz, r, ht, color, meta, d, opt = {}) {
+    const g = geom(), cb = project(wx, wy, wz, g), ct = project(wx, wy, wz + ht, g);
+    const Rx = v.top ? r * g.s : r * g.tw / Math.SQRT2, Ry = v.top ? r * g.s : r * g.th / Math.SQRT2;
+    const lit = occ ? litAt(wx, wy, wz + ht + 0.01) : 1, sd = sunScreen(), S = v.sun.dir;
+    list.push({ depth: d, meta, draw: (cx, pc) => {
+      if (!v.top) {
+        cx.beginPath(); cx.moveTo(ct[0] - Rx, ct[1]); cx.lineTo(cb[0] - Rx, cb[1]); cx.ellipse(cb[0], cb[1], Rx, Ry, 0, Math.PI, 0, true); cx.lineTo(ct[0] + Rx, ct[1]); cx.ellipse(ct[0], ct[1], Rx, Ry, 0, 0, Math.PI, true); cx.closePath();
+        if (pc) { cx.fillStyle = pc(0); cx.fill(); }
+        else {
+          const gr = cx.createLinearGradient(cb[0] - Rx, 0, cb[0] + Rx, 0), lt = sd[0] > 0;
+          gr.addColorStop(0, lightCol(color, lt ? 0.05 : 0.9, lit, 0.85)); gr.addColorStop(lt ? 0.7 : 0.3, lightCol(color, 0.9, lit)); gr.addColorStop(1, lightCol(color, lt ? 0.9 : 0.05, lit, 0.85));
+          cx.fillStyle = gr; cx.fill();
+          if (opt.ribs) { cx.strokeStyle = 'rgba(60,70,80,.18)'; cx.lineWidth = 1.2 * v.dpr; for (const f of opt.ribs) { const yy = cb[1] + (ct[1] - cb[1]) * f; cx.beginPath(); cx.ellipse(cb[0], yy, Rx, Ry, 0, 0, Math.PI); cx.stroke(); } }
+        }
+      }
+      cx.beginPath(); cx.ellipse(ct[0], ct[1], Rx, Ry, 0, 0, 7);
+      cx.fillStyle = pc ? pc(4) : lightCol(opt.top || color, S[2], lit, 0.95); cx.fill();
+      if (!pc && opt.lid) { cx.beginPath(); cx.ellipse(ct[0], ct[1], Rx * 0.45, Ry * 0.45, 0, 0, 7); cx.fillStyle = lightCol(opt.lid, S[2], lit); cx.fill(); }
+    } });
+  }
+  /* 接地の影：物の下にやわらかい影。地面の上面のすぐ後に描く */
+  function blob(list, wx, wy, wz, r, strength = 0.28, d) {
+    if (v.top) return;
+    const g = geom(), c = project(wx, wy, wz, g), Rx = r * g.tw / Math.SQRT2 * 1.1, Ry = r * g.th / Math.SQRT2 * 1.1;
+    list.push({ depth: d, draw: (cx, pc) => { if (pc) return; cx.save(); cx.translate(c[0], c[1]); cx.scale(1, Ry / Rx); const gr = cx.createRadialGradient(0, 0, 0, 0, 0, Rx); gr.addColorStop(0, `rgba(30,35,20,${strength})`); gr.addColorStop(1, 'rgba(30,35,20,0)'); cx.fillStyle = gr; cx.beginPath(); cx.arc(0, 0, Rx, 0, 7); cx.fill(); cx.restore(); } });
+  }
+  const terrainDepth = (x, y, floorLv) => { const g = geom(), gg = h(world, x, y); return project(x + 0.5, y + 0.5, floorLv, g)[2] + floorLv * 0.001 + (gg - floorLv) * 0.0005; };
+  /* 置いたものを形で描く（タンクは円柱、木は丸い葉、畑は土と苗の列…） */
+  function drawBlock(list, x, y, z, b, d, floorLv) {
+    const meta = { type: 'block', x, y, z, b }, a = b.p ? 0.45 : 1, onGround = terrainDepth(x, y, floorLv) + 1e-5;
+    if (d.kind === 'tank') { blob(list, x + 0.5, y + 0.5, z, 0.55, 0.3, onGround); cylinder(list, x + 0.5, y + 0.5, z, 0.42, 0.95, d.color, meta, dep(x, y, z, 1), { ribs: [0.33, 0.66], lid: '#8FA9C2', top: '#DCE9F5' }); return; }
+    if (d.kind === 'tree') {
+      blob(list, x + 0.5, y + 0.5, z, 0.75, 0.32, onGround);
+      rbox(list, x + 0.45, y + 0.45, x + 0.55, y + 0.55, z, 1.2, '#7A5A3A', meta, a);
+      const D = dep(x, y, z, 2.2), hh = hash(x, y, 9);
+      sphere(list, x + 0.36, y + 0.6, z + 1.25, 0.36, '#4E8F5B', meta, D + 0.0001);
+      sphere(list, x + 0.64, y + 0.4, z + 1.35, 0.36, '#57995F', meta, D + 0.0002);
+      sphere(list, x + 0.5, y + 0.5, z + 1.7, 0.45, '#5FA066', meta, D + 0.0003);
+      if (hh > 0.3) for (let i = 0; i < 4; i++) sphere(list, x + 0.3 + hash(x, y, 30 + i) * 0.4, y + 0.3 + hash(x, y, 40 + i) * 0.4, z + 1.3 + hash(x, y, 50 + i) * 0.5, 0.06, '#E8843A', meta, D + 0.0004 + i * 1e-5);
+      return;
+    }
+    if (d.kind === 'hedge') {
+      blob(list, x + 0.5, y + 0.5, z, 0.6, 0.25, onGround);
+      rbox(list, x + 0.06, y + 0.06, x + 0.94, y + 0.94, z, 0.45, '#2F6139', meta, a);
+      const D = dep(x, y, z, 1);
+      [[0.3, 0.3], [0.7, 0.3], [0.3, 0.7], [0.7, 0.7]].forEach(([px, py], i) => sphere(list, x + px, y + py, z + 0.55 + hash(x, y, 60 + i) * 0.12, 0.3, '#3C7445', meta, D + i * 1e-5));
+      return;
+    }
+    if (d.kind === 'heap') { blob(list, x + 0.5, y + 0.5, z, 0.6, 0.3, onGround); sphere(list, x + 0.5, y + 0.5, z + 0.15, 0.48, '#8A6A42', { ...meta }, dep(x, y, z, 0.6), a, 0.72); return; }
+    if (d.kind === 'coop') {
+      blob(list, x + 0.5, y + 0.5, z, 0.65, 0.28, onGround);
+      rbox(list, x + 0.12, y + 0.12, x + 0.88, y + 0.88, z, 0.6, '#E8C98A', { ...meta, sideDecor: (cx, p, face) => { if (face !== 1 && face !== 0) return; const m = (fx, fy) => [p[0][0] + (p[1][0] - p[0][0]) * fx + (p[3][0] - p[0][0]) * fy, p[0][1] + (p[1][1] - p[0][1]) * fx + (p[3][1] - p[0][1]) * fy]; const q = [m(0.4, 0), m(0.6, 0), m(0.6, 0.5), m(0.4, 0.5)]; cx.fillStyle = '#5A4030'; cx.beginPath(); cx.moveTo(q[0][0], q[0][1]); for (const r of q) cx.lineTo(r[0], r[1]); cx.fill(); } }, a);
+      rbox(list, x + 0.05, y + 0.05, x + 0.95, y + 0.95, z + 0.6, 0.12, '#B5523B', meta, a);
+      rbox(list, x + 0.2, y + 0.2, x + 0.8, y + 0.8, z + 0.72, 0.12, '#A84A35', meta, a);
+      return;
+    }
+    if (d.kind === 'pump') { blob(list, x + 0.5, y + 0.5, z, 0.35, 0.25, onGround); rbox(list, x + 0.3, y + 0.3, x + 0.7, y + 0.7, z, 0.4, d.color, meta, a); cylinder(list, x + 0.5, y + 0.5, z + 0.4, 0.06, 0.35, '#8A9AA6', meta, dep(x, y, z, 0.8)); return; }
+    if (d.kind === 'pv') {
+      blob(list, x + 0.5, y + 0.5, z, 0.5, 0.22, onGround);
+      rbox(list, x + 0.15, y + 0.2, x + 0.22, y + 0.27, z, 0.45, '#8A9AA6', meta, a); rbox(list, x + 0.78, y + 0.2, x + 0.85, y + 0.27, z, 0.45, '#8A9AA6', meta, a);
+      rbox(list, x + 0.06, y + 0.12, x + 0.94, y + 0.9, z + 0.45, 0.06, '#30476B', { ...meta, decor: (cx, t) => { cx.strokeStyle = 'rgba(160,185,220,.55)'; cx.lineWidth = 1; for (let i = 1; i < 4; i++) { const f = i / 4; cx.beginPath(); cx.moveTo(t[0][0] + (t[1][0] - t[0][0]) * f, t[0][1] + (t[1][1] - t[0][1]) * f); cx.lineTo(t[3][0] + (t[2][0] - t[3][0]) * f, t[3][1] + (t[2][1] - t[3][1]) * f); cx.stroke(); } for (let i = 1; i < 3; i++) { const f = i / 3; cx.beginPath(); cx.moveTo(t[0][0] + (t[3][0] - t[0][0]) * f, t[0][1] + (t[3][1] - t[0][1]) * f); cx.lineTo(t[1][0] + (t[2][0] - t[1][0]) * f, t[1][1] + (t[2][1] - t[1][1]) * f); cx.stroke(); } } }, a);
+      return;
+    }
+    if (d.kind === 'bed') { rbox(list, x + 0.03, y + 0.03, x + 0.97, y + 0.97, z, 0.14, b.m ? '#A88A5A' : '#6E5034', { ...meta, decor: bedDecor(x, y, b) }, a); return; }
+    if (d.kind === 'pond') { rbox(list, x, y, x + 1, y + 1, z, 0.85, '#5B9BD5', { ...meta, decor: waterDecor(x, y) }, 0.82); return; }
+    const ht = d.overlay ? 0.14 : d.kind === 'roof' ? 0.35 : 1;
+    const inset = d.kind === 'pillar' ? 0.38 : 0;
+    box(list, x, y, z, ht, d.color, { ...meta, decor: decorFor(b, d) }, b.p ? 0.45 : 1, inset);
+  }
+  function bedDecor(x, y, b) {   // 畑：苗の列。石垣は縁の石、温室は白い覆い
+    return (cx, t) => {
+      const at = (fx, fy) => [t[0][0] + (t[1][0] - t[0][0]) * fx + (t[3][0] - t[0][0]) * fy, t[0][1] + (t[1][1] - t[0][1]) * fx + (t[3][1] - t[0][1]) * fy];
+      const u = Math.abs(t[1][0] - t[0][0]) + Math.abs(t[3][0] - t[0][0]); if (u < 10 * v.dpr) return;
+      cx.strokeStyle = 'rgba(60,40,25,.35)'; cx.lineWidth = 1; for (const fy of [0.33, 0.66]) { const A = at(0.08, fy), B = at(0.92, fy); cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.stroke(); }
+      for (const fy of [0.2, 0.5, 0.8]) for (const fx of [0.2, 0.5, 0.8]) {
+        const [px, py] = at(fx + (hash(x, y, fx * 10 + fy) - 0.5) * 0.08, fy), rr = (2.2 + hash(x, y, fy * 7 + fx) * 1.4) * v.dpr;
+        cx.fillStyle = '#4F8F45'; cx.beginPath(); cx.arc(px - rr * 0.6, py - rr * 0.3, rr, 0, 7); cx.arc(px + rr * 0.6, py - rr * 0.3, rr, 0, 7); cx.fill();
+        cx.fillStyle = '#76B25E'; cx.beginPath(); cx.arc(px, py - rr * 0.9, rr * 0.9, 0, 7); cx.fill();
+      }
+      if (b.s) { cx.fillStyle = '#9B988E'; for (let i = 0; i < 4; i++) for (const [fx, fy] of [[i / 4 + 0.12, 0.04], [i / 4 + 0.12, 0.96], [0.04, i / 4 + 0.12], [0.96, i / 4 + 0.12]]) { const [px, py] = at(fx, fy); cx.beginPath(); cx.ellipse(px, py, 3.4 * v.dpr, 2.2 * v.dpr, 0, 0, 7); cx.fill(); } }
+      if (b.g) { cx.fillStyle = 'rgba(245,248,250,.45)'; cx.strokeStyle = 'rgba(255,255,255,.8)'; cx.lineWidth = 1.2 * v.dpr; const A = at(0, 0.5), B = at(1, 0.5); const mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2 - 16 * v.dpr; cx.beginPath(); cx.moveTo(t[0][0], t[0][1]); cx.quadraticCurveTo(mx, my - 6 * v.dpr, t[1][0], t[1][1]); cx.lineTo(t[2][0], t[2][1]); cx.quadraticCurveTo(mx, my + 10 * v.dpr, t[3][0], t[3][1]); cx.closePath(); cx.fill(); cx.stroke(); }
+    };
+  }
+  function waterDecor(x, y) {
+    return (cx, t) => {
+      const at = (fx, fy) => [t[0][0] + (t[1][0] - t[0][0]) * fx + (t[3][0] - t[0][0]) * fy, t[0][1] + (t[1][1] - t[0][1]) * fx + (t[3][1] - t[0][1]) * fy];
+      const A = at(0, 0), B = at(1, 1), gr = cx.createLinearGradient(A[0], A[1], B[0], B[1]); gr.addColorStop(0, 'rgba(255,255,255,.25)'); gr.addColorStop(1, 'rgba(30,70,120,.2)');
+      cx.fillStyle = gr; cx.beginPath(); cx.moveTo(t[0][0], t[0][1]); for (const p of t) cx.lineTo(p[0], p[1]); cx.closePath(); cx.fill();
+      cx.strokeStyle = 'rgba(255,255,255,.55)'; cx.lineWidth = 1.2 * v.dpr; for (let i = 0; i < 2; i++) { const [px, py] = at(0.25 + hash(x, y, 70 + i) * 0.5, 0.25 + hash(x, y, 80 + i) * 0.5); cx.beginPath(); cx.ellipse(px, py, 6 * v.dpr, 2.5 * v.dpr, 0, Math.PI * 1.1, Math.PI * 1.9); cx.stroke(); }
+    };
+  }
   /* 家：床・壁（窓と扉つき）・屋根。設計中は新しい床を青く、なくなる床を赤く */
-  function drawHouse(list, hs, base, x0, x1, y0, y1) {
+  function drawHouse(list, hs, base, x0, x1, y0, y1, floorLv) {
     const z = hs.z, Wm = WALLS[hs.wall], F = FLOORS[hs.floor], R = ROOFS[hs.roof];
-    const inView = (x, y) => x >= x0 - 1 && x <= x1 + 1 && y >= y0 - 1 && y <= y1 + 1;
+    const inView = (x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
     for (const k in hs.cells) {
       const [x, y] = k.split(',').map(Number); if (!inView(x, y)) continue;
       const isNew = base && !base.cells[k];
@@ -307,17 +411,36 @@ export function createView(canvas, world, opt = {}) {
     const T = v.top ? 0.26 : 0.14, LOW = 0.45;
     for (const o of houseOuterEdges(hs)) {
       const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number);
-      if (!inView(ex, ey)) continue;
+      if (!inView(o.x, o.y)) continue;
       const op = hs.open[o.e], O = op ? OPENINGS[op] : null;
       const rect = t === 'h' ? [ex, ey - T / 2, ex + 1, ey + T / 2] : [ex - T / 2, ey, ex + T / 2, ey + 1];
       const meta = { type: 'wall', e: o.e, x: o.x, y: o.y, dir: o.dir, op };
       const full = v.wallMode === 'up' || (v.wallMode === 'cut' && !FRONT.includes(o.dir));
       const changed = base && (!base.cells[`${o.x},${o.y}`] || base.wall !== hs.wall || base.open[o.e] !== op);
       const alpha = 1;
+      // 外の地面に、壁ぎわのやわらかい影
+      const [ox, oy] = [o.x + (o.dir === 'e' ? 1 : o.dir === 'w' ? -1 : 0), o.y + (o.dir === 's' ? 1 : o.dir === 'n' ? -1 : 0)];
+      if (!v.top && !hs.cells[`${ox},${oy}`]) {
+        const gz = h(world, ox, oy), g = geom(), W2 = 0.42;
+        const q = o.dir === 'n' ? [[ex, ey], [ex + 1, ey], [ex + 1, ey - W2], [ex, ey - W2]] : o.dir === 's' ? [[ex, ey], [ex + 1, ey], [ex + 1, ey + W2], [ex, ey + W2]] : o.dir === 'w' ? [[ex, ey], [ex, ey + 1], [ex - W2, ey + 1], [ex - W2, ey]] : [[ex, ey], [ex, ey + 1], [ex + W2, ey + 1], [ex + W2, ey]];
+        const pq = q.map(([px, py]) => project(px, py, gz + 0.01, g));
+        list.push({ depth: terrainDepth(ox, oy, floorLv) + 2e-5, draw: (cx, pc) => { if (pc) return; const A = [(pq[0][0] + pq[1][0]) / 2, (pq[0][1] + pq[1][1]) / 2], B = [(pq[2][0] + pq[3][0]) / 2, (pq[2][1] + pq[3][1]) / 2], gr = cx.createLinearGradient(A[0], A[1], B[0], B[1]); gr.addColorStop(0, 'rgba(30,35,20,.30)'); gr.addColorStop(1, 'rgba(30,35,20,0)'); cx.fillStyle = gr; cx.beginPath(); cx.moveTo(pq[0][0], pq[0][1]); for (const p of pq) cx.lineTo(p[0], p[1]); cx.closePath(); cx.fill(); } });
+      }
+      const wallDecor = wallTexture(hs.wall);
       if (v.top || !full) { rbox(list, ...rect, z, v.top ? HOUSE_H : LOW, O ? O.color : Wm.color, meta, alpha); continue; }
-      if (op === 'door') { rbox(list, ...rect, z, 2.1, O.color, meta, alpha); rbox(list, ...rect, z + 2.1, HOUSE_H - 2.1, Wm.color, meta, alpha); }
-      else if (op) { rbox(list, ...rect, z, 0.9, Wm.color, meta, alpha); rbox(list, ...rect, z + 0.9, 1.3, O.color, meta, 0.85); rbox(list, ...rect, z + 2.2, HOUSE_H - 2.2, Wm.color, meta, alpha); }
-      else rbox(list, ...rect, z, HOUSE_H, Wm.color, { ...meta, decor: changed ? null : null }, alpha);
+      if (op === 'door') {
+        rbox(list, ...rect, z, 2.1, O.color, { ...meta, sideDecor: doorDecor }, alpha); rbox(list, ...rect, z + 2.1, HOUSE_H - 2.1, Wm.color, { ...meta, sideDecor: wallDecor }, alpha);
+        // 扉の前の踏み石
+        if (!hs.cells[`${ox},${oy}`] && !v.top) { const gz = h(world, ox, oy), c0 = [o.x + 0.5 + (ox - o.x) * 0.72, o.y + 0.5 + (oy - o.y) * 0.72]; rbox(list, c0[0] - 0.3, c0[1] - 0.22 + (o.dir === 'e' || o.dir === 'w' ? -0.08 : 0), c0[0] + 0.3, c0[1] + 0.22, gz, 0.06, '#B7B2A6', { type: 'ghost' }, 1); }
+      } else if (op) {
+        rbox(list, ...rect, z, 0.9, Wm.color, { ...meta, sideDecor: wallDecor }, alpha);
+        rbox(list, ...rect, z + 0.9, 1.3, O.color, { ...meta, sideDecor: windowDecor(op) }, 0.9);
+        rbox(list, ...rect, z + 2.2, HOUSE_H - 2.2, Wm.color, { ...meta, sideDecor: wallDecor }, alpha);
+        // 窓台
+        const SD = 0.1, sr = t === 'h' ? [ex + 0.12, ey - T / 2 - SD, ex + 0.88, ey + T / 2 + SD] : [ex - T / 2 - SD, ey + 0.12, ex + T / 2 + SD, ey + 0.88];
+        rbox(list, ...sr, z + 0.86, 0.05, '#F2EEE4', meta, 1);
+      }
+      else rbox(list, ...rect, z, HOUSE_H, Wm.color, { ...meta, sideDecor: wallDecor }, alpha);
     }
     // 家具（屋根があるときは見えないので描かない）
     if (v.wallMode !== 'up' || v.top) {
@@ -332,31 +455,60 @@ export function createView(canvas, world, opt = {}) {
     }
     if (v.wallMode === 'up' && !v.top) {
       const cells = Object.keys(hs.cells).map(k => k.split(',').map(Number)).sort((a, b) => b[1] - a[1] || a[0] - b[0]);
-      for (const [x, y] of cells) { if (!inView(x, y)) continue; rbox(list, x, y, x + 1, y + 1, z + HOUSE_H, 0.2, R.color, { type: 'roof', x, y, decor: roofDecor(hs.roof) }, 0.95); }
-      if (hs.eaves) for (const o of houseOuterEdges(hs)) {
-        const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number), E2 = 0.45;
+      for (const [x, y] of cells) { if (!inView(x, y)) continue; rbox(list, x, y, x + 1, y + 1, z + HOUSE_H, 0.2, R.color, { type: 'roof', x, y, decor: roofDecor(hs.roof) }, 1); }
+      for (const o of houseOuterEdges(hs)) {   // 軒：ふだんは少し、庇をつけると深く
+        if (!inView(o.x, o.y)) continue;
+        const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number), E2 = hs.eaves ? 0.5 : 0.16;
         const rect = o.dir === 'n' ? [ex, ey - E2, ex + 1, ey] : o.dir === 's' ? [ex, ey, ex + 1, ey + E2] : o.dir === 'w' ? [ex - E2, ey, ex, ey + 1] : [ex, ey, ex + E2, ey + 1];
-        rbox(list, ...rect, z + HOUSE_H, 0.12, R.color, { type: 'roof', x: o.x, y: o.y }, 0.95);
+        rbox(list, ...rect, z + HOUSE_H + 0.06, 0.14, R.color, { type: 'roof', x: o.x, y: o.y, decor: roofDecor(hs.roof) }, 1);
       }
       for (let i = 0; i < Math.min(hs.pv || 0, cells.length); i++) { const [x, y] = cells[i]; rbox(list, x + 0.08, y + 0.08, x + 0.92, y + 0.92, z + HOUSE_H + 0.2, 0.06, '#30476B', { type: 'roof', x, y }, 1); }
     }
   }
+  const faceAt = (p, fx, fy) => [p[0][0] + (p[1][0] - p[0][0]) * fx + (p[3][0] - p[0][0]) * fy, p[0][1] + (p[1][1] - p[0][1]) * fx + (p[3][1] - p[0][1]) * fy];   // 側面の中の位置（fx：横、fy：下→上）
+  function wallTexture(kind) {
+    return (cx, p) => {
+      const L = (a, b) => { cx.beginPath(); cx.moveTo(a[0], a[1]); cx.lineTo(b[0], b[1]); cx.stroke(); };
+      if (kind === 'board') { cx.strokeStyle = 'rgba(70,45,20,.22)'; cx.lineWidth = 1; for (let i = 1; i < 6; i++) L(faceAt(p, i / 6, 0), faceAt(p, i / 6, 1)); }
+      else { cx.strokeStyle = kind === 'thick' ? 'rgba(90,70,40,.10)' : 'rgba(90,70,40,.17)'; cx.lineWidth = 1; const n = kind === 'thick' ? 3 : 6; for (let i = 1; i < n; i++) L(faceAt(p, 0, i / n), faceAt(p, 1, i / n)); }
+      cx.fillStyle = 'rgba(60,55,50,.25)'; const q = [faceAt(p, 0, 0), faceAt(p, 1, 0), faceAt(p, 1, 0.05), faceAt(p, 0, 0.05)]; cx.beginPath(); cx.moveTo(q[0][0], q[0][1]); for (const r of q) cx.lineTo(r[0], r[1]); cx.fill();
+    };
+  }
+  function windowDecor(op) {
+    return (cx, p) => {
+      const q = [faceAt(p, 0.1, 0.06), faceAt(p, 0.9, 0.06), faceAt(p, 0.9, 0.96), faceAt(p, 0.1, 0.96)];
+      cx.strokeStyle = '#F4F1EA'; cx.lineWidth = 2.4 * v.dpr; cx.beginPath(); cx.moveTo(q[0][0], q[0][1]); for (const r of q) cx.lineTo(r[0], r[1]); cx.closePath(); cx.stroke();
+      cx.lineWidth = 1.6 * v.dpr; const m1 = faceAt(p, 0.5, 0.06), m2 = faceAt(p, 0.5, 0.96); cx.beginPath(); cx.moveTo(m1[0], m1[1]); cx.lineTo(m2[0], m2[1]); cx.stroke();
+      if (op === 'window2') { const h1 = faceAt(p, 0.1, 0.5), h2 = faceAt(p, 0.9, 0.5); cx.beginPath(); cx.moveTo(h1[0], h1[1]); cx.lineTo(h2[0], h2[1]); cx.stroke(); }
+      cx.strokeStyle = 'rgba(255,255,255,.55)'; cx.lineWidth = 2 * v.dpr; const a = faceAt(p, 0.2, 0.55), b = faceAt(p, 0.38, 0.85); cx.beginPath(); cx.moveTo(a[0], a[1]); cx.lineTo(b[0], b[1]); cx.stroke();
+    };
+  }
+  function doorDecor(cx, p) {
+    cx.strokeStyle = 'rgba(40,25,15,.45)'; cx.lineWidth = 1.2 * v.dpr;
+    for (const [a0, b0, a1, b1] of [[0.2, 0.12, 0.8, 0.45], [0.2, 0.55, 0.8, 0.9]]) { const q = [faceAt(p, a0, b0), faceAt(p, a1, b0), faceAt(p, a1, b1), faceAt(p, a0, b1)]; cx.beginPath(); cx.moveTo(q[0][0], q[0][1]); for (const r of q) cx.lineTo(r[0], r[1]); cx.closePath(); cx.stroke(); }
+    const k = faceAt(p, 0.82, 0.48); cx.fillStyle = '#E8C98A'; cx.beginPath(); cx.arc(k[0], k[1], 2.2 * v.dpr, 0, 7); cx.fill();
+  }
   function drawFurn(list, f, z, meta, alpha, tint) {
-    const cs = furnCells(f), X0 = Math.min(...cs.map(c => c[0])), X1 = Math.max(...cs.map(c => c[0])) + 1, Y0 = Math.min(...cs.map(c => c[1])), Y1 = Math.max(...cs.map(c => c[1])) + 1;
-    const c = (col) => tint || col, b = z + 0.1, long = (X1 - X0) > (Y1 - Y0);
-    if (f.t === 'toilet') { rbox(list, X0 + 0.3, Y0 + 0.28, X0 + 0.7, Y0 + 0.75, b, 0.42, c('#F2F2EE'), meta, alpha); rbox(list, X0 + 0.28, Y0 + 0.12, X0 + 0.72, Y0 + 0.3, b, 0.8, c('#E6E6E0'), meta, alpha); }
-    else if (f.t === 'ctoilet') { rbox(list, X0 + 0.2, Y0 + 0.2, X0 + 0.8, Y0 + 0.8, b, 0.45, c('#B98B58'), meta, alpha); rbox(list, X0 + 0.3, Y0 + 0.3, X0 + 0.7, Y0 + 0.7, b + 0.45, 0.04, c('#F2F2EE'), meta, alpha); rbox(list, X0 + 0.65, Y0 + 0.65, X0 + 0.85, Y0 + 0.85, b, 0.3, c('#D9C49A'), meta, alpha); }
-    else if (f.t === 'shower' || f.t === 'shower2') { rbox(list, X0 + 0.06, Y0 + 0.06, X0 + 0.94, Y0 + 0.94, b, 0.06, c(FURN[f.t].color), meta, alpha); rbox(list, X0 + 0.08, Y0 + 0.08, X0 + 0.16, Y0 + 0.16, b, 2.0, c('#9AA4A8'), meta, alpha); rbox(list, X0 + 0.08, Y0 + 0.08, X0 + 0.4, Y0 + 0.4, b + 1.95, 0.06, c('#9AA4A8'), meta, alpha); }
-    else if (f.t === 'bed') {
-      rbox(list, X0 + 0.08, Y0 + 0.08, X1 - 0.08, Y1 - 0.08, b, 0.3, c('#8B6B48'), meta, alpha);
-      rbox(list, X0 + 0.12, Y0 + 0.12, X1 - 0.12, Y1 - 0.12, b + 0.3, 0.14, c('#F4F1E8'), meta, alpha);
-      if (long) { rbox(list, X0 + 0.2, Y0 + 0.2, X0 + 0.55, Y1 - 0.2, b + 0.44, 0.08, c('#FFFFFF'), meta, alpha); rbox(list, X0 + 0.9, Y0 + 0.14, X1 - 0.14, Y1 - 0.14, b + 0.44, 0.05, c('#7FA7C9'), meta, alpha); }
-      else { rbox(list, X0 + 0.2, Y0 + 0.2, X1 - 0.2, Y0 + 0.55, b + 0.44, 0.08, c('#FFFFFF'), meta, alpha); rbox(list, X0 + 0.14, Y0 + 0.9, X1 - 0.14, Y1 - 0.14, b + 0.44, 0.05, c('#7FA7C9'), meta, alpha); }
+    // 向き r：fwd は頭→足の向き、side はその右。(a, b)＝頭からの距離・横の位置 → 世界の座標
+    const [fx, fy] = FDIR[(f.r || 0) % 4], sx = -fy, sy = fx, L = FURN[f.t].d;
+    const ox = f.x + 0.5 - fx * 0.5, oy = f.y + 0.5 - fy * 0.5;
+    const W = (a, b) => [ox + fx * a + sx * b, oy + fy * a + sy * b];
+    const R = (a0, a1, b0, b1, z0, ht, col, al = alpha) => { const p = W(a0, b0), q = W(a1, b1); rbox(list, Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.max(p[0], q[0]), Math.max(p[1], q[1]), z0, ht, tint || col, meta, al); };
+    const b = z + 0.1, ctr = W(L / 2, 0);
+    if (!tint) blob(list, ctr[0], ctr[1], b, L === 2 ? 0.75 : 0.42, 0.2, dep(Math.floor(ctr[0]), Math.floor(ctr[1]), z, 0.1) + 1e-6);
+    if (f.t === 'toilet') { R(0.06, 0.28, -0.22, 0.22, b, 0.82, '#ECEDE8'); R(0.24, 0.72, -0.18, 0.18, b, 0.4, '#F6F6F2'); R(0.28, 0.68, -0.15, 0.15, b + 0.4, 0.03, '#FFFFFF'); }
+    else if (f.t === 'ctoilet') { R(0.06, 0.82, -0.32, 0.32, b, 0.45, '#B98B58'); R(0.3, 0.66, -0.16, 0.16, b + 0.45, 0.03, '#F4F1EA'); R(0.62, 0.9, 0.22, 0.42, b, 0.32, '#D9C49A'); }
+    else if (f.t === 'shower' || f.t === 'shower2') {
+      R(0.04, 0.96, -0.46, 0.46, b, 0.07, FURN[f.t].color); R(0.06, 0.13, 0.32, 0.4, b, 2.0, '#A7B1B6'); R(0.08, 0.36, 0.28, 0.42, b + 1.96, 0.05, '#A7B1B6');
+      R(0.04, 0.96, -0.47, -0.43, b + 0.07, 1.85, '#D9ECF5', Math.min(alpha, 0.35));
+    } else if (f.t === 'bed') {
+      R(0.02, 0.1, -0.46, 0.46, b, 0.85, '#7A5A3A'); R(0.06, L - 0.06, -0.44, 0.44, b, 0.3, '#8B6B48');
+      R(0.1, L - 0.1, -0.4, 0.4, b + 0.3, 0.14, '#F4F1E8'); R(0.14, 0.48, -0.3, 0.3, b + 0.44, 0.09, '#FFFFFF'); R(0.7, L - 0.12, -0.42, 0.42, b + 0.44, 0.06, '#7FA7C9');
     } else if (f.t === 'table') {
-      if (long) { rbox(list, X0 + 0.5, Y0 + 0.2, X1 - 0.5, Y1 - 0.2, b, 0.68, c('#9C7148'), meta, alpha); rbox(list, X0 + 0.45, Y0 + 0.15, X1 - 0.45, Y1 - 0.15, b + 0.68, 0.06, c('#B98B58'), meta, alpha);
-        rbox(list, X0 + 0.1, Y0 + 0.3, X0 + 0.42, Y1 - 0.3, b, 0.45, c('#C9A47A'), meta, alpha); rbox(list, X1 - 0.42, Y0 + 0.3, X1 - 0.1, Y1 - 0.3, b, 0.45, c('#C9A47A'), meta, alpha); }
-      else { rbox(list, X0 + 0.2, Y0 + 0.5, X1 - 0.2, Y1 - 0.5, b, 0.68, c('#9C7148'), meta, alpha); rbox(list, X0 + 0.15, Y0 + 0.45, X1 - 0.15, Y1 - 0.45, b + 0.68, 0.06, c('#B98B58'), meta, alpha);
-        rbox(list, X0 + 0.3, Y0 + 0.1, X1 - 0.3, Y0 + 0.42, b, 0.45, c('#C9A47A'), meta, alpha); rbox(list, X0 + 0.3, Y1 - 0.42, X1 - 0.3, Y1 - 0.1, b, 0.45, c('#C9A47A'), meta, alpha); }
+      for (const [a, c] of [[0.62, -0.3], [0.62, 0.3], [1.38, -0.3], [1.38, 0.3]]) R(a - 0.03, a + 0.03, c - 0.03, c + 0.03, b, 0.7, '#7A5A3A');
+      R(0.5, 1.5, -0.36, 0.36, b + 0.7, 0.06, '#B98B58');
+      R(0.14, 0.44, -0.2, 0.2, b, 0.45, '#C9A47A'); R(0.08, 0.14, -0.2, 0.2, b, 0.95, '#B08A60');
+      R(L - 0.44, L - 0.14, -0.2, 0.2, b, 0.45, '#C9A47A'); R(L - 0.14, L - 0.08, -0.2, 0.2, b, 0.95, '#B08A60');
     }
   }
   function grassDecor(x, y) {   // 草むら・ときどき小さな花・小石

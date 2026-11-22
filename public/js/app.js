@@ -345,7 +345,7 @@ function openBuild(cx, cy, o = {}) {
   const world = o.world || G.s.world, ro = !!o.readOnly;
   const ov = document.createElement('div'); ov.className = 'iso3d';
   ov.innerHTML = `<div class="iso-in" role="dialog" aria-modal="true" aria-label="拡大して作る">
-    <div class="iso-stage"><canvas id="isoc"></canvas><canvas id="isomini" class="iso-mini" aria-label="全体の地図。枠がいま見ている場所。押すとそこへ移動"></canvas>
+    <div class="iso-stage"><canvas id="isoc"></canvas><div class="tilt" aria-hidden="true"></div><canvas id="isomini" class="iso-mini" aria-label="全体の地図。枠がいま見ている場所。押すとそこへ移動"></canvas>
       <div class="iso-views" role="group" aria-label="見え方">${ro ? '' : `<button data-view="up" class="on" title="屋根までできあがった姿">できあがり</button><button data-view="cut" title="手前の壁だけ下げて、中と奥の壁を見る">中を見る</button><button data-view="down" title="壁を全部低くして、床と家具を見る">壁を下げる</button><button data-view="top" title="真上から（北が上、等高線つき）">真上から</button>`}<button data-sun="1" class="sun"></button></div>
       <div class="iso-nav"><button class="btn" data-nav="rl" aria-label="左に回す">↺</button><button class="btn" data-nav="rr" aria-label="右に回す">↻</button><button class="btn" data-nav="zi" aria-label="拡大">＋</button><button class="btn" data-nav="zo" aria-label="縮小">−</button>
       <button class="btn" data-nav="u" aria-label="奥へ">↑</button><button class="btn" data-nav="d" aria-label="手前へ">↓</button><button class="btn" data-nav="l" aria-label="左へ">←</button><button class="btn" data-nav="r" aria-label="右へ">→</button></div>
@@ -388,8 +388,23 @@ function openBuild(cx, cy, o = {}) {
   };
   st.close = close;
   const onR = () => { v.size(); v.draw(); miniMap(mini, world, v); }; window.addEventListener('resize', onR);
-  const onKey = (e) => { if (e.key === 'Escape') close(); if (e.key === 'q') v.rotate(-1); if (e.key === 'e') v.rotate(1); if (st.cat === 'house' && (e.ctrlKey || e.metaKey) && e.key === 'z') { st.doUndo(); e.preventDefault(); } };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { if (st.sel >= 0) { st.dropHeld(); return; } close(); }
+    if (e.key === 'q') v.rotate(-1); if (e.key === 'e') v.rotate(1);
+    if ((e.key === 'r' || e.key === 'R') && st.cat === 'house') { if (st.sel >= 0) st.rotateHeld(); else if (st.hoverFurn != null) st.rotateInPlace(st.hoverFurn); }
+    if (st.cat === 'house' && (e.ctrlKey || e.metaKey) && e.key === 'z') { st.doUndo(); e.preventDefault(); }
+  };
   document.addEventListener('keydown', onKey);
+  // 家具：持ち上げる → 床を押して置く。持っている間は［回す］・Rキー・右クリックで向きを変える
+  st.updateGhost = () => {
+    if (st.sel < 0 || !st.hoverC) { v.furnGhost = null; return; }
+    const fu = { ...st.draft.furn[st.sel], x: st.hoverC[0], y: st.hoverC[1], r: st.selR };
+    v.furnGhost = { ...fu, ok: !E.W.furnProblem(st.draft, fu, st.sel) };
+  };
+  st.pickUp = (i) => { st.tab = 'furn'; st.tool = 'furn'; st.sel = i; st.selR = st.draft.furn[i].r || 0; st.hoverC = E.W.furnCells(st.draft.furn[i])[0]; st.updateGhost(); st.msg = `${E.W.FURN[st.draft.furn[i].t].name}を持っている。置きたい床を押す（向きは［回す］かRキー・右クリック）`; redraw(); };
+  st.rotateHeld = () => { st.selR = (st.selR + 1) % 4; st.updateGhost(); v.draw(); side(); };
+  st.dropHeld = () => { st.sel = -1; v.furnGhost = null; st.msg = ''; redraw(); };
+  st.rotateInPlace = (i) => { const err = st.edit(d => E.W.draftRotateFurn(d, i)); st.msg = err || `${E.W.FURN[st.draft.furn[i].t].name}を回した（設計の上だけ）`; redraw(); };
   st.doUndo = () => { if (!st.undo.length) return; st.draft = st.undo.pop(); st.msg = ''; st.sel = -1; v.furnGhost = null; redraw(); };
   st.edit = (fn) => { const before = E.W.cloneHouse(st.draft); const r = fn(st.draft); if (JSON.stringify(before) !== JSON.stringify(st.draft)) st.undo.push(before); return r; };
   ov.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => {
@@ -408,9 +423,13 @@ function openBuild(cx, cy, o = {}) {
   const isOpenTool = () => ['window', 'window2', 'door', 'unopen'].includes(st.tool);
   const isHouseFace = (f) => f && ['floor', 'wall', 'roof', 'furn'].includes(f.type);
   cv.style.touchAction = 'none';
+  cv.addEventListener('contextmenu', (e) => { if (st.cat === 'house' && st.sel >= 0) { e.preventDefault(); st.rotateHeld(); } });
   cv.addEventListener('pointerdown', (e) => {
-    if (ro || st.cat !== 'house' || !['add', 'remove'].includes(st.tool)) return;
-    const c = cellOf(v.pickAt(e.clientX, e.clientY)); if (!c) return;
+    if (ro || st.cat !== 'house' || e.button === 2) return;
+    const f0 = v.pickAt(e.clientX, e.clientY);
+    if (f0 && f0.type === 'furn' && st.sel < 0 && !isOpenTool()) { st.pickUp(f0.i); st.justPicked = true; return; }
+    if (!['add', 'remove'].includes(st.tool)) return;
+    const c = cellOf(f0); if (!c) return;
     st.drag = { a: c, b: c }; cv.setPointerCapture(e.pointerId);
     v.rect = { ...rectFrom(c, c), mode: st.tool === 'remove' ? 'remove' : 'add', ok: okCell }; v.draw();
   });
@@ -424,7 +443,8 @@ function openBuild(cx, cy, o = {}) {
     if (st.cat !== 'house') { v.ghost = ghostFor(st, f); v.draw(); return; }
     if (st.drag) { const c = cellOf(f); if (c) { st.drag.b = c; v.rect = { ...rectFrom(st.drag.a, c), mode: st.tool === 'remove' ? 'remove' : 'add', ok: okCell }; v.draw(); } return; }
     if (isOpenTool()) { v.ghostEdge = f && f.type === 'wall' ? { e: f.e, t: st.tool === 'unopen' ? 'remove' : st.tool, low: v.wallMode !== 'up' } : null; v.draw(); return; }
-    if (st.tool === 'furn') { const c = cellOf(f); if (st.sel >= 0 && c) { const fu = { ...st.draft.furn[st.sel], x: c[0], y: c[1], r: st.selR }; v.furnGhost = { ...fu, ok: !E.W.furnProblem(st.draft, fu, st.sel) }; } else v.furnGhost = null; v.draw(); return; }
+    st.hoverFurn = f && f.type === 'furn' ? f.i : null;
+    if (st.tool === 'furn') { const c = cellOf(f); if (c) st.hoverC = c; st.updateGhost(); cv.style.cursor = st.sel >= 0 ? 'grabbing' : st.hoverFurn != null ? 'grab' : 'default'; v.draw(); return; }
     const c = cellOf(f); v.rect = c ? { ...rectFrom(c, c), mode: st.tool === 'remove' ? 'remove' : 'add', ok: okCell } : null; v.draw();
   });
   cv.addEventListener('pointerleave', () => { if (!st.drag) { v.rect = null; v.ghostEdge = null; v.ghost = null; v.hoverCell = null; v.draw(); tip.textContent = ''; } });
@@ -438,11 +458,13 @@ function openBuild(cx, cy, o = {}) {
       else st.msg = '家の外壁を押してください';
       v.ghostEdge = null; redraw(); return;
     }
+    if (e.button === 2) return;
+    if (st.justPicked) { st.justPicked = false; return; }
     if (st.tool === 'furn') {
-      if (st.sel < 0) { if (f && f.type === 'furn') { st.sel = f.i; st.selR = st.draft.furn[f.i].r || 0; st.msg = `${E.W.FURN[st.draft.furn[f.i].t].name}を置く場所の床を押す（［回す］で向きを変える）`; } else st.msg = '動かしたい家具を押す'; redraw(); return; }
+      if (st.sel < 0) { if (f && f.type === 'furn') st.pickUp(f.i); else { st.msg = '動かしたい家具を押す'; redraw(); } return; }
       const c = cellOf(f); if (!c) return;
-      const err = st.edit(d => E.W.draftMoveFurn(d, st.sel, c[0], c[1], st.selR));
-      if (err) st.msg = `置けない：${err}`; else { st.msg = '動かした（設計の上だけ）'; st.sel = -1; v.furnGhost = null; }
+      const i = st.sel, err = st.edit(d => E.W.draftMoveFurn(d, i, c[0], c[1], st.selR));
+      if (err) st.msg = `置けない：${err}`; else { st.msg = '置いた（設計の上だけ）'; st.sel = -1; v.furnGhost = null; }
       redraw(); return;
     }
     if (!st.drag) return;
@@ -584,12 +606,12 @@ function renderHouseDesign(st) {
       <button class="mcard small${st.tool === 'unopen' ? ' on' : ''}" data-tool="unopen"><i class="swatch" style="--c:#D9534F"></i><span class="mc-b"><b>外す</b><span class="note">窓や扉を押すと、ふつうの壁に戻す</span></span></button></div>`;
   if (st.tab === 'furn') {
     const groups = [['toilet', 'トイレ'], ['shower', 'シャワー'], ['bed', 'ベッド'], ['table', 'テーブルと椅子']];
-    body = `<p class="small">家具を押してから床を押すと動かせる（設計の上だけ、お金はかからない）。トイレとシャワーは種類を替えられる。</p>
-      ${st.sel >= 0 ? `<div class="seg-o"><span class="small">いま動かしている：<b>${esc(E.W.FURN[d.furn[st.sel].t].name)}</b></span><button class="opt" data-frot="1">回す</button><button class="opt" data-fcancel="1">やめる</button></div>` : ''}
+    body = `<p class="small">3Dの家具を押すと持ち上がり、床を押すとそこに置く。持っている間は［回す］・Rキー・右クリックで向きが変わる。設計の上だけなので、お金はかからない。</p>
+      ${st.sel >= 0 ? `<div class="held"><span>持っている：<b>${esc(E.W.FURN[d.furn[st.sel].t].name)}</b>（${['北', '西', '南', '東'][st.selR]}が奥）</span><button class="btn" data-frot="1">↻ 回す（R）</button><button class="btn ghost" data-fcancel="1">置くのをやめる</button></div>` : ''}
       ${groups.map(([g, gname]) => {
         const i = d.furn.findIndex(f => E.W.FURN[f.t].group === g); if (i < 0) return '';
         const kinds = Object.entries(E.W.FURN).filter(([, F]) => F.group === g);
-        return `<h3>${gname} <button class="opt mini" data-fmove="${i}">${st.sel === i ? '動かし中…' : '動かす'}</button></h3>
+        return `<h3>${gname} <button class="opt mini" data-fmove="${i}">${st.sel === i ? '持っている' : '動かす'}</button><button class="opt mini" data-frotin="${i}">↻ 回す</button></h3>
           ${kinds.length > 1 ? `<div class="mcards">${kinds.map(([k, F]) => { const ok = knownTech(F.learn); return `<button class="mcard${d.furn[i].t === k ? ' on' : ''}" data-fswap="${i}:${k}" ${ok ? '' : 'disabled'}><i class="swatch" style="--c:${F.color}"></i><span class="mc-b"><b>${ok ? esc(F.name) : '？ ' + esc(F.name)}</b><span class="note">${ok ? esc(F.note) : '学ぶと使える'}</span></span><span class="price">${F.cost}<small>万円</small></span></button>`; }).join('')}</div>` : `<p class="small" style="margin:0">${esc(E.W.FURN[d.furn[i].t].note)}</p>`}`;
       }).join('')}`;
   }
@@ -622,9 +644,10 @@ function renderHouseDesign(st) {
   bindHeader(st, el);
   el.querySelectorAll('[data-tab3]').forEach(b => b.onclick = () => { st.tab = b.dataset.tab3; st.tool = st.tab === 'plan' ? 'add' : st.tab === 'open' ? 'window' : st.tab === 'furn' ? 'furn' : null; st.sel = -1; G.view.furnGhost = null; st.msg = ''; st.redraw(); });
   el.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { st.tool = b.dataset.tool; st.msg = ''; renderHouseDesign(st); });
-  el.querySelectorAll('[data-fmove]').forEach(b => b.onclick = () => { const i = +b.dataset.fmove; st.tool = 'furn'; st.sel = i; st.selR = d.furn[i].r || 0; st.msg = `${E.W.FURN[d.furn[i].t].name}を置く場所の床を押す`; st.redraw(); });
-  el.querySelectorAll('[data-frot]').forEach(b => b.onclick = () => { st.selR = st.selR ? 0 : 1; const f = d.furn[st.sel]; if (E.W.FURN[f.t].d > 1 && !E.W.furnProblem(d, { ...f, r: st.selR }, st.sel)) { st.edit(dd => E.W.draftMoveFurn(dd, st.sel, f.x, f.y, st.selR)); } st.redraw(); });
-  el.querySelectorAll('[data-fcancel]').forEach(b => b.onclick = () => { st.sel = -1; G.view.furnGhost = null; st.msg = ''; st.redraw(); });
+  el.querySelectorAll('[data-fmove]').forEach(b => b.onclick = () => st.pickUp(+b.dataset.fmove));
+  el.querySelectorAll('[data-frot]').forEach(b => b.onclick = () => st.rotateHeld());
+  el.querySelectorAll('[data-frotin]').forEach(b => b.onclick = () => st.rotateInPlace(+b.dataset.frotin));
+  el.querySelectorAll('[data-fcancel]').forEach(b => b.onclick = () => st.dropHeld());
   el.querySelectorAll('[data-fswap]').forEach(b => b.onclick = () => { const [i, t] = b.dataset.fswap.split(':'); st.edit(dd => E.W.draftSwapFurn(dd, +i, t)); st.msg = ''; st.redraw(); });
   const set = (fn) => { st.edit(fn); st.msg = ''; st.redraw(); };
   el.querySelectorAll('[data-wall]').forEach(b => b.onclick = () => set(d => { d.wall = b.dataset.wall; }));
