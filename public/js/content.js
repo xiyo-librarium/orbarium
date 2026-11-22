@@ -9,10 +9,13 @@ export const NOTES = {
   toilet: { name: 'コンポストトイレ', what: '水で流さず、おがくずと混ぜて堆肥にする。下水に出していた養分が畑に戻る。', how: '家につける工夫。流す水がいらなくなる。', cost: '30万円・週0.3日', world: 'earthship' },
   grey: { name: '排水の植物セル', what: '台所や風呂の水を植物と砂利の層に通して、トイレや畑に回す。', how: '家の近くに置く。乾く季節の畑の水になる。', cost: '25万円・20年', world: 'earthship' },
   saving: { name: '節水の器具', what: 'シャワーや蛇口の水量を半分にする。', how: '家につける工夫。同じタンクで長く持つ。', cost: '8万円' },
+  catch: { name: '集水屋根', what: '屋根だけの小屋を建てて、降った雨をタンクに集める。家の屋根だけでは足りない土地で効く。下は薪や道具の置き場になる。', how: '地図にドラッグで置く。タンクの近くに。', cost: '1m²あたり1万円・30年', world: 'earthship' },
   mulch: { name: 'マルチ', what: '刈った草やわらで地面を覆う。土からの蒸発が減り、雨が浸みこみやすくなる。覆いは腐って有機物になる。', how: '畑につける工夫。草を集める手間が少し増える。', cost: '1m²あたり100円', world: 'zai' },
   terrace: { name: '石垣の段々畑', what: '斜面を石垣で段にする。雨が流れ去らずに土に浸み、土も流されない。石のすき間は生き物の住みかになる。', how: '畑につける工夫。斜面の畑ほど効く。', cost: '1m²あたり1,500円', world: 'andenes' },
   offgrid: { name: '太陽光と蓄電池', what: '昼の太陽で発電し、夜のぶんを電池に溜める。停電しても暮らしが止まらない。', how: '太陽光パネルは1枚0.4kW、蓄電池は1台5kWh。', cost: 'パネル11万円・電池15万円（12年）' },
-  deep: { name: '深い基礎', what: '大雨で斜面がゆるんでも、家が動かないように基礎を深くする。', how: '家を選んで基礎を深くする。後からだと費用は2倍。', cost: '0.3mごとに家の値段の5%' },
+  deep: { name: '深い基礎', what: '大雨で斜面がゆるんでも、冬に土が凍って持ち上がっても、家が動かないように基礎を深くする。', how: '家を選んで基礎を深くする。斜面の急さと、その土地の凍る深さのうち深いほうが要る。後からだと費用は2倍。', cost: '0.3mごとに家の値段の5%' },
+  insulation: { name: '断熱', what: '壁・屋根・床・窓から逃げる熱を減らす。寒い土地では、暖房の電気が何分の一にもなる。', how: '家を選んで、ふつう（1m²あたり2万円）か厚い（5万円）を足す。', cost: '1m²あたり2〜5万円', world: 'earthship' },
+  greenhouse: { name: '温室', what: '外より10℃ほど暖かく、冬も作物が育つ。雨は入らないので、水はタンクや排水から回す。屋根で雨も集められる。', how: '地図にドラッグで置く。300m²で週1日の手入れ。', cost: '1m²あたり1.5万円・30年', world: 'earthship' },
   chicken: { name: 'ニワトリ', what: '台所の残り物や畑の虫を食べ、卵とふんを返してくれる。ふんは堆肥になる。5羽で1小屋。', how: '小屋を置く。キツネが来ることがあり、生け垣で囲うと減る。', cost: '小屋10万円・週0.25日' },
   pond: { name: 'ため池', what: '畑から流れ去る雨を受けて溜め、乾く季節の水やりに回す。カエルやトンボが集まる。', how: '畑より低い場所に置くと、流れた雨が自然に集まる。深さ1m。', cost: '1m²あたり1.2万円', world: 'cascade' },
   hedge: { name: '生け垣と果樹', what: '花が受粉する虫を呼び、葉の陰が害虫を食べる虫や鳥の住みかになる。果樹は2年たつと実る。', how: '畑のまわりに植える。', cost: '果樹1本5,000円・生け垣1mあたり2,000円', world: 'satoyama' }
@@ -34,6 +37,11 @@ export const LESSON = {
   fox: (n) => ({ from: '近所の人', subject: 'キツネが出たって？', body: `うちもやられたよ。小屋のまわりに${n}を植えると、寄りつきにくくなる。` }),
   gift: (n) => ({ from: '近所の人', subject: 'いつも野菜をありがとう', body: `お礼にヒナを分けるよ。${n}は残り物を食べて、卵とふんを返してくれる。小屋の作り方を書いておいた。` }),
   pond: (n) => ({ from: '近所の人', subject: '流れた雨、もったいないね', body: `大雨のたびに畑から水が流れていくでしょう。下の方に${n}を掘ると、その水が乾く季節まで持つよ。スリランカの村では、池をいくつもつなげているらしい。` }),
+  haul: (n) => ({ from: '近所の人', subject: '水、運んでもらってるの？', body: `ここは雨が少ないから、家の屋根だけじゃ足りない。${n}を建てて、降った分は全部タンクに入れるんだ。` }),
+  tankempty2: (n) => ({ from: '友人', subject: 'またタンクが空？', body: `屋根の広さで集まる雨が決まるよ。${n}を足せば、同じ雨でもたくさん溜まる。` }),
+  cold: (n) => ({ from: '近所の人', subject: '電気代、すごくない？', body: `この辺の冬は氷点下が続くから、家の熱がどんどん逃げる。${n}をしっかりすれば、暖房は何分の一かになるよ。` }),
+  frost: (n) => ({ from: '近所の人', subject: '冬は畑が止まるね', body: `ここでは冬の間、外の畑は何も育たない。うちは${n}で冬も青菜を採ってる。` }),
+  heave: (n) => ({ from: '近所の人', subject: '家が傾いてない？', body: `冬に土が凍ると、浅い基礎は持ち上げられる。凍る深さより下まで${n}にしないと毎年やられるよ。` }),
   foresight: (n) => ({ from: '自分のメモ', subject: '記録から気づいたこと', body: `天気の記録を見て、${n}について調べておいた。` }),
   atlas: (n) => ({ from: '自分のメモ', subject: '世界の知恵から', body: `図鑑で読んだ話を、${n}としてノートにまとめた。` })
 };
@@ -43,10 +51,14 @@ export function eventText(e) {
   switch (e.kind) {
     case 'blackout': return { title: `停電 ${e.days}日`, body: e.covered ? '太陽光と蓄電池で暮らしは止まらなかった。' : '冷蔵庫が止まり、外食と氷でしのいだ。' , tone: e.covered ? 'good' : 'bad' };
     case 'watercut': return { title: `断水 ${e.days}日`, body: e.covered ? 'タンクの水でまかなえた。' : `買い水 ${(e.bottled).toFixed(1)}m³ で、節約してしのいだ。`, tone: e.covered ? 'good' : 'bad' };
-    case 'tankempty': return { title: `タンクが空 ${e.days}日`, body: '雨が少なく、タンクの水が尽きた日があった。水道で補った。', tone: 'bad' };
+    case 'tankempty': return { title: `タンクが空 ${e.days}日`, body: `雨が少なく、タンクの水が尽きた日があった。${e.haul ? '水を運んでもらって補った。' : '水道で補った。'}`, tone: 'bad' };
     case 'dry': return { title: '畑が乾いた', body: `土の水が足りず、作物がしおれた日が${e.days}日あった。`, tone: 'bad' };
     case 'erosion': return { title: '畑の土が流れた', body: `大雨のたびに、畑から雨が流れ去った（1m²あたり${Math.round(e.mm)}mm）。土も一緒に流れている。`, tone: 'bad' };
     case 'pest': return { title: 'アブラムシが出た', body: '作物の一部が弱った。', tone: 'bad', choice: 'pest' };
+    case 'frost': return { title: '畑が止まった', body: `5℃を下回る日が${e.days}日。外の畑はほとんど育たなかった。`, tone: 'bad' };
+    case 'cold': return { title: '暖房の電気', body: `寒さで暖房に${Math.round(e.cost)}万円ぶんの電気を使った。`, tone: 'bad' };
+    case 'heave': return { title: '凍上で家が傾いた', body: `土が凍って基礎が持ち上がった。あと${e.short.toFixed(1)}m浅い。修理に${e.repair}万円。`, tone: 'bad' };
+    case 'haul': return { title: `水を運んでもらった ${e.m3.toFixed(1)}m³`, body: `水道がない土地なので、1m³あたり5,000円。${Math.round(e.cost)}万円。`, tone: 'bad' };
     case 'fox': return { title: 'キツネが来た', body: 'ニワトリが何羽かやられ、卵が減った。', tone: 'bad' };
     case 'lowN': return { title: '葉が黄色い', body: `養分が足りない（必要な量の${Math.round(e.nf * 100)}%）。`, tone: 'bad' };
     case 'shared': return { title: `野菜を${Math.round(e.kg)}kg分けた`, body: '食べきれない分を近所に配った。', tone: 'good', choice: 'surplus' };
@@ -89,4 +101,7 @@ export const PROLOGUE = [
   'このまま30年働けば、引退か。',
   '……そこへ、メデジンに住む友人からメールが届いた。'
 ];
+export const LANDS = {
+  taos: { name: 'タオス（アメリカ・ニューメキシコ）', text: '標高2,100mの高地の砂漠。冬は氷点下が続き、雨は年に320mmほど。水道が来ていない。アースシップの町。', note: '寒さと乾きの章：断熱、温室、凍る深さの基礎を学ぶ' }
+};
 export const INVITE = { from: '友人（メデジン）', subject: 'こっちに来ない？', body: '祖父の土地が山の斜面に空いてるんだ。50m四方、使っていいよ。一年中春みたいな町だよ。暮らしを一から作ってみない？' };

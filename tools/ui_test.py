@@ -71,8 +71,41 @@ def run(viewport, tag):
         if errs: problems.extend([f'{tag}: {e}' for e in errs])
         b.close()
 
+def run_taos(viewport, tag):
+    with sync_playwright() as p:
+        b = p.chromium.launch(); page = b.new_page(viewport=viewport); errs = []
+        page.on('pageerror', lambda e: errs.append(str(e)))
+        page.on('console', lambda m: errs.append(m.text) if m.type == 'error' and 'Failed to load resource' not in m.text else None)
+        page.goto('http://localhost:8765/index.html'); page.wait_for_timeout(500)
+        page.click('#new'); page.click('#skip'); page.click('#go'); page.wait_for_timeout(200); page.click('#skip'); page.wait_for_timeout(300)
+        map_click(page, 30, 20); page.wait_for_timeout(100)
+        page.evaluate("()=>{const s=JSON.parse(localStorage.getItem('orbarium-v1'));s.flags.done_med=4;s.cash=600;s.known.push('insulation','greenhouse','catch');localStorage.setItem('orbarium-v1',JSON.stringify(s));}")
+        page.reload(); page.wait_for_timeout(500); page.click('#cont'); page.wait_for_timeout(300)
+        page.click('#menu'); page.click('[data-m="next"]'); page.wait_for_timeout(200)
+        page.screenshot(path=f'{OUT}/{tag}_t1_choose.png')
+        page.click('[data-m="go:taos"]'); page.wait_for_timeout(600); page.click('#skip'); page.wait_for_timeout(400)
+        map_click(page, 22, 22); page.wait_for_timeout(100)
+        map_click(page, 28, 20); page.wait_for_timeout(100)
+        map_drag(page, 10, 34, 22, 42); page.wait_for_timeout(100)
+        page.click('[data-t="gh"]'); map_drag(page, 30, 32, 37, 37); page.wait_for_timeout(100)
+        map_click(page, 23, 23); page.wait_for_timeout(100)   # 家を選ぶ（ツールなし）
+        page.screenshot(path=f'{OUT}/{tag}_t2_taos.png')
+        st = page.evaluate("()=>JSON.parse(localStorage.getItem('orbarium-v1'))")
+        if st['site'] != 'taos': problems.append(f'{tag}: タオスに移れていない')
+        kinds = [x['type'] for x in st['items']]
+        for k in ['house', 'tank', 'garden', 'gh']:
+            if k not in kinds: problems.append(f'{tag} taos: {k} が置けていない（{kinds}）')
+        for i in range(4):
+            page.click('#close'); page.wait_for_timeout(600)
+            if i == 0: page.screenshot(path=f'{OUT}/{tag}_t3_wake.png')
+            page.click('#back'); page.wait_for_timeout(150)
+        page.screenshot(path=f'{OUT}/{tag}_t4_after.png')
+        if errs: problems.extend([f'{tag} taos: {e}' for e in errs])
+        b.close()
+
 try:
     run({'width': 1440, 'height': 900}, 'desk')
+    run_taos({'width': 1440, 'height': 900}, 'desk')
     run({'width': 390, 'height': 844}, 'phone')
 finally:
     srv.terminate()

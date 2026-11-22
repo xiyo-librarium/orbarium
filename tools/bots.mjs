@@ -71,6 +71,10 @@ const STRATS = {
       if (s.known.includes('offgrid') && count(s, 'batt') < 1 && s.cash > 40) s = put(s, 'batt', 1, 1, { near: h });
       if (s.known.includes('deep') && h && h.depth < E.summarize(s).need) s = E.modify(s, h.id, { depth: E.summarize(s).need }).state;
       if (s.known.includes('chicken') && count(s, 'chicken') < 1 && s.cash > 20) s = put(s, 'chicken', 3, 2, { near: h });
+      if (s.known.includes('insulation') && h && (h.mods.ins || 'none') !== 'high' && s.cash > h.w * h.h * 5 + 10) s = E.modify(s, h.id, { mods: { ins: 'high' } }).state;
+      if (s.known.includes('greenhouse') && count(s, 'gh') < 1 && s.cash > 50) s = put(s, 'gh', 8, 5, { near: h });
+      if (s.known.includes('catch') && count(s, 'roof') < 1 && s.cash > 40) s = put(s, 'roof', 6, 5, { near: h });
+      if (s.known.includes('catch') && count(s, 'tank') < 4 && s.cash > 30 && s.site === 'taos') s = put(s, 'tank', 2, 2, { near: h });
       if (s.known.includes('pond') && count(s, 'pond') < 1 && s.cash > 30) s = put(s, 'pond', 4, 4, { low: true });
       return s;
     }
@@ -88,9 +92,9 @@ const STRATS = {
   }
 };
 
-function play(name, seed, foresight = false) {
+function play(name, seed, foresight = false, site = 'med') {
   const st = STRATS[name], r = E.rng(seed * 31 + 7);
-  let s = E.newGame({ seed });
+  let s = site === 'med' ? E.newGame({ seed }) : E.newGame({ seed, site, cash: 400, known: ['house', 'tank', 'garden', 'heap', 'toilet', 'grey', 'mulch', 'terrace', 'offgrid', 'hedge', 'saving', 'chicken', 'pond', 'catch'] });
   if (st.week) s.persons[0].week = st.week.slice();
   if (foresight) for (const f of E.foresight(s)) s = E.learn(s, f.id, 'foresight');
   const turns = [];
@@ -106,7 +110,7 @@ function play(name, seed, foresight = false) {
     const RR = E.relations(s); turns.push({ good: RR.nodes.filter(x => x.good === true && x.v > 0.15).length, cash: s.cash, rel: RR.score, ev: report.events.map(e => e.kind), learn: report.learn.map(x => x.id), ws: report.waterSelf, ps: report.powerSelf, fs: report.foodSelf, om: s.om });
   }
   const rel = E.relations(s);
-  return { name, seed, cash: s.cash, minCash, broke, quiet, maxQuietRun, rel: rel.score, known: s.known.length, om: s.om, turns,
+  return { final: rel.nodes, name, seed, cash: s.cash, minCash, broke, quiet, maxQuietRun, rel: rel.score, known: s.known.length, om: s.om, turns,
     ws: avg(turns.slice(-4), 'ws'), ps: avg(turns.slice(-4), 'ps'), fs: avg(turns.slice(-4), 'fs'), items: s.items.length };
 }
 const avg = (a, k) => a.reduce((x, y) => x + y[k], 0) / a.length;
@@ -117,6 +121,8 @@ for (const name of Object.keys(STRATS)) {
   results[name] = [];
   for (let seed = 1; seed <= SEEDS; seed++) results[name].push(play(name, seed));
 }
+// タオス（メデジンで学んだあと、所持金400万円で移る）
+for (const name of ['tokyo', 'money', 'life']) { results['taos:' + name] = []; for (let seed = 1; seed <= SEEDS; seed++) results['taos:' + name].push(play(name, seed, false, 'taos')); }
 // 先読みあり（life）
 results['life+先読み'] = []; for (let seed = 1; seed <= SEEDS; seed++) results['life+先読み'].push(play('life', seed, true));
 
@@ -140,7 +146,7 @@ for (const name of ['tokyo', 'money', 'life']) {
   console.log(`関係の網の推移 ${name.padEnd(6)}: ${line.join(' ')}`);
 }
 // 豊かな関係が8つに届くまで
-for (const name of ['money', 'life', 'random']) {
+for (const name of ['money', 'life', 'random', 'taos:life']) {
   const hit = results[name].map(r => r.turns.findIndex(t => t.good >= 12)).filter(i => i >= 0).sort((a, b) => a - b);
   const g = results[name].map(r => r.turns[r.turns.length - 1].good);
   console.log(`豊かな関係12 ${name.padEnd(6)}: 到達 ${hit.length}/${SEEDS}・中央値 ${hit.length ? (hit[Math.floor(hit.length / 2)] / 4).toFixed(1) + '年' : '-'}・最後の数 平均${(g.reduce((a, b) => a + b, 0) / g.length).toFixed(1)}`);
@@ -154,5 +160,14 @@ checks.push(['生き物優先でも破産しない（赤字ターン平均<1）'
 checks.push(['静かなターンが続きすぎない（最長連続<4）', M('life', 'maxQuietRun') < 4]);
 checks.push(['10年で学ぶ技術が8つ以上（life）', M('life', 'known') >= 11]);
 checks.push(['東京型は関係の網が育たない', M('tokyo', 'rel') < 2.5]);
+checks.push(['タオスでも生き物優先は破産しない', M('taos:life', 'broke') < 1]);
+checks.push(['タオスは生き物優先が東京型より関係の網で上回る', M('taos:life', 'rel') > M('taos:tokyo', 'rel') + 1]);
 console.log('\n点検:'); for (const [t, ok] of checks) console.log(`${ok ? '  ✓' : '  ✗'} ${t}`);
 process.exitCode = checks.every(c => c[1]) ? 0 : 1;
+if (process.env.NODES) {
+  for (const name of ['life', 'taos:life']) {
+    const agg = {};
+    for (const r of results[name]) for (const n of r.final) agg[n.name] = (agg[n.name] || 0) + n.v / results[name].length;
+    console.log(name, Object.entries(agg).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(' / '));
+  }
+}
