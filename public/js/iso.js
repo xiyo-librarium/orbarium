@@ -1,5 +1,5 @@
 /* 斜め上から見下ろす3D（アイソメトリック）。カメラは固定。回転ボタンを押したときだけ短くなめらかに回る */
-import { BLOCKS, N, h, at } from './world.js';
+import { BLOCKS, N, h, at, PANELS, ROOFS, HOUSE_H, houseOuterEdges } from './world.js';
 
 const SIDE = [[1, 0], [0, 1], [-1, 0], [0, -1]];   // +x, +y, -x, -y
 function shade(hex, f) {
@@ -16,7 +16,7 @@ function terrainColor(lv, maxLv) {
 export function createView(canvas, world, opt = {}) {
   const ctx = canvas.getContext('2d');
   const pick = document.createElement('canvas'), pctx = pick.getContext('2d', { willReadFrequently: true });
-  const v = { world, cx: opt.cx ?? 25, cy: opt.cy ?? 25, R: opt.R ?? 8, angle: 0, rot: 0, zoom: 1, hover: null, ghost: null, faces: [], dpr: Math.min(2, window.devicePixelRatio || 1), maxLv: Math.max(...world.H) };
+  const v = { world, showRoof: true, cx: opt.cx ?? 25, cy: opt.cy ?? 25, R: opt.R ?? 8, angle: 0, rot: 0, zoom: 1, hover: null, ghost: null, faces: [], dpr: Math.min(2, window.devicePixelRatio || 1), maxLv: Math.max(...world.H) };
   function size() { const r = canvas.getBoundingClientRect(); canvas.width = Math.round(r.width * v.dpr); canvas.height = Math.round(r.height * v.dpr); pick.width = canvas.width; pick.height = canvas.height; }
   function geom() {
     const W = canvas.width, H = canvas.height;
@@ -30,10 +30,11 @@ export function createView(canvas, world, opt = {}) {
     return [g.ox + (rx - ry) * g.tw / 2, g.oy + (rx + ry) * g.th / 2 - zc * g.bh, rx + ry];
   }
   /* 1つの直方体を描く（x,y は左下の角、z は下の高さ、ht は高さ） */
-  function box(list, x, y, z, ht, color, meta, alpha = 1, inset = 0) {
+  function box(list, x, y, z, ht, color, meta, alpha = 1, inset = 0) { rbox(list, x + inset, y + inset, x + 1 - inset, y + 1 - inset, z, ht, color, meta, alpha); }
+  function rbox(list, x0, y0, x1, y1, z, ht, color, meta, alpha = 1) {
     const g = geom();
     const a = v.angle * Math.PI / 180;
-    const x0 = x + inset, y0 = y + inset, x1 = x + 1 - inset, y1 = y + 1 - inset;
+    const x = (x0 + x1) / 2 - 0.5, y = (y0 + y1) / 2 - 0.5;
     const P = (px, py, pz) => project(px, py, pz, g);
     const c = [P(x0, y0, z), P(x1, y0, z), P(x1, y1, z), P(x0, y1, z)];
     const t = [P(x0, y0, z + ht), P(x1, y0, z + ht), P(x1, y1, z + ht), P(x0, y1, z + ht)];
@@ -76,6 +77,31 @@ export function createView(canvas, world, opt = {}) {
       const zz = d.kind === 'roof' ? z : z;
       const meta = { type: 'block', x, y, z, b, decor: decorFor(b, d) };
       box(list, x, y, zz, ht, d.color, meta, b.p ? 0.45 : d.kind === 'pond' ? 0.85 : 1, inset);
+    }
+    const hs = world.house;
+    if (hs) {
+      const z = hs.z, T = 0.12;
+      for (const k in hs.cells) {
+        const [x, y] = k.split(',').map(Number); if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+        const c = hs.cells[k];
+        rbox(list, x, y, x + 1, y + 1, z, 0.08, hs.floor === 'slab' ? '#A39A8C' : '#D7B98A', { type: 'floor', x, y, z, k }, c.p ? 0.45 : 1);
+        if (v.showRoof) rbox(list, x, y, x + 1, y + 1, z + HOUSE_H, 0.18, ROOFS[hs.roof].color, { type: 'roof', x, y, z: z + HOUSE_H, k }, c.p ? 0.4 : 0.92);
+        if (v.showRoof && hs.pv && hs.pv[k]) rbox(list, x + 0.08, y + 0.08, x + 0.92, y + 0.92, z + HOUSE_H + 0.18, 0.06, '#30476B', { type: 'pv', x, y, k }, 1);
+      }
+      for (const o of houseOuterEdges(hs, false)) {
+        const wl = hs.walls[o.e]; if (!wl) continue;
+        const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number);
+        if (ex < x0 - 1 || ex > x1 + 1 || ey < y0 - 1 || ey > y1 + 1) continue;
+        const P = PANELS[wl.next || wl.t];
+        const rect = t === 'h' ? [ex, ey - T / 2, ex + 1, ey + T / 2] : [ex - T / 2, ey, ex + T / 2, ey + 1];
+        const pend = !!wl.p || hs.cells[`${o.x},${o.y}`]?.p;
+        if (!v.showRoof) rbox(list, ...rect, z, 0.7, P.win ? '#A9CDEB' : P.color, { type: 'wall', e: o.e, x: o.x, y: o.y, wl }, pend ? 0.45 : 1);
+        else if (P.win) {
+          rbox(list, ...rect, z, 0.9, PANELS.wall.color, { type: 'wall', e: o.e, x: o.x, y: o.y, wl }, pend ? 0.45 : 1);
+          rbox(list, ...rect, z + 0.9, 1.0, P.color, { type: 'wall', e: o.e, x: o.x, y: o.y, wl }, pend ? 0.45 : 0.85);
+          rbox(list, ...rect, z + 1.9, HOUSE_H - 1.9, PANELS.wall.color, { type: 'wall', e: o.e, x: o.x, y: o.y, wl }, pend ? 0.45 : 1);
+        } else rbox(list, ...rect, z, HOUSE_H, P.color, { type: 'wall', e: o.e, x: o.x, y: o.y, wl }, pend ? 0.45 : 1);
+      }
     }
     if (v.ghost) for (const gh of v.ghost.cells) box(list, gh[0], gh[1], gh[2], gh[3] ?? 1, v.ghost.ok ? '#F0A85A' : '#D9534F', { type: 'ghost' }, 0.5);
     list.sort((p, q) => p.depth - q.depth);

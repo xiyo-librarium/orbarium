@@ -241,6 +241,21 @@ export function weekCount(p) {
 /* ---------- ゲーム状態 ---------- */
 export function newGame(opt = {}) {
   const site = opt.site || 'med', seed = opt.seed ?? 1;
+  const s = makeGame(site, seed, opt);
+  if (site !== 'tokyo' && !opt.empty) {
+    // 最初の家：中古のコンテナ（20ft）。平らにならした高めの場所に置いてある
+    const w = s.world; let best = null;
+    for (let y = 8; y < 40; y++) for (let x = 8; x < 40; x++) {
+      let lo = 99, hi = -99; for (let yy = y; yy < y + 2; yy++) for (let xx = x; xx < x + 6; xx++) { lo = Math.min(lo, W.h(w, xx, yy)); hi = Math.max(hi, W.h(w, xx, yy)); }
+      const score = -(hi - lo) * 10 + lo * 0.6 - Math.abs(x - 22) * 0.1;
+      if (!best || score > best.score) best = { x, y, score, z: hi };
+    }
+    W.placeContainer(w, best.x, best.y);
+    s.cash -= opt.containerCost ?? 60;
+  }
+  return s;
+}
+function makeGame(site, seed, opt) {
   return {
     v: 2, site, seed, year: opt.year || 2027, q: 0, turn: 0,
     world: W.makeWorld(siteTerrain(site)),
@@ -267,7 +282,7 @@ export function siteTerrain(key) { return _terrainCache[key] || (_terrainCache[k
 /* 置いたものの集計 */
 const _anaCache = new WeakMap();
 export function analyzeWorld(s) {
-  const key = s.world; const sig = JSON.stringify([s.world.H, s.world.blocks, s.world.mods]).length + ':' + Object.keys(s.world.blocks).length + ':' + s.world.queue.length + ':' + s.world.H.reduce((a, b, i) => a + b * (i % 7 + 1), 0) + ':' + JSON.stringify(s.world.mods) + ':' + Object.values(s.world.blocks).reduce((a, b) => a + (b.p ? 1 : 0) + (b.s ? 3 : 0) + (b.m ? 5 : 0), 0);
+  const key = s.world; const sig = JSON.stringify([s.world.H, s.world.blocks, s.world.mods]).length + ':' + Object.keys(s.world.blocks).length + ':' + s.world.queue.length + ':' + s.world.H.reduce((a, b, i) => a + b * (i % 7 + 1), 0) + ':' + JSON.stringify(s.world.mods) + ':' + JSON.stringify(s.world.house) + ':' + Object.values(s.world.blocks).reduce((a, b) => a + (b.p ? 1 : 0) + (b.s ? 3 : 0) + (b.m ? 5 : 0), 0);
   const c = _anaCache.get(key); if (c && c.sig === sig && c.n === s.persons.length) return c.a;
   const a = W.analyze(s.world, SITES[s.site], s.persons.length);
   _anaCache.set(key, { sig, a, n: s.persons.length }); return a;
@@ -276,7 +291,7 @@ export function summarize(s) {
   const T = siteTerrain(s.site), w = s.world, A = analyzeWorld(s);
   const HM = A.house ? A.house.m : null;
   let hRect = null;
-  if (A.house) { const xs = A.house.cells.map(c => c[0]), ys = A.house.cells.map(c => c[1]); hRect = T.rect({ x: Math.min(...xs) - 1, y: Math.min(...ys) - 1, w: Math.max(...xs) - Math.min(...xs) + 2, h: Math.max(...ys) - Math.min(...ys) + 2 }); }
+  if (A.house) { const cc = A.house.cells.map(k => k.split(',').map(Number)); const xs = cc.map(c => c[0]), ys = cc.map(c => c[1]); hRect = T.rect({ x: Math.min(...xs) - 1, y: Math.min(...ys) - 1, w: Math.max(...xs) - Math.min(...xs) + 2, h: Math.max(...ys) - Math.min(...ys) + 2 }); }
   const need = hRect ? Math.max(requiredDepth(hRect.slope), frostNeed(s.site)) : 0;
   const grey = 0.9 * (w.mods.saving ? 65 : 130) * s.persons.length;
   const bare = Math.max(0, A.risers - A.stoneRisers);
@@ -550,7 +565,7 @@ export function advance(state) {
     if (short > 0 && r() < 0.6) { const rp = Math.round(houseCost * (0.05 + 0.1 * short / 0.3)); repair += rp; events.push({ kind: 'heave', repair: rp, short }); }
   }
   // 家の傷み：結露・雨・掃除
-  if (HM && A.condDays > 30) { const rp = 3; repair += rp; events.push({ kind: 'condensation', days: A.condDays, repair: rp }); }
+  if (HM && A.condDays > 30) { const rp = 3; repair += rp; if (s.flags.condYear !== s.year) { events.push({ kind: 'condensation', days: A.condDays, repair: rp }); s.flags.condYear = s.year; } }
   if (HM && HM.rotRisk > 0.2 && A.rain > 250 && r() < HM.rotRisk * 0.45) { const rp = Math.max(2, Math.round(houseCost * 0.04)); repair += rp; events.push({ kind: 'rot', repair: rp }); }
   if (clogged) { repair += 2; events.push({ kind: 'clog', repair: 2 }); }
   // 暑すぎる日：同じ年にはしつこく言わない（ひどいときだけ）
@@ -616,7 +631,7 @@ function compact(rep) {
 }
 
 /* ---------- 学びのきっかけ ---------- */
-export const TECH = ['heap', 'toilet', 'grey', 'saving', 'catch', 'mulch', 'terrace', 'offgrid', 'deep', 'hedge', 'chicken', 'pond', 'insulation', 'greenhouse', 'bamboo', 'earth', 'straw'];
+export const TECH = ['heap', 'toilet', 'grey', 'saving', 'catch', 'mulch', 'terrace', 'offgrid', 'deep', 'hedge', 'chicken', 'pond', 'insulation', 'greenhouse'];
 function triggers(s, rep) {
   const out = [], has = (id) => s.known.includes(id);
   const ev = (k) => rep.events.find(e => e.kind === k);
@@ -630,9 +645,6 @@ function triggers(s, rep) {
   if (!has('deep') && (ev('crack') || ev('landslide'))) out.push({ id: 'deep', why: ev('landslide') ? 'landslide' : 'crack' });
   if (!has('catch') && (ev('haul') || (ev('tankempty') && s.turn >= 3))) out.push({ id: 'catch', why: ev('haul') ? 'haul' : 'tankempty2' });
   if (!has('insulation') && (ev('cold') || ev('overheat') || ev('condensation'))) out.push({ id: 'insulation', why: ev('cold') ? 'cold' : ev('overheat') ? 'overheat' : 'condensation' });
-  if (!has('bamboo') && s.site === 'med' && (s.turn >= 3 || ev('rot'))) out.push({ id: 'bamboo', why: 'guadua' });
-  if (!has('earth') && s.site === 'taos' && (ev('cold') || s.turn >= 2)) out.push({ id: 'earth', why: 'earthship' });
-  if (!has('straw') && s.site === 'taos' && has('insulation') && s.turn >= 4) out.push({ id: 'straw', why: 'straw' });
   if (!has('greenhouse') && ev('frost')) out.push({ id: 'greenhouse', why: 'frost' });
   if (!has('deep') && ev('heave')) out.push({ id: 'deep', why: 'heave' });
   if (!has('hedge') && (ev('pest') || ev('fox'))) out.push({ id: 'hedge', why: ev('pest') ? 'pest' : 'fox' });

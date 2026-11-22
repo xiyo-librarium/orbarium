@@ -33,30 +33,59 @@ def run(viewport, tag):
         page.screenshot(path=f'{OUT}/{tag}_2_prologue.png'); overflow(page, tag + ' prologue')
         page.click('#skip'); page.click('#go'); page.wait_for_timeout(300); page.click('#skip'); page.wait_for_timeout(400)
         page.screenshot(path=f'{OUT}/{tag}_3_game.png'); overflow(page, tag + ' game')
-        spot = page.evaluate(FLAT, 6)
-        if not spot: problems.append(f'{tag}: 平らな場所がない'); b.close(); return
-        x, y = spot
-        page.evaluate("([x,y])=>window.__orb.open3D(x,y,'house')", [x + 2, y + 2]); page.wait_for_timeout(400)
-        page.screenshot(path=f'{OUT}/{tag}_4_iso.png'); overflow(page, tag + ' iso')
-        z = top(page, x, y)
-        iso_click(page, x + 0.5, y + 0.5, z); iso_click(page, x + 5.5, y + 5.5, z)
-        page.wait_for_timeout(200)
-        c = blocks(page)
-        if c.get('roof_tin', 0) < 30: problems.append(f'{tag}: 部屋が建たない {c} {page.inner_text("#isoside")[:200]}')
-        page.screenshot(path=f'{OUT}/{tag}_5_room.png')
-        # 雨水タンク：南の軒の隣、地面の上に
-        page.click('[data-cat3="water"]'); page.wait_for_timeout(100); page.click('[data-tool="tank"]'); tz = top(page, x + 2, y + 6)
-        iso_click(page, x + 2.5, y + 6.5, tz); page.wait_for_timeout(100)
-        # 畑：坂の下に広げる
-        page.click('[data-cat3="farm"]'); page.wait_for_timeout(100)
-        iso_click(page, x + 0.5, y + 7.5, top(page, x, y + 7)); iso_click(page, x + 5.5, y + 9.5, top(page, x + 5, y + 9)); page.wait_for_timeout(150)
-        c = blocks(page)
-        if c.get('tank', 0) < 1: problems.append(f'{tag}: タンクが置けない {c}')
-        if c.get('bed', 0) < 10: problems.append(f'{tag}: 畑が広がらない {c}')
+        if page.locator('[data-cat]').count() != 3: problems.append(f'{tag}: 地図のボタンが3つでない')
+        hs = page.evaluate("()=>{const h=window.__orb.G.s.world.house;return h?{z:h.z,cells:Object.keys(h.cells),walls:Object.keys(h.walls)}:null}")
+        if not hs: problems.append(f'{tag}: 最初のコンテナがない'); b.close(); return
+        # 家の画面
+        page.click('[data-cat="house"]'); page.wait_for_timeout(400)
+        page.screenshot(path=f'{OUT}/{tag}_4_house.png'); overflow(page, tag + ' house')
+        if page.locator('.iso-mini').count() != 1: problems.append(f'{tag}: 小さな地図がない')
+        page.click('[data-mode="hire"]')
+        # 鋼板の壁を断熱壁に（北面の1枚）
+        cells = [list(map(int, k.split(','))) for k in hs['cells']]
+        x0 = min(c[0] for c in cells); y0 = min(c[1] for c in cells); x1 = max(c[0] for c in cells); y1 = max(c[1] for c in cells)
+        page.click('[data-panel="ins"]')
+        def edge_click(ex, ey, horiz):
+            pt = page.evaluate("([x,y,z])=>window.__orb.G.view.screenOf(x,y,z)", [ex + (0.5 if horiz else 0), ey + (0 if horiz else 0.5), hs['z'] + 1.3])
+            page.mouse.click(pt[0], pt[1]); page.wait_for_timeout(60)
+        # 見えている面（南と東）を押す
+        edge_click(x0 + 2, y1 + 1, True)
+        edge_click(x1 + 1, y0, False)
+        n_ins = page.evaluate("()=>Object.values(window.__orb.G.s.world.house.walls).filter(w=>w.t==='ins').length")
+        if n_ins < 1: problems.append(f'{tag}: 壁を断熱壁に替えられない {page.inner_text("#isoside")[:160]}')
+        # 床を広げる：南どなり2マス
+        page.click('[data-tool="grow"]')
+        for dx in (0, 1, 2):
+            tx, ty = x0 + dx, y1 + 1
+            iso_click(page, tx + 0.5, ty + 0.5, top(page, tx, ty))
+        n_cells = page.evaluate("()=>Object.keys(window.__orb.G.s.world.house.cells).length")
+        if n_cells <= len(cells): problems.append(f'{tag}: 床が広がらない {n_cells} {page.inner_text("#isoside")[:200]}')
+        page.screenshot(path=f'{OUT}/{tag}_5_house_grown.png')
+        page.click('[data-showroof]'); page.wait_for_timeout(100)
+        page.screenshot(path=f'{OUT}/{tag}_5b_noroof.png')
         page.click('[data-nav="rr"]'); page.wait_for_timeout(450)
         page.screenshot(path=f'{OUT}/{tag}_6_rotated.png')
-        side = page.inner_text('#isoside')
         page.click('#isox'); page.wait_for_timeout(300)
+        # その他：家の東どなりにタンク
+        page.click('[data-cat="other"]'); page.wait_for_timeout(100)
+        page.evaluate("([x,y])=>window.__orb.open3D(x,y,'other')", [x1 + 1, y0]); page.wait_for_timeout(300)
+        page.click('[data-mode="hire"]'); page.click('[data-tool="tank"]')
+        tx, ty = x1 + 1, y0
+        iso_click(page, tx + 0.5, ty + 0.5, top(page, tx, ty))
+        page.screenshot(path=f'{OUT}/{tag}_6b_other.png'); overflow(page, tag + ' other')
+        page.click('#isox'); page.wait_for_timeout(200)
+        # 畑：家の南、少し離れたところ
+        page.click('[data-cat="farm"]'); page.wait_for_timeout(100)
+        page.evaluate("([x,y])=>window.__orb.open3D(x,y,'farm')", [x0 + 2, y1 + 6]); page.wait_for_timeout(300)
+        page.click('[data-mode="hire"]'); page.click('[data-tool="beds"]')
+        iso_click(page, x0 + 0.5, y1 + 4.5, top(page, x0, y1 + 4)); iso_click(page, x0 + 4.5, y1 + 7.5, top(page, x0 + 4, y1 + 7)); page.wait_for_timeout(150)
+        page.screenshot(path=f'{OUT}/{tag}_6c_farm.png')
+        page.click('#isox'); page.wait_for_timeout(300)
+        c = blocks(page)
+        if c.get('tank', 0) < 1: problems.append(f'{tag}: タンクが置けない {c}')
+        if c.get('bed', 0) < 8: problems.append(f'{tag}: 畑が広がらない {c}')
+        fed = page.evaluate("()=>window.__orb.E.summarize(window.__orb.G.s).A.fedTanks")
+        if fed < 1: problems.append(f'{tag}: 家の隣のタンクに雨が入らない')
         page.screenshot(path=f'{OUT}/{tag}_7_map.png')
         page.click('[data-tab="plan"]'); page.click('[data-cell="0,3"]'); page.click('[data-cell="0,3"]')
         for i in range(6):

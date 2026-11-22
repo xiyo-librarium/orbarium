@@ -82,6 +82,7 @@ export function canPut(w, x, y, z, t) {
   const g = h(w, x, y);
   if (z < g) return '地面の中';
   if (at(w, x, y, z)) return 'もう何かある';
+  if (w.house && w.house.cells[`${x},${y}`] && z >= w.house.z && z < w.house.z + 3 && !['batt'].includes(d.kind)) return '家の中';
   if (d.overlay && z !== g) return d.kind === 'bed' ? '畑は地面の上に' : '床や植物は地面の上に';
   if (d.overlay && d.kind === 'plant') { const below = at(w, x, y, z - 1); if (!below || BLOCKS[below.t].kind !== 'media') return 'ヨシやカンナは、浄化の層の上に植える'; }
   if (d.pit && z >= w.H0[idx(x, y)]) return '掘った穴の中にしか置けない（先に掘る）';
@@ -156,7 +157,7 @@ export function fill(s, x, y, mode) {
 /* 畑の工夫（石垣・マルチ）はブロックの印 */
 export function toggleMark(s, x, y, z, mark) {
   const b = at(s.world, x, y, z); if (!b || BLOCKS[b.t].kind !== 'bed') return '畑を選ぶ';
-  const price = mark === 's' ? 0.15 : 0.01;
+  const price = mark === 's' ? 0.15 : mark === 'g' ? 1.2 : 0.01;
   if (!b[mark] && price > s.cash) return 'お金が足りない';
   if (!b[mark]) { s.cash -= price; spend(s.world, mark === 's' ? price : 0, mark === 's' ? 0 : price); }
   b[mark] = b[mark] ? 0 : 1; return null;
@@ -381,20 +382,12 @@ export function flowAccum(w) {
 /* ---------- 全部まとめて読む：シミュレーションと画面に渡す ---------- */
 export function analyze(w, site, persons = 1) {
   const diag = [];
-  const groups = interiors(w);
-  // 一番大きい囲いを家とする。畑が中にあってガラスの多い囲いは温室
-  let house = null, ghBeds = 0, gh = [];
-  for (const g of groups) {
-    const bedsIn = g.filter(([x, y, z]) => { const b = at(w, x, y, z); return b && active(b) && BLOCKS[b.t].kind === 'bed'; }).length;
-    const m = houseFromVoxels(w, g, site);
-    if (bedsIn > 0 && m.Aw >= 0.3 * (m.wallNet + m.roofA + m.Aw)) { ghBeds += bedsIn; gh.push(g); continue; }
-    if (!house || g.length > house.cells.length) house = { cells: g, m };
-  }
-  if (!groups.length && Object.values(w.blocks).some(b => BLOCKS[b.t].kind === 'wall' && active(b))) diag.push({ lv: 'warn', text: '壁はあるが、屋根と壁で囲われた部屋がまだない' });
-  if (house) {
-    const hasDoor = house.cells.some(([x, y, z]) => D6.some(([dx, dy, dz]) => { const b = at(w, x + dx, y + dy, z + dz); return b && BLOCKS[b.t].kind === 'door'; }));
-    if (!hasDoor) diag.push({ lv: 'warn', text: '家に扉がない' });
-  }
+  // 家：床・壁パネル・屋根
+  const hm = houseFromPanels(w, site, persons);
+  const house = hm ? { m: hm, cells: hm.cells } : null;
+  const groups = [], gh = [];
+  if (hm && hm.open) diag.push({ lv: 'warn', text: `家の外側に、壁のない辺が${hm.open}つある（すきま風で熱が逃げる）` });
+  if (hm && !hm.doors) diag.push({ lv: 'warn', text: '家に扉がない' });
   // 屋根とタンク：屋根のつながりごとに、軒の隣か下にある低いタンクへ雨が入る
   const roofs = blocksOf(w, 'roof'), tanks = blocksOf(w, 'tank');
   const roofSet = new Map(roofs.map(r => [K(r.x, r.y, r.z), r]));
@@ -406,6 +399,13 @@ export function analyze(w, site, persons = 1) {
     comp.push(c);
   }
   const fedTanks = new Set(); let roofCatch = 0, roofLost = 0;
+  if (w.house) {
+    const hs = w.house, hc = Object.keys(hs.cells).filter(k => built(hs.cells[k])).map(k => k.split(',').map(Number));
+    const area = hc.length * ROOFS[hs.roof].catch * (1 - Object.keys(hs.pv || {}).length * 0 / Math.max(1, hc.length));
+    const my = tanks.filter(t => t.z < hs.z + 3 && hc.some(([x, y]) => Math.max(Math.abs(x - t.x), Math.abs(y - t.y)) <= 1));
+    my.forEach(t => fedTanks.add(K(t.x, t.y, t.z)));
+    if (my.length) roofCatch += area; else roofLost += area;
+  }
   const roofComps = comp.map(c => {
     const exposed = c.filter(r => !at(w, r.x, r.y, r.z + 1) || BLOCKS[at(w, r.x, r.y, r.z + 1).t].kind === 'pv');
     const area = exposed.reduce((a, r) => a + BLOCKS[r.b.t].catch, 0);
@@ -428,8 +428,7 @@ export function analyze(w, site, persons = 1) {
     const nh = h(w, b.x + dx, b.y + dy); if (nh === -99) continue;
     if (nh < b.z) { risers += b.z - nh; if (b.b.s) stoneRisers += b.z - nh; }
   }
-  const outBeds = beds.filter(b => !groups.some(g => g.some(c => c[0] === b.x && c[1] === b.y)));
-  const gArea = outBeds.length;
+  const gArea = beds.filter(b => !b.b.g).length, ghBeds = beds.filter(b => b.b.g).length;
   const bedMaxZ = beds.length ? Math.max(...beds.map(b => b.z)) : null;
   const pumps = blocksOf(w, 'pump').length;
   const gravShare = (srcZ) => beds.length && srcZ != null ? beds.filter(b => srcZ - b.z >= 1).length / beds.length : 0;
@@ -470,7 +469,7 @@ export function analyze(w, site, persons = 1) {
     groups, house, gh, ghBeds, roofComps, roofCatch, roofLost, tanks: tanks.length, fedTanks: fed.length, tankCap: fed.length * 1000, tankBase,
     beds: beds.length, gArea, bedMaxZ, risers, stoneRisers, mulch: beds.filter(b => b.b.m).length, bedSet,
     tankGrav, pondGrav, pumps, ponds: ponds.length, pondCap: ponds.length * 1000, pondArea: new Set(ponds.map(p => `${p.x},${p.y}`)).size, pondCatch, pondTop,
-    filter, pvKw: count('pv') * BLOCKS.pv.kw, battKwh: count('batt') * BLOCKS.batt.kwh, heap: count('heap'), coops: count('coop'), trees: count('tree'), hedge: count('hedge'),
+    filter, pvKw: (count('pv') + Object.keys(w.house?.pv || {}).length) * BLOCKS.pv.kw, battKwh: (count('batt') + (w.house?.batt || 0)) * BLOCKS.batt.kwh, heap: count('heap'), coops: count('coop'), trees: count('tree'), hedge: count('hedge'),
     greenRoof: roofs.filter(r => r.b.t === 'roof_green').length, diag
   };
 }
@@ -479,6 +478,7 @@ export function analyze(w, site, persons = 1) {
 export function progress(w, days) {
   let pool = days;
   const d0 = Math.min(pool, w.debt); w.debt -= d0; pool -= d0;
+  pool = houseProgress(w, pool);
   const done = [];
   while (pool > 1e-9 && w.queue.length) {
     const k = w.queue[0], b = w.blocks[k];
@@ -486,6 +486,177 @@ export function progress(w, days) {
     const use = Math.min(pool, b.p); b.p -= use; pool -= use;
     if (b.p <= 1e-9) { delete b.p; w.queue.shift(); done.push(b.t); }
   }
-  return { done, left: w.debt + w.queue.reduce((a, k) => a + (w.blocks[k]?.p || 0), 0) };
+  return { done, left: pendingDays(w) };
 }
-export function pendingDays(w) { return w.debt + w.queue.reduce((a, k) => a + (w.blocks[k]?.p || 0), 0); }
+export function pendingDays(w) { return w.debt + w.queue.reduce((a, k) => a + (w.blocks[k]?.p || 0), 0) + housePending(w); }
+
+/* =====================================================================
+   家：床（マス）・壁パネル（マスの辺）・屋根（家全体で1種類）
+   辺のキー：'h:x,y' はマス(x,y)の北側の辺、'v:x,y' はマス(x,y)の西側の辺
+   ===================================================================== */
+export const PANELS = {
+  steel: { name: 'コンテナの鋼板', u: 5.0, cost: 0, labor: 0, color: '#7E8C96', steel: true, fixed: true },
+  wall: { name: '壁（断熱なし）', u: 1.6, cost: 2, labor: 1.5, color: '#C8A87A' },
+  ins: { name: '断熱壁', u: 0.4, cost: 3.5, labor: 1.8, color: '#E3C795' },
+  thick: { name: '厚い断熱壁', u: 0.18, cost: 5, labor: 2.2, color: '#F0DDB2', learn: 'insulation' },
+  window: { name: '窓', u: 2.8, g: 0.75, cost: 5, labor: 1, color: '#A9CDEB', win: true },
+  windowHi: { name: '高断熱の窓', u: 1.2, g: 0.6, cost: 8, labor: 1, color: '#8DBDE6', win: true, learn: 'insulation' },
+  door: { name: '扉', u: 2.0, cost: 3, labor: 1, color: '#8C6A45', door: true }
+};
+export const ROOFS = {
+  steel: { name: 'コンテナの屋根', u: 5.0, absorb: 0.7, catch: 0.85, cost: 0, labor: 0, color: '#7E8C96' },
+  tin: { name: 'トタン屋根', u: 2.4, absorb: 0.7, catch: 0.85, cost: 0.5, labor: 0.3, color: '#8C9499' },
+  tinins: { name: '断熱したトタン屋根', u: 0.25, absorb: 0.7, catch: 0.85, cost: 1.0, labor: 0.5, color: '#A3ABAF' },
+  green: { name: '草屋根', u: 1.6, absorb: 0.25, catch: 0.35, cost: 1.5, labor: 0.6, color: '#6FA45F' }
+};
+export const FLOORS = { wood: { name: '木の床', u: 1.0, mass: 0, cost: 0.5, labor: 0.3 }, slab: { name: '土間', u: 1.2, mass: 2, cost: 1.0, labor: 0.5 } };
+export const HOUSE_H = 2.5;
+const ck = (x, y) => `${x},${y}`;
+export const edgeOf = (x, y, dir) => dir === 'n' ? `h:${x},${y}` : dir === 's' ? `h:${x},${y + 1}` : dir === 'w' ? `v:${x},${y}` : `v:${x + 1},${y}`;
+export function edgeCells(e) {   // 辺の両側のマス
+  const [t, r] = e.split(':'); const [x, y] = r.split(',').map(Number);
+  return t === 'h' ? [[x, y - 1], [x, y]] : [[x - 1, y], [x, y]];
+}
+const built = (v) => v && !v.p;
+export function houseOuterEdges(hs, onlyBuilt = true) {
+  const out = [];
+  const has = (x, y) => { const c = hs.cells[ck(x, y)]; return c && (!onlyBuilt || built(c)); };
+  for (const k in hs.cells) {
+    if (onlyBuilt && !built(hs.cells[k])) continue;
+    const [x, y] = k.split(',').map(Number);
+    for (const [d, dx, dy] of [['n', 0, -1], ['s', 0, 1], ['w', -1, 0], ['e', 1, 0]]) if (!has(x + dx, y + dy)) out.push({ e: edgeOf(x, y, d), dir: d, x, y });
+  }
+  return out;
+}
+/* コンテナ（20ft）を最初の家として置く：6×2マス、鋼板、扉1つ、窓2つ */
+export function placeContainer(w, x0, y0, rot = false) {
+  const nx = rot ? 2 : 6, ny = rot ? 6 : 2;
+  const z = h(w, x0, y0);
+  const hs = { z, cells: {}, walls: {}, roof: 'steel', floor: 'wood', eaves: false, pv: {}, batt: 0, queue: [], roofNext: null };
+  for (let y = y0; y < y0 + ny; y++) for (let x = x0; x < x0 + nx; x++) { hs.cells[ck(x, y)] = {}; w.H[idx(x, y)] = z; }
+  w.house = hs;
+  for (const o of houseOuterEdges(hs)) hs.walls[o.e] = { t: 'steel' };
+  // 扉は短い辺、窓は南側に2つ
+  const door = rot ? edgeOf(x0, y0 + ny - 1, 's') : edgeOf(x0 + nx - 1, y0, 'e');
+  hs.walls[door] = { t: 'door' };
+  if (!rot) { hs.walls[edgeOf(x0 + 1, y0 + 1, 's')] = { t: 'window' }; hs.walls[edgeOf(x0 + 4, y0 + 1, 's')] = { t: 'window' }; }
+  else { hs.walls[edgeOf(x0 + 1, y0 + 1, 'e')] = { t: 'window' }; hs.walls[edgeOf(x0 + 1, y0 + 4, 'e')] = { t: 'window' }; }
+  return hs;
+}
+function pay(s, cost, labor, mode, local = false) {
+  const price = mode === 'self' ? cost : cost + labor * 1.5;
+  if (price > s.cash + 1e-9) return 'お金が足りない';
+  s.cash -= price;
+  s.world.spent = s.world.spent || { local: 0, far: 0 };
+  s.world.spent.local += (mode === 'self' ? 0 : labor * 1.5) + (local ? cost : 0); s.world.spent.far += local ? 0 : cost;
+  return null;
+}
+/* 床を足す：家の床と同じ段で、となりのマス。外側に壁（断熱なし）を立て、間の壁は取る */
+export function addFloor(s, x, y, mode, wallT = 'wall') {
+  const w = s.world, hs = w.house; if (!hs) return '家がない';
+  if (hs.cells[ck(x, y)]) return 'もう床がある';
+  const g0 = h(w, x, y), step = g0 - hs.z;
+  if (Math.abs(step) > 1) return `段が2つ以上ちがう（床は${hs.z + w.base}m、ここは${g0 + w.base}m）。［その他］で掘るか盛って近づける`;
+  for (let z = Math.min(g0, hs.z) - 1; z < hs.z + 3; z++) if (at(w, x, y, z)) return 'ほかのものと重なる';
+  if (![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => hs.cells[ck(x + dx, y + dy)])) return '今の床のとなりに足す';
+  // 1段ちがうなら、掘るか盛って床の高さにそろえる（その分の作業と土）
+  if (step) { const err = step > 0 ? dig(s, x, y, mode) : fill(s, x, y, mode); if (err) return err; }
+  const R = ROOFS[hs.roof === 'steel' ? 'tin' : hs.roof], F = FLOORS[hs.floor];
+  // 新しい外壁の数
+  let newWalls = 0;
+  for (const [d, dx, dy] of [['n', 0, -1], ['s', 0, 1], ['w', -1, 0], ['e', 1, 0]]) if (!hs.cells[ck(x + dx, y + dy)]) newWalls++;
+  const P = PANELS[wallT];
+  const cost = F.cost + R.cost + newWalls * P.cost, labor = F.labor + R.labor + newWalls * P.labor + 0.5;
+  const err = pay(s, cost, labor, mode); if (err) return err;
+  const cell = {}; if (mode === 'self') { cell.p = labor; hs.queue.push({ k: 'cell', id: ck(x, y) }); }
+  hs.cells[ck(x, y)] = cell;
+  if (hs.roof === 'steel') hs.roof = 'tin';   // 広げたら屋根はトタンでつなぐ
+  for (const [d, dx, dy] of [['n', 0, -1], ['s', 0, 1], ['w', -1, 0], ['e', 1, 0]]) {
+    const e = edgeOf(x, y, d);
+    if (hs.cells[ck(x + dx, y + dy)]) delete hs.walls[e];
+    else hs.walls[e] = { t: wallT };
+  }
+  w.H[idx(x, y)] = hs.z;
+  return null;
+}
+export function removeFloor(s, x, y) {
+  const hs = s.world.house; if (!hs || !hs.cells[ck(x, y)]) return '床がない';
+  if (Object.keys(hs.cells).length <= 2) return 'これ以上は減らせない';
+  delete hs.cells[ck(x, y)];
+  for (const [d, dx, dy] of [['n', 0, -1], ['s', 0, 1], ['w', -1, 0], ['e', 1, 0]]) {
+    const e = edgeOf(x, y, d);
+    if (hs.cells[ck(x + dx, y + dy)]) hs.walls[e] = { t: 'wall' }; else delete hs.walls[e];
+  }
+  return null;
+}
+/* 壁パネルを替える */
+export function setWall(s, e, t, mode) {
+  const hs = s.world.house; if (!hs || !hs.walls[e]) return '家の外壁を押す';
+  const cur = hs.walls[e]; if (cur.t === t && !cur.next) return 'もうその壁';
+  const P = PANELS[t];
+  const err = pay(s, P.cost, P.labor, mode); if (err) return err;
+  if (mode === 'self') { cur.next = t; cur.p = P.labor; hs.queue.push({ k: 'wall', id: e }); }
+  else { cur.t = t; delete cur.next; delete cur.p; }
+  return null;
+}
+export function setRoof(s, t, mode) {
+  const hs = s.world.house; if (!hs) return '家がない';
+  if (hs.roof === t) return 'もうその屋根';
+  const R = ROOFS[t], n = Object.keys(hs.cells).length;
+  const err = pay(s, R.cost * n * 1.1, R.labor * n, mode); if (err) return err;
+  if (mode === 'self') { hs.roofNext = t; hs.roofP = R.labor * n; hs.queue.push({ k: 'roof' }); }
+  else hs.roof = t;
+  return null;
+}
+export function setFloorType(s, t, mode) {
+  const hs = s.world.house; if (!hs || hs.floor === t) return null;
+  const F = FLOORS[t], n = Object.keys(hs.cells).length;
+  const err = pay(s, F.cost * n, F.labor * n, mode); if (err) return err;
+  hs.floor = t; return null;
+}
+/* 自分でやる家の工事を進める */
+export function houseProgress(w, pool) {
+  const hs = w.house; if (!hs) return pool;
+  while (pool > 1e-9 && hs.queue.length) {
+    const q = hs.queue[0];
+    if (q.k === 'cell') { const c = hs.cells[q.id]; if (!c || !c.p) { hs.queue.shift(); continue; } const u = Math.min(pool, c.p); c.p -= u; pool -= u; if (c.p <= 1e-9) { delete c.p; hs.queue.shift(); } }
+    else if (q.k === 'wall') { const c = hs.walls[q.id]; if (!c || !c.p) { hs.queue.shift(); continue; } const u = Math.min(pool, c.p); c.p -= u; pool -= u; if (c.p <= 1e-9) { c.t = c.next; delete c.next; delete c.p; hs.queue.shift(); } }
+    else if (q.k === 'roof') { const u = Math.min(pool, hs.roofP || 0); hs.roofP -= u; pool -= u; if (hs.roofP <= 1e-9) { hs.roof = hs.roofNext; hs.roofNext = null; hs.queue.shift(); } }
+  }
+  return pool;
+}
+export function housePending(w) {
+  const hs = w.house; if (!hs) return 0;
+  let d = 0; for (const q of hs.queue) { if (q.k === 'cell') d += hs.cells[q.id]?.p || 0; if (q.k === 'wall') d += hs.walls[q.id]?.p || 0; if (q.k === 'roof') d += hs.roofP || 0; }
+  return d;
+}
+/* 家の熱の性質（パネルから） */
+export function houseFromPanels(w, site, n = 1) {
+  const hs = w.house; if (!hs) return null;
+  const cells = Object.keys(hs.cells).filter(k => built(hs.cells[k]));
+  if (!cells.length) return null;
+  const A = cells.length, V = A * HOUSE_H;
+  const latF = Math.min(1, Math.abs(site.lat || 0) / 35), south = (site.lat || 0) >= 0 ? 's' : 'n';
+  const parts = { wall: 0, roof: 0, floor: 0, window: 0, air: 0 };
+  let open = 0, wallA = 0, uWallSum = 0, Aw = 0, winGain = 0, steel = 0, doors = 0;
+  for (const o of houseOuterEdges(hs)) {
+    const wl = hs.walls[o.e];
+    if (!wl) { open++; continue; }
+    const P = PANELS[wl.t];
+    const area = HOUSE_H;
+    if (P.win) { Aw += area * 0.6; parts.window += P.u * area * 0.6 + 1.6 * area * 0.4; winGain += P.g * area * 0.6 * (latF * (o.dir === south ? 1 : o.dir === (south === 's' ? 'n' : 's') ? 0.2 : 0.55) + (1 - latF) * 0.5); }
+    else { parts.wall += P.u * area; wallA += area; uWallSum += P.u * area; if (P.steel) steel += area; if (P.door) doors++; }
+  }
+  const R = ROOFS[hs.roof], F = FLOORS[hs.floor];
+  parts.roof = R.u * A; parts.floor = F.u * A * 0.6;
+  const ach = 0.6 + 2 * open;
+  parts.air = 0.33 * V * ach;
+  const UA = Object.values(parts).reduce((a, b) => a + b, 0);
+  const massLv = Math.min(3, F.mass + (hs.roof === 'green' ? 1 : 0));
+  const MASS = [{ eta: 0.5, damp: 0.3, name: '軽い' }, { eta: 0.7, damp: 0.5, name: 'ふつう' }, { eta: 0.85, damp: 0.7, name: '重い' }, { eta: 0.92, damp: 0.82, name: 'とても重い' }];
+  return {
+    A, V, UA, parts, wallNet: wallA, uWall: wallA ? uWallSum / wallA : 1.6, roofA: A, uRoof: R.u, absorb: R.absorb,
+    Aw, winFactor: Aw ? winGain / Aw : 0, mass: MASS[massLv], massLv, eavesShade: hs.eaves ? 0.6 : 0, rainGuard: hs.eaves ? 0.9 : 0,
+    ventAch: 2 + 40 * Math.min(0.3, Aw / Math.max(1, A)), condenseProne: steel / Math.max(1, wallA) > 0.3 || hs.roof === 'steel', steelShare: steel / Math.max(1, wallA), rotRisk: 0, open, doors, floorZ: hs.z, cells
+  };
+}
