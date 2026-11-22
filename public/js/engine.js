@@ -85,11 +85,6 @@ export function terrain(key) {
       const d = (x - 0.55 * y - 6);
       e = 1788 + 0.24 * x + 0.9 * Math.sin(y / 8) + 0.004 * (y - 25) * (y - 25)
         - 1.6 * Math.exp(-(d * d) / 40);
-    } else if (key === 'tokyo') {
-      // 台地を小さな川が削った谷。川はいまは暗渠で、ゆるく曲がった道になっている（場所と向きはぼかしてある）
-      const yc = 31 + 5 * Math.sin(x / 9) + 0.06 * x;
-      const d = Math.abs(y - yc);
-      e = 21 + 0.03 * x + 7 * Math.pow(Math.min(1, d / 17), 1.3) + 0.4 * Math.sin(x / 5 + y / 7);
     } else if (key === 'taos') {
       // 南（下）に向かって下るゆるい斜面。日当たりがいい
       e = 2128 + 0.09 * (50 - y) + 0.5 * Math.sin(x / 7) + 0.3 * Math.cos(y / 5);
@@ -831,33 +826,6 @@ export function tokyoYear() {
 }
 
 /* 東京の街：段々の谷に建物が詰まっている。あなたの部屋は賃貸の3階 */
-export function tokyoWorld() {
-  const w = W.makeWorld(siteTerrain('tokyo'));
-  const put = (x, y, z, t) => { w.blocks[`${x},${y},${z}`] = { t, at: 0 }; };
-  const road = new Set();
-  // 暗渠の道（谷底に沿って曲がる）と、谷を横切る坂道
-  for (let x = 0; x < 50; x++) { const yc = Math.round(31 + 5 * Math.sin(x / 9) + 0.06 * x); for (const dy of [0, 1]) road.add(`${x},${yc + dy}`); }
-  for (let y = 0; y < 50; y++) for (const x of [22, 23]) road.add(`${x},${y}`);
-  for (const k of road) { const [x, y] = k.split(',').map(Number); if (y >= 0 && y < 50) put(x, y, W.h(w, x, y), 'asphalt'); }
-  // 建物：小さな区画ごとに、地面を平らにして積む
-  const lots = [];
-  for (let by = 2; by < 48; by += 8) for (let bx = 1; bx < 48; bx += 7) lots.push([bx, by]);
-  let mine = null;
-  for (const [bx, by] of lots) {
-    const cells = [];
-    for (let y = by; y < by + 6; y++) for (let x = bx; x < bx + 5; x++) if (x < 50 && y < 50 && !road.has(`${x},${y}`)) cells.push([x, y]);
-    if (cells.length < 20) continue;
-    const z0 = Math.max(...cells.map(([x, y]) => W.h(w, x, y)));
-    const floors = 2 + ((bx * 7 + by * 3) % 4);
-    const isMine = !mine && bx >= 15 && by >= 18 && by <= 26;
-    for (const [x, y] of cells) { w.H[y * 50 + x] = z0; for (let k = 0; k < (isMine ? 4 : floors); k++) put(x, y, z0 + k, isMine && k === 2 && x === bx + 1 && y === by + 1 ? 'myroom' : 'concrete'); }
-    if (isMine) mine = { x: bx + 1, y: by + 1, z: z0 + 2 };
-  }
-  w.mine = mine;
-  return w;
-}
-
-/* ---------- 保存（文字列） ---------- */
 export function save(s) { const t = clone(s); delete t.flags.weatherYear; return JSON.stringify(t); }
 export function load(str) { try { const s = JSON.parse(str); if (s && s.real) applyReal(s.site, s.real); return s; } catch { return null; } }
 

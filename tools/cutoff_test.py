@@ -58,10 +58,8 @@ with sync_playwright() as p:
         mock_real.install(pg)
         pg.goto('http://localhost:8767/index.html'); pg.wait_for_timeout(400)
         snap(pg, tag, 'title')
-        click(pg, '#new', tag); pg.wait_for_timeout(300); click(pg, '#skip', tag); pg.wait_for_timeout(200)
-        snap(pg, tag, 'prologue')
-        click(pg, '#skip', tag); pg.wait_for_timeout(100); snap(pg, tag, 'invite')
-        click(pg, '#go', tag); pg.wait_for_timeout(200); click(pg, '#skip', tag); pg.wait_for_timeout(300)
+        click(pg, '#new', tag); pg.wait_for_timeout(600); snap(pg, tag, 'trip')
+        click(pg, '#skip', tag); pg.wait_for_timeout(500)
         snap(pg, tag, 'game0')
         pg.evaluate("()=>{const {G}=window.__orb;G.s.known=['house','tank','garden','heap','toilet','grey','saving','catch','mulch','terrace','offgrid','deep','hedge','chicken','pond','insulation','greenhouse'];G.s.flags.done_med=1;G.s.cash=900;}")
         for cat in [None, 'house', 'farm', 'water', 'other']:

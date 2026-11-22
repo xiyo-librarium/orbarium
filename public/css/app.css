@@ -327,3 +327,5 @@ h1, h2, h3 { margin: 0; }
 .input { width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); font-family: var(--mono); font-size: 15px; background: var(--card); color: var(--ink); }
 .loading-real { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(20,25,28,.35); z-index: 60; }
 .loading-real .box { background: var(--card); padding: 18px 22px; border-radius: 14px; display: flex; flex-direction: column; gap: 6px; max-width: 360px; box-shadow: 0 8px 30px rgba(0,0,0,.2); }
+.travel .mailcard.trip { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); width: min(460px, calc(100% - 32px)); box-shadow: 0 6px 24px rgba(0,0,0,.12); z-index: 2; animation: tripin .6s ease both; }
+@keyframes tripin { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }

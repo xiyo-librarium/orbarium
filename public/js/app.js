@@ -1,5 +1,5 @@
 import * as E from './engine.js';
-import { NOTES, LESSON, eventText, ATLAS, PROLOGUE, INVITE, LANDS } from './content.js';
+import { NOTES, LESSON, eventText, ATLAS, INVITE, LANDS } from './content.js';
 import { createGlobe, flyTo, loadLand } from './globe.js';
 import { createView, sunVector, dirName } from './iso.js';
 import { loadRealPlot, mapsUrl } from './realsite.js';
@@ -32,97 +32,23 @@ async function title() {
   app.innerHTML = `<main class="title"><canvas id="globe" aria-hidden="true"></canvas>
     <div class="title-card"><h1>Orbarium</h1><p>Choose a land. Close the loop.</p>
     <div class="row"><button class="btn primary" id="new">はじめから</button>${saved ? `<button class="btn" id="cont">つづきから（${saved.year}年）</button>` : ''}<button class="btn ghost" id="atlas">地球儀で学ぶ</button></div>
-    <p class="small">気候と地形はメデジンの平年値をもとにした試作です</p></div></main>`;
+    <p class="small">地形と気候は実在の場所のデータ（標高：AWS Terrain Tiles／気候：Open-Meteo）</p></div></main>`;
   await loadLand();
   const g = createGlobe(document.getElementById('globe'), { lon: 140, lat: 20 });
   let run = true; const spin = () => { if (!run) return; g.lon -= 0.08; g.draw(); requestAnimationFrame(spin); }; spin();
   const onR = () => { g.size(); g.draw(); }; window.addEventListener('resize', onR);
   stopAnim = () => { run = false; window.removeEventListener('resize', onR); };
-  document.getElementById('new').onclick = () => { if (!saved || confirmBox('今の暮らしを消して、はじめからにしますか？')) travel({ lon: 60, lat: 20, name: '' }, E.SITES.tokyo, prologue); };
+  document.getElementById('new').onclick = () => { if (!saved || confirmBox('今の暮らしを消して、はじめからにしますか？')) travel(E.SITES.tokyo, E.SITES.med, startGame, INVITE); };
   const c = document.getElementById('cont'); if (c) c.onclick = () => { G.s = saved; game(); };
   document.getElementById('atlas').onclick = () => atlas(() => title());
 }
 function confirmBox(msg) { return window.confirm(msg); }
 
-/* ================= 序章：東京（見るだけ。ほかの土地と同じ画面） ================= */
-const TOKYO_TABS = [['web', 'めぐり'], ['book', '家計簿'], ['plan', '予定'], ['sky', '天気'], ['note', 'ノート']];
-function prologue() {
-  stop();
-  const T = E.tokyoYear();
-  let i = 0, tab = 'web';
-  app.innerHTML = `<div class="game">
-    <header class="bar"><div class="brand">Orbarium</div><div class="where">東京・30m²の賃貸 · 3階</div><div class="when">2026年 秋</div>${wallet(null, T)}</header>
-    <section class="left"><div class="mapzone">${tokyoMap()}</div><div class="story" id="story" aria-live="polite"></div></section>
-    <section class="right"><nav class="tabs" id="ttabs"></nav><div class="panel" id="tpanel"></div></section></div>`;
-  const tabs = () => {
-    document.getElementById('ttabs').innerHTML = TOKYO_TABS.map(([k, n]) => `<button class="tab${tab === k ? ' on' : ''}" data-tt="${k}">${n}</button>`).join('');
-    document.querySelectorAll('[data-tt]').forEach(b => b.onclick = () => { tab = b.dataset.tt; tabs(); });
-    document.getElementById('tpanel').innerHTML = tokyoPanel(T, tab);
-  };
-  tabs();
-  const story = document.getElementById('story');
-  const show = () => {
-    if (i < PROLOGUE.length) {
-      story.innerHTML = `<div>${esc(PROLOGUE[i])}</div><div class="row"><button class="btn" id="skip">とばす</button><button class="btn" id="next">次へ</button></div>`;
-      document.getElementById('next').onclick = () => { i++; show(); };
-      document.getElementById('skip').onclick = () => { i = PROLOGUE.length; show(); };
-    } else {
-      story.innerHTML = `<div class="mailcard"><div class="small">メール · ${esc(INVITE.from)}</div><b>${esc(INVITE.subject)}</b><div>${esc(INVITE.body)}</div></div><div class="row"><button class="btn" id="go">300万円を持って、行ってみる</button></div>`;
-      document.getElementById('go').onclick = () => travel(E.SITES.tokyo, E.SITES.med, startGame);
-    }
-  };
-  show();
-  drawTokyo();
-  window.onresize = () => { if (document.getElementById('tmap')) drawTokyo(); };
-}
-function tokyoMap() { return `<div class="mapwrap" id="tmap" style="height:100%"></div>`; }
-function drawTokyo() {
-  const tw = E.tokyoWorld(), m = tw.mine;
-  draw2D(document.getElementById('tmap'), tw, {
-    label: '東京の部屋のまわり。台地を小さな川が削った谷で、川はいまは暗渠の道になっている。水・電気・食べものは外から届き、下水とごみは外へ消える',
-    caption: '↑北　谷の地形（場所はぼかしてある）・1段=高さ1m',
-    onCell: () => open3D(m.x, m.y, 'house', { world: tw, readOnly: true }),
-    overlay: (ctx, pad, c, dpr) => {
-      const P = (x, y) => [pad + x * c, pad + y * c], me = P(m.x + 0.5, m.y + 0.5);
-      const arrow = (from, to, col, text, tx, ty) => {
-        ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 2.5 * dpr; ctx.setLineDash([7 * dpr, 4 * dpr]);
-        ctx.beginPath(); ctx.moveTo(...from); ctx.lineTo(...to); ctx.stroke(); ctx.setLineDash([]);
-        const a = Math.atan2(to[1] - from[1], to[0] - from[0]), L = 9 * dpr;
-        ctx.beginPath(); ctx.moveTo(...to); ctx.lineTo(to[0] - L * Math.cos(a - 0.4), to[1] - L * Math.sin(a - 0.4)); ctx.lineTo(to[0] - L * Math.cos(a + 0.4), to[1] - L * Math.sin(a + 0.4)); ctx.fill();
-        ctx.font = `700 ${12 * dpr}px "Noto Sans JP", sans-serif`; ctx.fillStyle = 'rgba(251,250,245,.85)'; const w = ctx.measureText(text).width; ctx.fillRect(tx - 3 * dpr, ty - 13 * dpr, w + 6 * dpr, 17 * dpr); ctx.fillStyle = col; ctx.fillText(text, tx, ty);
-      };
-      arrow(P(-0.5, m.y - 6), me, '#2B6CB0', '水道 ← どこかのダム', ...P(0.5, m.y - 7));
-      arrow(P(m.x - 4, -0.5), me, '#C08A1E', '電気 ← どこかの発電所', ...P(m.x - 3, 2));
-      arrow(P(m.x + 10, 50.5), me, '#3F7D4E', '食べもの ← どこかの畑', ...P(m.x + 4, 48.5));
-      arrow(me, P(50.5, m.y + 8), '#8A4513', '下水 → 処理場の先の川', ...P(31, m.y + 11));
-      ctx.font = `700 ${12 * dpr}px "Noto Sans JP", sans-serif`; ctx.fillStyle = '#1F2A2E'; ctx.fillText('あなたの部屋（3階）', me[0] + 8 * dpr, me[1] - 6 * dpr);
-      ctx.font = `${11 * dpr}px "Noto Sans JP", sans-serif`; ctx.fillStyle = '#5E4A30'; ctx.fillText('暗渠になった川（いまは道）', ...P(2, 30));
-    }
-  });
-}
-function tokyoPanel(T, tab) {
-  const c = T.cost;
-  if (tab === 'book') return `<div><h2>家計簿 · 東京の1年</h2><p class="small">財布は円の一つだけ。水も電気も食べものも、円で買う。</p></div>
-  <div class="rows"><span>給料（会社で週5日）</span><b class="num">+${man(T.income)}</b>
-  <span>家賃</span><b class="num neg">−${man(c.rent)}</b><span>食べもの ${T.flows.food}kg</span><b class="num neg">−${man(c.food)}</b>
-  <span>水道 ${Math.round(T.flows.water)}m³</span><b class="num neg">−${man(c.water)}</b><span>電気 ${Math.round(T.flows.power).toLocaleString()}kWh</span><b class="num neg">−${man(c.power)}</b>
-  <span>そのほかの暮らし・通勤</span><b class="num neg">−${man(c.living + c.commute)}</b><span class="tot">残る</span><b class="num tot">+${man(T.save)}</b></div>
-  <h3>外から買ったもの・外へ出したもの</h3><div class="rows"><span>水を買った</span><b class="num">${Math.round(T.flows.water)}m³</b><span>電気を買った</span><b class="num">${Math.round(T.flows.power).toLocaleString()}kWh</b><span>食べものを買った</span><b class="num">${T.flows.food}kg</b><span>下水に流した</span><b class="num">${Math.round(T.flows.sewer)}m³</b><span>ごみに出した</span><b class="num">${T.flows.garbage}kg</b></div>`;
-  if (tab === 'plan') return `<div><h2>予定 · 週の過ごし方</h2><p class="small">変えられない。平日は会社、週末は休み。</p></div>
-    <div class="week"><span></span>${E.WEEKDAYS.map(d => `<span>${d}</span>`).join('')}<span style="text-align:left">あなた</span>${['work', 'work', 'work', 'work', 'work', 'rest', 'rest'].map(v => `<button class="cell ${v}" disabled>${v === 'work' ? '会社' : '休み'}</button>`).join('')}</div>
-    <p class="small">外貨（円）を稼ぐ日が5日、ほかは休む日。土や水や生き物に手をかける日はない。</p>`;
-  if (tab === 'sky') return `<div><h2>天気</h2><p class="small">東京の雨は年に1,500mmほど。でも、この部屋の暮らしには関係しない。雨が降っても降らなくても、水道から同じ水が来る。屋根に降った雨は、そのまま側溝から下水へ流れていく。</p></div>`;
-  if (tab === 'note') return `<div><h2>ノート</h2><p class="small">まだ何も書いていない。</p></div>${['家', '雨水タンク', '畑'].map(() => `<div class="note locked"><b>？？？</b><span>まだ知らない。</span></div>`).join('')}`;
-  return `<div><h2>めぐり</h2><p class="small">この部屋にも、水・養分・エネルギー・お金の4つの輪が流れている。流れる量は少なくない。でも、どの輪もこの部屋と近所の中ではほとんど閉じず、遠くへ抜けていく。</p></div>
-  ${cycleSVG(E.tokyoCycles())}${cycleList(E.tokyoCycles())}`;
-}
-
-/* ================= 地球儀で移動 ================= */
-async function travel(from = E.SITES.tokyo, to = E.SITES.med, after = startGame) {
+async function travel(from = E.SITES.tokyo, to = E.SITES.med, after = startGame, story = null) {
   stop();
   const toKey = Object.keys(E.SITES).find(k => E.SITES[k] === to);
   if (toKey && toKey !== 'tokyo') G.realP = realPromise(toKey);
-  app.innerHTML = `<div class="travel"><div class="cap" id="cap">${from.name ? `${esc(from.name)}から、${esc(to.name)}へ` : esc(to.name)}</div><canvas id="tg" aria-hidden="true"></canvas><button class="btn skip" id="skip">とばす</button></div>`;
+  app.innerHTML = `<div class="travel"><div class="cap" id="cap">${from.name ? `${esc(from.name)}から、${esc(to.name)}へ` : esc(to.name)}</div>${story ? `<div class="mailcard trip"><div class="small">メール · ${esc(story.from)}</div><b>${esc(story.subject)}</b><div>${esc(story.body)}</div></div>` : ''}<canvas id="tg" aria-hidden="true"></canvas><button class="btn skip" id="skip">とばす</button></div>`;
   await loadLand();
   const g = createGlobe(document.getElementById('tg'), { lon: from.lon, lat: from.lat });
   g.label = from.name ? { lon: from.lon, lat: from.lat, text: from.name } : null; g.draw();
@@ -134,7 +60,7 @@ async function travel(from = E.SITES.tokyo, to = E.SITES.med, after = startGame)
     g.label = { lon: to.lon, lat: to.lat, text: to.name };
     flyTo(g, { lon: to.lon, lat: to.lat, scale: 1 }, 3200, () => {
       const cap = document.getElementById('cap'); if (!cap) return;
-      cap.textContent = to.key === 'tokyo' || to === E.SITES.tokyo ? '東京・30m²の賃貸' : `${to.name}・標高${to.elev.toLocaleString()}m`;
+      cap.textContent = `${to.name}・標高${to.elev.toLocaleString()}m`;
       flyTo(g, { lon: to.lon, lat: to.lat, scale: 14 }, 1400, () => { document.querySelector('.travel')?.classList.add('fade-out'); setTimeout(finish, 500); });
     });
   }, 500);
@@ -199,35 +125,11 @@ function wallet(s, T) {
 }
 function renderBar() {
   const s = G.s, site = E.SITES[s.site];
-  const place = s.site === 'tokyo' ? '' : ` · <a href="${mapsUrl(site.lat, site.lon)}" target="_blank" rel="noopener" title="この区画の中心をGoogleマップで開く">${site.lat.toFixed(4)}, ${site.lon.toFixed(4)}</a>${s.real ? '' : ' <span class="ng" title="実データを取れなかったので、作り物の地形と仮の気候">（仮の地形）</span>'}${s.turn === 0 ? ' <button class="linkbtn" id="moveplot">場所を変える</button>' : ''}`;
+  const place = s.site === 'tokyo' ? '' : ` · <a href="${mapsUrl(site.lat, site.lon)}" target="_blank" rel="noopener" title="この区画の中心をGoogleマップで開く">${site.lat.toFixed(4)}, ${site.lon.toFixed(4)}</a>${s.real ? '' : ' <span class="ng" title="実データを取れなかったので、作り物の地形と仮の気候">（仮の地形）</span>'}`;
   document.getElementById('bar').innerHTML = `<div class="brand">Orbarium</div><div class="where">${esc(site.name)} · 区画50m四方${place}</div>
     <div class="when">${s.year}年 ${esc(site.quarters[s.q])}</div>${wallet(s)}
     <button class="menu" id="menu" aria-label="メニュー"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14"/></svg></button>`;
   document.getElementById('menu').onclick = menu;
-  const mv = document.getElementById('moveplot'); if (mv) mv.onclick = movePlot;
-}
-/* 区画の場所を変える（最初の季節だけ）。Googleマップの座標をそのまま貼る */
-function movePlot() {
-  const s = G.s, S = E.SITES[s.site];
-  modal(`<h2>区画の場所を変える</h2>
-    <p class="small" style="margin:0">Googleマップで場所を長押し（パソコンは右クリック）すると出る「6.27269, -75.66148」のような座標を貼ってください。その場所を中心にした50m四方の、実際の標高と、2014〜2023年の気象から作った平年の気候で始め直します。</p>
-    <input id="plotll" class="input" inputmode="decimal" value="${S.lat.toFixed(5)}, ${S.lon.toFixed(5)}" aria-label="緯度, 経度">
-    <p class="small" style="margin:0">いまの場所：<a href="${mapsUrl(S.lat, S.lon)}" target="_blank" rel="noopener">Googleマップで開く</a>${S.src ? `<br>標高：${esc(S.src.dem)}<br>気候：${esc(S.src.climate)}` : ''}</p>
-    <div id="plotmsg" class="small"></div>
-    <div style="display:flex;gap:8px"><button class="btn primary" data-m="go">ここで始め直す</button><button class="btn ghost" data-m="close">やめる</button></div>`, async (m, close) => {
-    if (m === 'close') return close();
-    if (m !== 'go') return;
-    const v = document.getElementById('plotll').value.match(/(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/), msg = document.getElementById('plotmsg');
-    if (!v) { msg.textContent = '「緯度, 経度」の形で入れてください'; return; }
-    const lat = +v[1], lon = +v[2];
-    if (Math.abs(lat) > 80 || Math.abs(lon) > 180) { msg.textContent = '座標が範囲の外です'; return; }
-    msg.textContent = '実際の標高と気候を取ってきています…';
-    const real = await realPromise(s.site, lat, lon);
-    if (!real) { msg.textContent = 'データを取れませんでした。通信を確かめて、もう一度試してください'; return; }
-    close();
-    G.s = E.newGame({ site: s.site, seed: s.seed, cash: s.cash, persons: s.persons, known: s.known, learned: s.learned, year: s.year, flags: s.flags, real });
-    persist(); game();
-  });
 }
 function menu() {
   modal(`<h2>メニュー</h2><div style="display:flex;flex-direction:column;gap:8px">
@@ -343,7 +245,7 @@ function draw2D(wrap, w, o) {
 }
 function hintText() {
   const s = G.s, S = E.summarize(s);
-  if (s.turn === 0 && s.site === 'med') return `${s.real ? 'ここはメデジン西部、サン・クリストバル地区の実在の山腹。等高線は実際の標高、気温と雨は2014〜2023年の実際の気象から。' : '実際の標高と気候を取れなかったので、仮の地形で始めています（上の「場所を変える」でやり直せます）。'}オレンジ色が、前の持ち主が建てた小さな板壁の家（12m²、高さ3m。トイレ・シャワー・ベッド・テーブルつき）。地図を押すとその場所を拡大して、何を作るか選べます。`;
+  if (s.turn === 0 && s.site === 'med') return `${s.real ? 'ここはメデジン西部、サン・クリストバル地区の実在の山腹。等高線は実際の標高、気温と雨は2014〜2023年の実際の気象から。' : '実際の標高と気候を取れなかったので、仮の地形で始めています（通信を確かめて、はじめからやり直すと取り直します）。'}オレンジ色が、前の持ち主が建てた小さな板壁の家（12m²、高さ3m。トイレ・シャワー・ベッド・テーブルつき）。地図を押すとその場所を拡大して、何を作るか選べます。`;
   return '';
 }
 function renderTools() {
@@ -392,7 +294,7 @@ function openBuild(cx, cy, o = {}) {
     <aside class="iso-side" id="isoside"></aside></div>`;
   document.body.appendChild(ov);
   const st = { cat: null, view: 'up', tool: null, a: null, msg: '', drag: null, sel: -1, spot: [cx, cy] };
-  const site = E.SITES[ro ? 'tokyo' : G.s.site], month = ro ? 5 : G.s.q * 3 + 2;
+  const site = E.SITES[G.s?.site || 'med'], month = G.s ? G.s.q * 3 + 2 : 5;
   const v = createView(document.getElementById('isoc'), world, { cx, cy, R: 8, lat: site.lat, month }); G.view = v; G.build = st;
   const sunBtn = ov.querySelector('[data-sun]');
   const sunLabel = () => { if (!sunBtn) return; const sv = v.sun; sunBtn.textContent = `☀ ${v.hour}時 · ${dirName(sv.az)}から${Math.round(sv.elev)}°`; sunBtn.title = `${month}月の${v.hour}時の日差し。押すと時刻が変わる（8・10・12・14・16時）`; };
@@ -714,10 +616,7 @@ function renderHouseDesign(st) {
 
 function renderReadOnlySide(close) {
   const el = document.getElementById('isoside');
-  el.innerHTML = `<header><h2>東京の部屋</h2><button class="btn ghost" id="isox">戻る</button></header>
-    <p style="margin:0">谷の斜面に建つ賃貸の3階、30m²。黄色いキューブがあなたの部屋。</p>
-    <div class="stat2"><span>この部屋でできること</span><b>ほとんどない</b><span>壁も屋根も床も大家さんのもの。屋根の雨は側溝から下水へ。土は建物と道の下。</span></div>
-    <p class="small">回す ↺↻ ／ 拡大 ＋− ／ 移動 矢印。見るだけ。</p>`;
+  el.innerHTML = `<header><h2>見るだけ</h2><button class="btn ghost" id="isox">戻る</button></header><p class="small">回す ↺↻ ／ 拡大 ＋− ／ 移動 矢印。</p>`;
   el.querySelector('#isox').onclick = close;
 }
 function renderIsoSide(st) {
