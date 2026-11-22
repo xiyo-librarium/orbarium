@@ -2,6 +2,7 @@ import * as E from './engine.js';
 import { NOTES, LESSON, eventText, ATLAS, PROLOGUE, INVITE, LANDS } from './content.js';
 import { createGlobe, flyTo, loadLand } from './globe.js';
 import { createView, sunVector, dirName } from './iso.js';
+import { loadRealPlot, mapsUrl } from './realsite.js';
 
 const KEY = 'orbarium-v4';
 const app = document.getElementById('app');
@@ -119,6 +120,8 @@ function tokyoPanel(T, tab) {
 /* ================= 地球儀で移動 ================= */
 async function travel(from = E.SITES.tokyo, to = E.SITES.med, after = startGame) {
   stop();
+  const toKey = Object.keys(E.SITES).find(k => E.SITES[k] === to);
+  if (toKey && toKey !== 'tokyo') G.realP = realPromise(toKey);
   app.innerHTML = `<div class="travel"><div class="cap" id="cap">${from.name ? `${esc(from.name)}から、${esc(to.name)}へ` : esc(to.name)}</div><canvas id="tg" aria-hidden="true"></canvas><button class="btn skip" id="skip">とばす</button></div>`;
   await loadLand();
   const g = createGlobe(document.getElementById('tg'), { lon: from.lon, lat: from.lat });
@@ -148,15 +151,26 @@ function chooseLand() {
       const k = m.slice(3); close();
       const from = E.SITES[s.site], to = E.SITES[k];
       const hist = [...(s.flags.history || []), { site: s.site, years: s.turn / 4, rel: E.relations(s).score }];
-      travel(from, to, () => {
-        G.s = E.newGame({ site: k, seed: Math.floor(Math.random() * 1e6), cash: s.cash - to.plotPrice, persons: s.persons, known: s.known, learned: s.learned, year: s.year, flags: { history: hist } });
+      travel(from, to, async () => {
+        const real = await waitReal(G.realP || realPromise(k), to.name); G.realP = null;
+        G.s = E.newGame({ site: k, seed: Math.floor(Math.random() * 1e6), cash: s.cash - to.plotPrice, persons: s.persons, known: s.known, learned: s.learned, year: s.year, flags: { history: hist }, real });
         G.s.q = s.q; G.tab = 'web'; G.cat = null; persist(); game();
       });
     }
   });
 }
-function startGame() {
-  G.s = E.newGame({ seed: Math.floor(Math.random() * 1e6) });
+/* 実在の土地のデータを取りに行く（地球儀の移動中に裏で進める）。取れなければ null */
+function realPromise(key, lat, lon) {
+  const S = E.SITES[key]; if (!S || key === 'tokyo') return Promise.resolve(null);
+  return loadRealPlot(lat ?? S.lat, lon ?? S.lon).then(r => { E.applyReal(key, r); return r; }).catch(e => { console.warn('実データを取れなかった', e); return null; });
+}
+async function waitReal(p, name) {
+  let shown = null; const t = setTimeout(() => { shown = document.createElement('div'); shown.className = 'loading-real'; shown.innerHTML = `<div class="box"><b>${esc(name)}の土地の、実際の標高と気候を取ってきています…</b><span class="small">標高：AWS Terrain Tiles ／ 気候：Open-Meteo（ERA5）</span></div>`; document.body.appendChild(shown); }, 300);
+  try { return await p; } finally { clearTimeout(t); shown?.remove(); }
+}
+async function startGame() {
+  const real = await waitReal(G.realP || realPromise('med'), 'メデジン'); G.realP = null;
+  G.s = E.newGame({ seed: Math.floor(Math.random() * 1e6), real });
   G.tab = 'web'; G.cat = null; G.report = null;
   persist();
   game();
@@ -185,10 +199,35 @@ function wallet(s, T) {
 }
 function renderBar() {
   const s = G.s, site = E.SITES[s.site];
-  document.getElementById('bar').innerHTML = `<div class="brand">Orbarium</div><div class="where">${esc(site.name)} · 区画50m四方</div>
+  const place = s.site === 'tokyo' ? '' : ` · <a href="${mapsUrl(site.lat, site.lon)}" target="_blank" rel="noopener" title="この区画の中心をGoogleマップで開く">${site.lat.toFixed(4)}, ${site.lon.toFixed(4)}</a>${s.real ? '' : ' <span class="ng" title="実データを取れなかったので、作り物の地形と仮の気候">（仮の地形）</span>'}${s.turn === 0 ? ' <button class="linkbtn" id="moveplot">場所を変える</button>' : ''}`;
+  document.getElementById('bar').innerHTML = `<div class="brand">Orbarium</div><div class="where">${esc(site.name)} · 区画50m四方${place}</div>
     <div class="when">${s.year}年 ${esc(site.quarters[s.q])}</div>${wallet(s)}
     <button class="menu" id="menu" aria-label="メニュー"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14"/></svg></button>`;
   document.getElementById('menu').onclick = menu;
+  const mv = document.getElementById('moveplot'); if (mv) mv.onclick = movePlot;
+}
+/* 区画の場所を変える（最初の季節だけ）。Googleマップの座標をそのまま貼る */
+function movePlot() {
+  const s = G.s, S = E.SITES[s.site];
+  modal(`<h2>区画の場所を変える</h2>
+    <p class="small" style="margin:0">Googleマップで場所を長押し（パソコンは右クリック）すると出る「6.27269, -75.66148」のような座標を貼ってください。その場所を中心にした50m四方の、実際の標高と、2014〜2023年の気象から作った平年の気候で始め直します。</p>
+    <input id="plotll" class="input" inputmode="decimal" value="${S.lat.toFixed(5)}, ${S.lon.toFixed(5)}" aria-label="緯度, 経度">
+    <p class="small" style="margin:0">いまの場所：<a href="${mapsUrl(S.lat, S.lon)}" target="_blank" rel="noopener">Googleマップで開く</a>${S.src ? `<br>標高：${esc(S.src.dem)}<br>気候：${esc(S.src.climate)}` : ''}</p>
+    <div id="plotmsg" class="small"></div>
+    <div style="display:flex;gap:8px"><button class="btn primary" data-m="go">ここで始め直す</button><button class="btn ghost" data-m="close">やめる</button></div>`, async (m, close) => {
+    if (m === 'close') return close();
+    if (m !== 'go') return;
+    const v = document.getElementById('plotll').value.match(/(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/), msg = document.getElementById('plotmsg');
+    if (!v) { msg.textContent = '「緯度, 経度」の形で入れてください'; return; }
+    const lat = +v[1], lon = +v[2];
+    if (Math.abs(lat) > 80 || Math.abs(lon) > 180) { msg.textContent = '座標が範囲の外です'; return; }
+    msg.textContent = '実際の標高と気候を取ってきています…';
+    const real = await realPromise(s.site, lat, lon);
+    if (!real) { msg.textContent = 'データを取れませんでした。通信を確かめて、もう一度試してください'; return; }
+    close();
+    G.s = E.newGame({ site: s.site, seed: s.seed, cash: s.cash, persons: s.persons, known: s.known, learned: s.learned, year: s.year, flags: s.flags, real });
+    persist(); game();
+  });
 }
 function menu() {
   modal(`<h2>メニュー</h2><div style="display:flex;flex-direction:column;gap:8px">
@@ -296,7 +335,7 @@ function draw2D(wrap, w, o) {
   ctx.fillStyle = '#E3E5DC'; ctx.fillRect(0, 0, cv.width, cv.height);
   paintPlot(ctx, w, pad, c, dpr, true);
   ctx.strokeStyle = '#1F2A2E'; ctx.setLineDash([6 * dpr, 4 * dpr]); ctx.lineWidth = 1.5 * dpr; ctx.strokeRect(pad, pad, c * 50, c * 50); ctx.setLineDash([]);
-  ctx.fillStyle = '#4A544F'; ctx.font = `${11 * dpr}px "Noto Sans JP", sans-serif`; ctx.fillText(o.caption || '↑北　1マス=1m・1段=高さ1m', pad, pad - 5 * dpr);
+  ctx.fillStyle = '#4A544F'; ctx.font = `${11 * dpr}px "Noto Sans JP", sans-serif`; ctx.fillText(o.caption || `↑北　1マス=1m・1段=高さ1m${G.s?.real ? '・実際の標高（AWS Terrain Tiles）' : ''}`, pad, pad - 5 * dpr);
   if (o.overlay) o.overlay(ctx, pad, c, dpr);
   const cell = (e) => { const b = cv.getBoundingClientRect(); const x = Math.floor(((e.clientX - b.left) * dpr - pad) / c), y = Math.floor(((e.clientY - b.top) * dpr - pad) / c); return x >= 0 && y >= 0 && x < 50 && y < 50 ? [x, y] : null; };
   if (o.onCell) cv.onclick = (e) => { const p = cell(e); if (p) o.onCell(p[0], p[1]); };
@@ -304,7 +343,7 @@ function draw2D(wrap, w, o) {
 }
 function hintText() {
   const s = G.s, S = E.summarize(s);
-  if (s.turn === 0 && s.site === 'med') return 'オレンジ色が、前の持ち主が建てた小さな板壁の家（12m²、高さ3m。トイレ・シャワー・ベッド・テーブルつき）。地図を押すとその場所を拡大して、何を作るか選べます。準備ができたら右下で3か月進めます。';
+  if (s.turn === 0 && s.site === 'med') return `${s.real ? 'ここはメデジン西部、サン・クリストバル地区の実在の山腹。等高線は実際の標高、気温と雨は2014〜2023年の実際の気象から。' : '実際の標高と気候を取れなかったので、仮の地形で始めています（上の「場所を変える」でやり直せます）。'}オレンジ色が、前の持ち主が建てた小さな板壁の家（12m²、高さ3m。トイレ・シャワー・ベッド・テーブルつき）。地図を押すとその場所を拡大して、何を作るか選べます。`;
   return '';
 }
 function renderTools() {

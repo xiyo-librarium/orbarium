@@ -594,7 +594,20 @@ export function houseOuterEdges(hs) {
 export const cloneHouse = (hs) => JSON.parse(JSON.stringify(hs));
 export function newHouse(z) { return { z, cells: {}, wall: 'board', roof: 'tin', floor: 'wood', open: {}, eaves: false, pv: 0, batt: 0, furn: [], eq: { depth: 0 } }; }
 /* 外側でなくなった辺の窓・扉を外す */
-function tidy(d) { const outer = new Set(houseOuterEdges(d).map(o => o.e)); for (const e in d.open) if (!outer.has(e)) delete d.open[e]; }
+function tidy(d) {
+  // 床を足して内側になった（または床を減らしてなくなった）辺の窓・扉は、同じ列のいちばん近い外壁へずらす。行き場がなければ外す
+  const outer = new Set(houseOuterEdges(d).map(o => o.e));
+  for (const e of Object.keys(d.open)) {
+    if (outer.has(e)) continue;
+    const t = d.open[e]; delete d.open[e];
+    const [k, r] = e.split(':'); const [x, y] = r.split(',').map(Number);
+    let moved = false;
+    for (let s = 1; s < N && !moved; s++) for (const sg of [1, -1]) {
+      const e2 = k === 'h' ? `h:${x},${y + sg * s}` : `v:${x + sg * s},${y}`;
+      if (outer.has(e2) && !d.open[e2]) { d.open[e2] = t; moved = true; break; }
+    }
+  }
+}
 function components(d) {
   const keys = Object.keys(d.cells), seen = new Set(), comps = [];
   for (const k of keys) {
@@ -697,21 +710,24 @@ export function findHouseSpot(w, L = 4, S = 3, margin = 6) {
   for (const rot of [false, true]) {
     const nx = rot ? S : L, ny = rot ? L : S;
     for (let y0 = margin; y0 + ny <= N - margin; y0++) for (let x0 = margin; x0 + nx <= N - margin; x0++) {
-      const z = h(w, x0, y0); let ok = true;
-      for (let y = y0; y < y0 + ny && ok; y++) for (let x = x0; x < x0 + nx; x++) if (h(w, x, y) !== z || at(w, x, y, z)) { ok = false; break; }
+      // 実在の急な斜面では平らな所がないこともあるので、2段までの差なら削って盛ってならした所を探す
+      const lv = []; let ok = true;
+      for (let y = y0; y < y0 + ny && ok; y++) for (let x = x0; x < x0 + nx; x++) { const g = h(w, x, y); if (at(w, x, y, g)) { ok = false; break; } lv.push(g); }
       if (!ok) continue;
+      lv.sort((a, b) => a - b); const z = lv[Math.floor(lv.length / 2)], spread = lv[lv.length - 1] - lv[0], earth = lv.reduce((a, g) => a + Math.abs(g - z), 0);
+      if (spread > 2) continue;
       // 4つの辺の外側の平均の高さ
       const side = { n: [], s: [], w: [], e: [] };
       for (let x = x0; x < x0 + nx; x++) { side.n.push(h(w, x, y0 - 1)); side.s.push(h(w, x, y0 + ny)); }
       for (let y = y0; y < y0 + ny; y++) { side.w.push(h(w, x0 - 1, y)); side.e.push(h(w, x0 + nx, y)); }
       const avg = (a) => a.reduce((p, q) => p + q, 0) / a.length;
       const shortS = rot ? ['n', 's'] : ['w', 'e'], longS = rot ? ['w', 'e'] : ['n', 's'];
-      const doorSide = shortS.map(k => ({ k, flat: side[k].filter(v => v === z).length / side[k].length })).sort((a, b) => b.flat - a.flat)[0];
+      const doorSide = shortS.map(k => ({ k, flat: side[k].filter(v => Math.abs(v - z) <= (spread ? 1 : 0)).length / side[k].length })).sort((a, b) => b.flat - a.flat)[0];
       if (doorSide.flat < 0.5) continue;
       const low = avg(side[longS[0]]) <= avg(side[longS[1]]) ? longS[0] : longS[1], high = low === longS[0] ? longS[1] : longS[0];
       const walk = side[high].filter(v => v === z).length / side[high].length;
-      const score = z + walk * 1.5 + doorSide.flat + (x0 - y0) * 0.01;
-      if (!best || score > best.score) best = { x0, y0, nx, ny, z, door: doorSide.k, win: low, score };
+      const score = z * 0.5 + walk * 1.5 + doorSide.flat - earth * 0.8 + (x0 - y0) * 0.01;
+      if (!best || score > best.score) best = { x0, y0, nx, ny, z, door: doorSide.k, win: low, score, earth };
     }
   }
   return best;

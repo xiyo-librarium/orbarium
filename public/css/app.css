@@ -322,3 +322,8 @@ h1, h2, h3 { margin: 0; }
 .held { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 10px 12px; border-radius: 12px; background: #FFF4E4; border: 1px solid #F0C9A0; font-size: 13px; }
 .held span { flex: 1 1 100%; }
 .held .btn { min-height: 40px; }
+.where a { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; font-family: var(--mono); font-size: 12px; }
+.linkbtn { border: none; background: none; padding: 0 4px; color: var(--warn-dark, #9A4A12); text-decoration: underline; cursor: pointer; font: inherit; font-size: 12px; }
+.input { width: 100%; min-height: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); font-family: var(--mono); font-size: 15px; background: var(--card); color: var(--ink); }
+.loading-real { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(20,25,28,.35); z-index: 60; }
+.loading-real .box { background: var(--card); padding: 18px 22px; border-radius: 14px; display: flex; flex-direction: column; gap: 6px; max-width: 360px; box-shadow: 0 8px 30px rgba(0,0,0,.2); }

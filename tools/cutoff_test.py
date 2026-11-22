@@ -3,6 +3,9 @@
 使い方: python3 tools/cutoff_test.py [出力フォルダ]"""
 import sys, os, subprocess, time, json
 from playwright.sync_api import sync_playwright
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(__file__))
+import mock_real
 OUT = sys.argv[1] if len(sys.argv) > 1 else '/tmp/orb_cut'
 os.makedirs(OUT, exist_ok=True)
 ROOT = os.path.join(os.path.dirname(__file__), '..', 'public')
@@ -52,6 +55,7 @@ with sync_playwright() as p:
     for (W, H) in SIZES:
         tag = f'{W}x{H}'
         pg = b.new_page(viewport={'width': W, 'height': H})
+        mock_real.install(pg)
         pg.goto('http://localhost:8767/index.html'); pg.wait_for_timeout(400)
         snap(pg, tag, 'title')
         click(pg, '#new', tag); pg.wait_for_timeout(300); click(pg, '#skip', tag); pg.wait_for_timeout(200)

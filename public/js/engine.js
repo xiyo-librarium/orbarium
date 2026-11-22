@@ -41,7 +41,9 @@ export const SITES = {
   med: {
     /* 市街から西へ約11km、サン・クリストバル地区の山腹（標高約1,800m）。谷底の市街（約1,480m）より300mほど高いので、
        気温は市街の平年値から約2℃下げてある。小さな沢の東側の斜面で、東（右）が上り */
-    name: 'メデジン', sub: 'サン・クリストバルの山腹・北緯6度・標高約1,800m', lat: 6.28, lon: -75.64, elev: 1795,
+    /* 実在の場所：サン・クリストバル地区のエル・パティオ（農村部の集落）。標高と気候は、遊ぶときにブラウザが実データを取ってくる。
+       取れなかったときだけ、下の数字と作り物の地形を使う */
+    name: 'メデジン', sub: 'サン・クリストバル地区エル・パティオの山腹・北緯6度', lat: 6.27269, lon: -75.66148, elev: 1795,
     tmean: [20.8, 21.1, 21.2, 20.8, 21.0, 21.0, 21.1, 21.1, 20.9, 20.3, 20.2, 20.5],
     tmin: [15.7, 15.9, 16.2, 16.1, 16.1, 15.8, 15.6, 15.8, 15.8, 15.6, 15.7, 15.8],
     tmax: [26.0, 26.3, 26.1, 25.6, 25.9, 26.2, 26.6, 26.4, 26.0, 25.0, 24.8, 25.3],
@@ -94,6 +96,11 @@ export function terrain(key) {
     } else e = 20;
     z[y * n + x] = e;
   }
+  return terrainFrom(z);
+}
+/* 標高の格子 z（(PLOT+1)^2、1m間隔、北が上）から、地形の問い合わせ（at・傾き・範囲）を作る */
+export function terrainFrom(z) {
+  const n = PLOT + 1;
   const at = (x, y) => {
     x = Math.max(0, Math.min(PLOT, x)); y = Math.max(0, Math.min(PLOT, y));
     const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.min(PLOT, x0 + 1), y1 = Math.min(PLOT, y0 + 1);
@@ -243,7 +250,9 @@ export function weekCount(p) {
 /* ---------- ゲーム状態 ---------- */
 export function newGame(opt = {}) {
   const site = opt.site || 'med', seed = opt.seed ?? 1;
+  if (opt.real) applyReal(site, opt.real); else if (SITES[site].real) { /* 実データは前のまま */ } 
   const s = makeGame(site, seed, opt);
+  if (opt.real) s.real = opt.real;
   if (site !== 'tokyo' && !opt.empty) {
     // 最初の家：前の持ち主が建てた小さな板壁の家（4×3m、高さ3m）。斜面の上のほうの平らな段に、等高線に沿って長く
     const w = s.world, sp = W.findHouseSpot(w);
@@ -274,6 +283,15 @@ export function clone(s) { return JSON.parse(JSON.stringify(s)); }
 
 let _terrainCache = {};
 export function siteTerrain(key) { return _terrainCache[key] || (_terrainCache[key] = terrain(SITES[key].terrain || key)); }
+/* 実在の土地のデータ（標高の格子と月ごとの気候）を、その土地に当てはめる */
+export function applyReal(key, real) {
+  if (!real || !real.z) return;
+  const S = SITES[key], c = real.climate || {};
+  for (const k of ['tmean', 'tmin', 'tmax', 'rain', 'rainDays', 'sunHours']) if (Array.isArray(c[k]) && c[k].length === 12 && c[k].every(v => Number.isFinite(v))) S[k] = c[k].slice();
+  S.lat = real.lat; S.lon = real.lon; S.real = true; S.src = real.src;
+  S.elev = Math.round(real.z.reduce((a, b) => a + b, 0) / real.z.length);
+  _terrainCache[key] = terrainFrom(Float32Array.from(real.z));
+}
 
 /* 置いたものの集計 */
 const _anaCache = new WeakMap();
@@ -841,7 +859,7 @@ export function tokyoWorld() {
 
 /* ---------- 保存（文字列） ---------- */
 export function save(s) { const t = clone(s); delete t.flags.weatherYear; return JSON.stringify(t); }
-export function load(str) { try { return JSON.parse(str); } catch { return null; } }
+export function load(str) { try { const s = JSON.parse(str); if (s && s.real) applyReal(s.site, s.real); return s; } catch { return null; } }
 
 /* ---------- 置く・外す ---------- */
 export function canPlace(s, x) {

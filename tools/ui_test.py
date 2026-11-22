@@ -2,6 +2,8 @@
 使い方: python3 tools/ui_test.py [出力フォルダ=/tmp/orb_shots]"""
 import sys, os, subprocess, time, json
 from playwright.sync_api import sync_playwright
+sys.path.insert(0, os.path.dirname(__file__))
+import mock_real
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else '/tmp/orb_shots'
 os.makedirs(OUT, exist_ok=True)
@@ -39,6 +41,8 @@ def run(viewport, tag):
         b = p.chromium.launch(); page = b.new_page(viewport=viewport); errs = []
         page.on('console', lambda m: errs.append(m.text) if m.type == 'error' and 'Failed to load resource' not in m.text else None)
         page.on('pageerror', lambda e: errs.append(str(e)))
+        if tag == 'phone': mock_real.block(page)   # スマホでは実データが取れない場合（仮の地形）を通す
+        else: mock_real.install(page)
         page.goto('http://localhost:8765/index.html'); page.wait_for_timeout(700)
         page.screenshot(path=f'{OUT}/{tag}_1_title.png')
         page.click('#new'); page.wait_for_timeout(1200); page.click('#skip'); page.wait_for_timeout(300)
@@ -46,6 +50,13 @@ def run(viewport, tag):
         page.click('#skip'); page.click('#go'); page.wait_for_timeout(300); page.click('#skip'); page.wait_for_timeout(400)
         page.screenshot(path=f'{OUT}/{tag}_3_game.png'); overflow(page, tag + ' game')
         if page.locator('.tools [data-cat]').count(): problems.append(f'{tag}: 地図に家・畑・その他のボタンが残っている')
+        rinfo = page.evaluate("()=>{const {G,E}=window.__orb;const S=E.SITES[G.s.site];return {real:!!G.s.real,base:G.s.world.base,t0:S.tmean[0],rain0:S.rain[0],lat:S.lat,house:!!G.s.world.house}}")
+        if tag == 'phone':
+            if rinfo['real']: problems.append(f'{tag}: 通信を止めたのに実データ扱いになっている')
+        else:
+            if not rinfo['real'] or abs(rinfo['t0'] - 18.6) > 0.05 or not (1930 <= rinfo['base'] <= 1950) or not (85 <= rinfo['rain0'] <= 100): problems.append(f'{tag}: 実データが当てはまっていない {rinfo}')
+        if not rinfo['house']: problems.append(f'{tag}: 実際の斜面に最初の家が置けていない')
+        if page.locator('.where a').count() != 1: problems.append(f'{tag}: 場所のリンクがない')
         hs = page.evaluate("()=>{const h=window.__orb.G.s.world.house;return h?{z:h.z,cells:Object.keys(h.cells)}:null}")
         if not hs: problems.append(f'{tag}: 最初のコンテナがない'); b.close(); return
         # 家の設計：設計図をいじっても家は変わらず、［建てる］で払って建つ
