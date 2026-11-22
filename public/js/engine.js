@@ -315,16 +315,19 @@ export function compostBalance(s, A) {
   const brownNeed = 0.8 * (scraps + hens + resid) + 0.3 * toilet;
   let forest = 0; if (w.veg) for (const c of w.veg) if (c === 10 || c === 95) forest++;
   const leaves = forest * 0.008 + (A.trees || 0) * 0.15 + (A.hedge || 0) * 0.03;   // 集められる落ち葉と刈り草
-  const fromPlot = Math.min(brownNeed, leaves), buy = bays ? Math.max(0, brownNeed - fromPlot) : 0;
+  const fromPlot = Math.min(brownNeed, leaves);
+  // 切った木：まずチップにして混ぜる（木1m³ → チップ2.5m³）。それでも足りなければおがくずを買う
+  const chips = bays ? Math.min(Math.max(0, brownNeed - fromPlot), (w.wood || 0) * 2.5) : 0;
+  const buy = bays ? Math.max(0, brownNeed - fromPlot - chips) : 0;
   const load = greens + brownNeed, f = !bays ? 0 : load > 0 ? Math.min(1, cap / load) : 1;
-  return { bays, perBay, cap, scraps, toilet, hens, resid, greens, brownNeed, leaves, fromPlot, buy, load, f };
+  return { bays, perBay, cap, scraps, toilet, hens, resid, greens, brownNeed, leaves, fromPlot, chips, buy, load, f };
 }
 export function summarize(s) {
   const T = siteTerrain(s.site), w = s.world, A = analyzeWorld(s);
   const C = compostBalance(s, A), cd = [];
   if (C.toilet && !C.bays) cd.push({ lv: 'warn', text: 'コンポストトイレのし尿をさばく堆肥小屋がない（汲み取りを頼んでいる）' });
   if (C.bays && C.f < 0.999) cd.push({ lv: 'warn', text: `堆肥小屋が足りない：年に${C.load.toFixed(1)}m³入るのに、${C.cap.toFixed(1)}m³ぶんしかさばけない（区画を足す）` });
-  if (C.buy > 0.05) cd.push({ lv: 'info', text: `落ち葉や刈り草が足りない分、おがくずを年${C.buy.toFixed(1)}m³ 製材所から買う` });
+  if (C.buy > 0.05) cd.push({ lv: 'info', text: `落ち葉や刈り草${w.wood ? '、木のチップ' : ''}が足りない分、おがくずを年${C.buy.toFixed(1)}m³ 製材所から買う` });
   const HM = A.house ? A.house.m : null;
   let hRect = null;
   if (A.house) { const cc = A.house.cells.map(k => k.split(',').map(Number)); const xs = cc.map(c => c[0]), ys = cc.map(c => c[1]); hRect = T.rect({ x: Math.min(...xs) - 1, y: Math.min(...ys) - 1, w: Math.max(...xs) - Math.min(...xs) + 2, h: Math.max(...ys) - Math.min(...ys) + 2 }); }
@@ -394,6 +397,10 @@ export function advance(state) {
   let clogged = false;
   if (F && r() < F.m.clogQ) clogged = true;
   const reserve = Math.min(S.tankCap, 20 * (clean + toiletUse));
+  // 切った木：堆肥のチップに使った残りを、かまどがあれば薪に（料理と暖房）。木1m³で料理なら約400kWh分、暖房なら約1100kWh分
+  const chipWood = S.compost.chips / 2.5 * days.length / 365;
+  let woodLeft = Math.max(0, (s.world.wood || 0) - chipWood);
+  const stove = !!(s.world.house && s.world.house.stove);
 
   // 畑の土の水（mm）
   const cap = Math.max(60, Math.min(170, 80 + 18 * (s.om - 2)));
@@ -403,7 +410,7 @@ export function advance(state) {
   if (S.gArea) runoffC *= (1 - 0.3 * S.mulchArea / S.gArea);
   const evapF = S.gArea ? 1 - 0.15 * S.mulchArea / S.gArea : 1;
 
-  const A = {
+  const A = { firewood: 0,
     rain: 0, harvest: 0, overflow: 0, tankUse: 0, city: 0, bottled: 0, waterCutDays: 0, waterCutShort: 0,
     greyUse: 0, greyOut: 0, sewer: 0, irr: 0, irrTank: 0, irrGrey: 0, irrCity: 0, pumpKwh: 0,
     et: 0, aet: 0, growth: 0, growDays: 0, runoff: 0, recharge: 0, soilMin: cap, tankMin: Infinity, tankEmptyDays: 0,
@@ -512,7 +519,12 @@ export function advance(state) {
       if (HM.condenseProne && ((site.humid && tmin < 20) || tmin < 5)) A.condDays++;
     }
     const cop = Math.min(3.5, Math.max(1.8, 2.6 + 0.05 * d.t));
-    const load = 2 + 1.0 * n + 0.6 * n + heatKwh / cop;
+    let cook = 1.0 * n;
+    if (stove && woodLeft > 0) {
+      const wc = Math.min(woodLeft, cook / 400); woodLeft -= wc; A.firewood += wc; cook -= wc * 400;
+      const wh = Math.min(woodLeft, heatKwh / 1100); woodLeft -= wh; A.firewood += wh; heatKwh -= wh * 1100;
+    }
+    const load = 2 + cook + 0.6 * n + heatKwh / cop;
     A.heatElec += heatKwh / cop;
     const pv = S.pvKw * d.psh * 0.75;
     const dayL = load * 0.4, night = load * 0.6;
@@ -615,9 +627,11 @@ export function advance(state) {
   if (pending0 > 0 && pr.left <= 1e-9) events.push({ kind: 'built', names: ['作っていたもの'] });
   if (pending0 > 0 && buildDays < 0.5) events.push({ kind: 'stalled', names: ['作りかけのもの'] });
   const sawdust = Cb.buy * 0.5 * qFrac;                                  // おがくず（近所の製材所）
+  const chipper = chipWood * 0.3;                                        // 木をチップにする手間（近所の人がチッパーで）
+  s.world.wood = woodLeft;
   const pumpout = Cb.toilet * (1 - Cb.f) * 4 * qFrac;                    // さばけないし尿の汲み取り（遠くの業者）
-  const outflow = { income, sell, jobCost, living, water: cWater, power: cPower, food: cFood, maint, replace, repair, rent, sawdust, pumpout };
-  const net = income + sell - jobCost - living - cWater - cPower - cFood - maint - replace - repair - rent - sawdust - pumpout;
+  const outflow = { income, sell, jobCost, living, water: cWater, power: cPower, food: cFood, maint, replace, repair, rent, sawdust, pumpout, chipper };
+  const net = income + sell - jobCost - living - cWater - cPower - cFood - maint - replace - repair - rent - sawdust - pumpout - chipper;
   s.cash += net;
 
   if (A.outDays) events.push({ kind: 'blackout', days: A.outDays, covered: A.outShort < 0.5, short: A.outShort });
@@ -666,7 +680,7 @@ export function advance(state) {
 function compact(rep) {
   const A = rep.A;
   return { y: rep.year, q: rep.q, net: rep.net, ws: rep.waterSelf, ps: rep.powerSelf, fs: rep.foodSelf, om: rep.om, harvest: rep.harvest, ev: rep.events.map(e => e.kind), phase: rep.phase, money: rep.money,
-    A: { rain: A.rain, city: A.city, harvest: A.harvest, grid: A.grid, sewer: A.sewer, runoff: A.runoff, recharge: A.recharge, bottled: A.bottled, tankUse: A.tankUse, greyUse: A.greyUse, irrTank: A.irrTank, irrGrey: A.irrGrey, irrPond: A.irrPond, load: A.load, pv: A.pv },
+    A: { firewood: A.firewood, rain: A.rain, city: A.city, harvest: A.harvest, grid: A.grid, sewer: A.sewer, runoff: A.runoff, recharge: A.recharge, bottled: A.bottled, tankUse: A.tankUse, greyUse: A.greyUse, irrTank: A.irrTank, irrGrey: A.irrGrey, irrPond: A.irrPond, load: A.load, pv: A.pv },
     foodBought: rep.foodBought, foodSold: rep.foodSold, foodShared: rep.foodShared, spent: rep.spent };
 }
 
@@ -799,12 +813,12 @@ export function cycles(s) {
   const nu = nutrients(s), Nout = 5.4 * n, back = Math.min(Nout, nu.supply);
   const fs = last.length ? sum(x => x.fs) / 4 : 0;
   // エネルギー（kWh）
-  const load = sum(x => x.A.load), grid = sum(x => x.A.grid);
+  const fire = sum(x => (x.A.firewood || 0) * 400), load = sum(x => x.A.load) + fire, grid = sum(x => x.A.grid);   // 薪も自分の土地のエネルギー
   const ps = load ? Math.max(0, 1 - grid / load) : 0;
   // お金（万円）：近所と遠く
   const m = (f) => sum(x => f(x.money || {}));
   const inFar = m(x => x.income), inLoc = m(x => x.sell);
-  const outLoc = m(x => (x.rent || 0) + 0.5 * (x.food || 0) + 0.2 * (x.living || 0) + 0.5 * (x.maint || 0) + 0.5 * (x.repair || 0) + (x.sawdust || 0)) + sum(x => x.spent?.local || 0);
+  const outLoc = m(x => (x.rent || 0) + 0.5 * (x.food || 0) + 0.2 * (x.living || 0) + 0.5 * (x.maint || 0) + 0.5 * (x.repair || 0) + (x.sawdust || 0) + (x.chipper || 0)) + sum(x => x.spent?.local || 0);
   const outFar = m(x => (x.jobCost || 0) + 0.5 * (x.food || 0) + 0.8 * (x.living || 0) + (x.water || 0) + (x.power || 0) + 0.5 * (x.maint || 0) + (x.replace || 0) + 0.5 * (x.repair || 0) + (x.pumpout || 0)) + sum(x => x.spent?.far || 0);
   const mTot = inFar + inLoc + outLoc + outFar;
   return [
@@ -813,7 +827,7 @@ export function cycles(s) {
     { id: 'nutrient', name: '養分', color: '#8A6A42', unit: 'kg N', flow: Nout + nu.need, closure: 0.5 * fs + 0.5 * (Nout ? back / Nout : 0),
       parts: part(['soil', 'worms', 'crops', 'hens', 'insects', 'birds']), leaks: [['下水・ごみへ', Math.max(0, Nout - back), 'kg N']], note: `食べものの${Math.round(fs * 100)}%を畑から。し尿と生ごみの養分の${Math.round(Nout ? back / Nout * 100 : 0)}%を土に返した` },
     { id: 'energy', name: 'エネルギー', color: '#C08A1E', unit: 'kWh', flow: load, closure: ps,
-      parts: part(['sun']).concat(S.houseM && S.houseM.massLv >= 2 ? ['土の壁（熱を溜める）'] : []), leaks: [['買った電気', grid, 'kWh']], note: `電気の${Math.round(ps * 100)}%を太陽から。設備の更新にはお金が要る` },
+      parts: part(['sun']).concat(fire > 0 ? ['薪（切った木）'] : []).concat(S.houseM && S.houseM.massLv >= 2 ? ['土の壁（熱を溜める）'] : []), leaks: [['買った電気', grid, 'kWh']], note: `電気と薪の${Math.round(ps * 100)}%を太陽と土地の木から。設備の更新にはお金が要る` },
     { id: 'money', name: 'お金', color: '#6B7462', unit: '万円', flow: mTot / 2, closure: mTot ? (inLoc + outLoc) / mTot : 0,
       parts: (inLoc + outLoc > 1 ? ['近所の人'] : []).concat(inFar > 0 ? ['遠くの会社（外貨）'] : []), leaks: [['遠くへ払った', outFar, '万円'], ['遠くから稼いだ', inFar, '万円']], note: `お金の流れの${Math.round(mTot ? (inLoc + outLoc) / mTot * 100 : 0)}%が近所の中で回った` }
   ];

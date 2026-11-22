@@ -654,6 +654,7 @@ export function houseOuterEdges(hs) {
   return out;
 }
 export const cloneHouse = (hs) => JSON.parse(JSON.stringify(hs));
+export const STOVE_PRICE = 6;   // 近所の左官さんが土とレンガで作る
 export function newHouse(z) { return { z, cells: {}, wall: 'board', roof: 'tin', floor: 'wood', open: {}, eaves: false, pv: 0, batt: 0, furn: [], eq: { depth: 0 } }; }
 /* 外側でなくなった辺の窓・扉を外す */
 function tidy(d) {
@@ -749,6 +750,7 @@ export function estimate(w, cur, d) {
   if (d.eaves && (!cur.eaves || newWalls)) add('庇', cur.eaves ? newWalls : outD.length, 'm', EAVES_PRICE, true);
   add('屋根の太陽光パネル', Math.max(0, d.pv - cur.pv), '枚', PV_PRICE, false);
   add('蓄電池', Math.max(0, d.batt - cur.batt), '台', BATT_PRICE, false);
+  if (d.stove && !cur.stove) add('薪のかまど（煙突つき）', 1, 'つ', STOVE_PRICE, true);
   for (const f of d.furn) if (FURN[f.t].cost && !houseHas(cur, f.t)) add(`${FURN[f.t].name}に替える`, 1, '', FURN[f.t].cost, false);
   if (d.eq.depth > cur.eq.depth) add('基礎を深く', Math.round((d.eq.depth - cur.eq.depth) / 0.3), '段', Math.max(1, cellsD.length * 0.6), true);
   const total = lines.reduce((a, l) => a + l.cost, 0), local = lines.reduce((a, l) => a + l.local, 0);

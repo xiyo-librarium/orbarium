@@ -319,7 +319,7 @@ const TOOLS = {
     { id: 'coop', how: 'point', block: 'coop', note: '残り物を食べて、卵とふんを返す' }
   ],
   land: [
-    { id: 'cut', how: 'cut', name: '木を切る', note: '木や茂みを切る（なぞると続けて）。木のある所には何も作れない。切った木は薪と材としてとっておく' },
+    { id: 'cut', how: 'cut', name: '木を切る', note: '木や茂みを切る（なぞると続けて）。木のある所には何も作れない。切った木はとっておき、チップにして堆肥に混ぜ（おがくずを買わずにすむ）、残りは家に［薪のかまど］があれば料理と暖房の薪にする' },
     { id: 'dig', how: 'cell', name: '掘る（1段）', note: '押したマスを1段掘る。なぞると続けて。出た土はとっておく' },
     { id: 'fill', how: 'cell', name: '盛る（1段）', note: 'とってある土で1段盛る。足りない分は買う' },
     { id: 'level', how: 'area', name: '平らにする', note: 'なぞった四角を、まん中の高さにそろえる' }
@@ -665,6 +665,7 @@ function trayBody(st) {
   let opts = '';
   if (st.tool === 'filter') opts = `<div class="seg"><div class="seg-h"><b>入れる層</b></div><div class="seg-o">${['media_gravel', 'media_sand', 'media_char'].map(k => `<button class="opt${MAT.media === k ? ' on' : ''}" data-mat="media:${k}">${esc(E.W.BLOCKS[k].name)}</button>`).join('')}</div><div class="seg-h"><b>植える草</b></div><div class="seg-o">${['plant_reed', 'plant_canna'].map(k => `<button class="opt${MAT.plant === k ? ' on' : ''}" data-mat="plant:${k}">${esc(E.W.BLOCKS[k].name)}</button>`).join('')}</div></div>`;
   if (st.cat === 'water') { const S = E.summarize({ ...G.s, world: st.dw }); if (S.filter) opts += `<div class="seg"><div class="seg-h"><b>きれいになった水の行き先</b></div><div class="seg-o">${Object.entries(E.B.OUTS).map(([k, o]) => `<button class="opt${st.dw.mods.out === k ? ' on' : ''}" data-out="${k}">${o.name}</button>`).join('')}</div></div>`; }
+  if (st.cat === 'land' && (st.dw.wood || 0) > 0.005) opts += `<p class="small">とってある木：${st.dw.wood.toFixed(1)}m³（堆肥のチップに使い、残りは${st.draft && st.draft.stove ? 'かまどの薪に' : '薪に。［家］の素材で「薪のかまど」をつけると使える'}）</p>`;
   return `<div class="tcards">${known.map(card).join('')}${card(ERASE)}</div>
     ${t ? `<p class="small tnote">${esc(t.note)}</p>` : ''}${opts}
     ${hidden ? `<p class="small muted">まだ知らない作り方が、あと${hidden}つ。困りごとや図鑑から覚える。</p>` : ''}`;
@@ -697,6 +698,7 @@ function houseBody(st) {
     <h3>床</h3><div class="mcards">${Object.entries(E.W.FLOORS).map(([k, M]) => matCard('floor', k, M, d.floor === k)).join('')}</div>
     <h3>そのほか</h3><div class="seg-o">
       <button class="opt${d.eaves ? ' on' : ''}" data-eaves="1">庇${d.eaves ? 'あり' : 'をつける'}（夏の日差しと雨を防ぐ）</button>
+      <button class="opt${d.stove ? ' on' : ''}" data-stove="1">薪のかまど${d.stove ? 'あり' : 'をつける'}（${E.W.STOVE_PRICE}万円。切った木で料理と暖房、電気が減る）</button>
       ${knownTech('offgrid') ? `<span class="step">屋根の太陽光 <button class="btn ghost" data-pv="-1" aria-label="減らす">−</button><b>${d.pv}枚</b><button class="btn ghost" data-pv="1" aria-label="増やす">＋</button></span><span class="step">蓄電池 <button class="btn ghost" data-batt="-1" aria-label="減らす">−</button><b>${d.batt}台</b><button class="btn ghost" data-batt="1" aria-label="増やす">＋</button></span>` : ''}
       <span class="step">基礎の深さ <button class="btn ghost" data-depth="-1" aria-label="浅く">−</button><b>${(d.eq.depth || E.summarize(s).depth).toFixed(1)}m</b><button class="btn ghost" data-depth="1" aria-label="深く">＋</button></span></div>`;
   const hidden = [...Object.values(E.W.WALLS), ...Object.values(E.W.ROOFS), ...Object.values(E.W.FLOORS), ...Object.values(E.W.OPENINGS), ...Object.values(E.W.FURN)].filter(M => !knownTech(M.learn)).length;
@@ -716,6 +718,7 @@ function bindHouse(st, el) {
   el.querySelectorAll('[data-roof]').forEach(b => b.onclick = () => set(d => { d.roof = b.dataset.roof; }));
   el.querySelectorAll('[data-floor]').forEach(b => b.onclick = () => set(d => { d.floor = b.dataset.floor; }));
   el.querySelectorAll('[data-eaves]').forEach(b => b.onclick = () => set(d => { d.eaves = !d.eaves; }));
+  el.querySelectorAll('[data-stove]').forEach(b => b.onclick = () => set(d => { d.stove = !d.stove; }));
   el.querySelectorAll('[data-pv]').forEach(b => b.onclick = () => set(d => { d.pv = Math.max(st.base.pv, Math.min(Object.keys(d.cells).length, d.pv + +b.dataset.pv)); }));
   el.querySelectorAll('[data-batt]').forEach(b => b.onclick = () => set(d => { d.batt = Math.max(st.base.batt, Math.min(4, d.batt + +b.dataset.batt)); }));
   el.querySelectorAll('[data-depth]').forEach(b => b.onclick = () => set(d => { const cur = d.eq.depth || E.summarize(G.s).depth, min = st.base.eq.depth || E.summarize(G.s).depth; d.eq.depth = Math.round(Math.max(min, cur + 0.3 * +b.dataset.depth) * 10) / 10; }));
@@ -847,7 +850,7 @@ function panelBook() {
   let ledger = '<p class="small">まだ3か月を過ごしていません。</p>';
   if (last) {
     const m = last.money;
-    const items = [['仮住まい', -(m.rent || 0)], ['外貨の仕事', m.income], ['野菜・電気を売った', m.sell], ['仕事の経費', -m.jobCost], ['そのほかの暮らし', -m.living], ['食べものを買った', -m.food], ['水を買った', -m.water], ['電気を買った', -m.power], ['家の維持', -m.maint], ['設備の交換', -m.replace], ['修理', -m.repair], ['おがくずを買った', -(m.sawdust || 0)], ['し尿の汲み取り', -(m.pumpout || 0)]].filter(x => Math.abs(x[1]) >= 0.05);
+    const items = [['仮住まい', -(m.rent || 0)], ['外貨の仕事', m.income], ['野菜・電気を売った', m.sell], ['仕事の経費', -m.jobCost], ['そのほかの暮らし', -m.living], ['食べものを買った', -m.food], ['水を買った', -m.water], ['電気を買った', -m.power], ['家の維持', -m.maint], ['設備の交換', -m.replace], ['修理', -m.repair], ['おがくずを買った', -(m.sawdust || 0)], ['木をチップに', -(m.chipper || 0)], ['し尿の汲み取り', -(m.pumpout || 0)]].filter(x => Math.abs(x[1]) >= 0.05);
     ledger = `<div class="rows">${items.map(([n, v]) => `<span>${n}</span><b class="num${v < 0 ? ' neg' : ''}">${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}万円</b>`).join('')}<span class="tot">差し引き</span><b class="num tot">${last.net >= 0 ? '+' : '−'}${Math.abs(last.net).toFixed(1)}万円</b></div>`;
   }
   return `<div><h2>家計簿</h2><p class="small">円の財布だけでなく、水・電気・食べもの・土の財布で暮らしを見る。</p></div>

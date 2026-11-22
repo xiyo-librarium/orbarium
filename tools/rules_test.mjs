@@ -27,4 +27,18 @@ for (let x = 36; x < 40; x++) W.put(s, x, 35, W.h(w, x, 35), 'heap', 'hire');
 S = E.summarize(s);
 check(`区画を足すとさばける割合が上がる（${f1.toFixed(2)}→${S.compost.f.toFixed(2)}）`, S.compost.f > f1);
 check('林の落ち葉で炭素が足りる', S.compost.buy < 0.01);
+// 切った木：まず堆肥のチップ、残りはかまどの薪
+{
+  const s2 = E.newGame({ seed: 9 }), w2 = s2.world; w2.mods.compostToilet = true;
+  for (let x = 30; x < 33; x++) W.put(s2, x, 40, W.h(w2, x, 40), 'heap', 'hire');
+  const b0 = E.summarize(s2).compost.buy; w2.wood = 2;
+  const C = E.summarize(s2).compost;
+  check(`木のチップで、買うおがくずが減る（${b0.toFixed(2)}→${C.buy.toFixed(2)}）`, C.chips > 0 && C.buy < b0);
+  const a = E.advance(s2), wood1 = a.state.world.wood;
+  check(`チップに使うと木が減る（2→${wood1.toFixed(2)}）`, wood1 < 2);
+  const s3 = E.newGame({ seed: 9 }); s3.world.wood = 3; s3.world.house.stove = true;
+  const s4 = E.newGame({ seed: 9 }); s4.world.wood = 3;
+  const r3 = E.advance(s3).report, r4 = E.advance(s4).report;
+  check(`かまどがあると薪を使い、電気が減る（${r4.A.load.toFixed(0)}→${r3.A.load.toFixed(0)}kWh）`, r3.A.firewood > 0 && r3.A.load < r4.A.load);
+}
 console.log(ok.map(x => '  ✓ ' + x).join('\n')); if (ng.length) { console.log(ng.map(x => '  ✗ ' + x).join('\n')); process.exit(1); }
