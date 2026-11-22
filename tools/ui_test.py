@@ -11,6 +11,14 @@ time.sleep(1)
 problems = []
 
 FLAT = """(n)=>{const {G,E}=window.__orb;const w=G.s.world;for(let y=4;y<44;y++)for(let x=4;x<44;x++){const L=E.W.levelInfo(w,{x0:x,y0:y,x1:x+n-1,y1:y+n-1});if(L.flat)return [x,y];}return null}"""
+# 家のとなりで、画面で見えている地面の上面の位置（'grow'：床を足せる段、'tank'：タンクを置ける所）
+VIS_ADJ = """(mode)=>{const {G,E}=window.__orb;const w=G.s.world,hs=w.house;
+  for(const k in hs.cells){const [cx,cy]=k.split(',').map(Number);for(const [dx,dy] of [[1,0],[0,1],[-1,0],[0,-1]]){const x=cx+dx,y=cy+dy;if(hs.cells[x+','+y])continue;
+    const z=E.W.h(w,x,y);
+    if(mode==='grow'&&Math.abs(z-hs.z)>1)continue;
+    if(mode==='tank'&&(z>=hs.z+3||E.W.canPut(w,x,y,z,'tank')))continue;
+    const p=G.view.screenOf(x+0.5,y+0.5,z);const f=G.view.pickAt(p[0],p[1]);
+    if(f&&f.type==='terrain'&&f.x===x&&f.y===y&&f.face===4)return p;}}return null}"""
 def iso_click(page, x, y, z):
     pt = page.evaluate("([x,y,z])=>window.__orb.G.view.screenOf(x,y,z)", [x, y, z])
     page.mouse.click(pt[0], pt[1]); page.wait_for_timeout(60)
@@ -40,7 +48,7 @@ def run(viewport, tag):
         page.click('[data-cat="house"]'); page.wait_for_timeout(400)
         page.screenshot(path=f'{OUT}/{tag}_4_house.png'); overflow(page, tag + ' house')
         if page.locator('.iso-mini').count() != 1: problems.append(f'{tag}: 小さな地図がない')
-        page.click('[data-mode="hire"]')
+        if page.locator('[data-mode]').count(): problems.append(f'{tag}: 自分で作る/頼むの切り替えが残っている')
         # 鋼板の壁を断熱壁に（北面の1枚）
         cells = [list(map(int, k.split(','))) for k in hs['cells']]
         x0 = min(c[0] for c in cells); y0 = min(c[1] for c in cells); x1 = max(c[0] for c in cells); y1 = max(c[1] for c in cells)
@@ -49,15 +57,18 @@ def run(viewport, tag):
             pt = page.evaluate("([x,y,z])=>window.__orb.G.view.screenOf(x,y,z)", [ex + (0.5 if horiz else 0), ey + (0 if horiz else 0.5), hs['z'] + 1.3])
             page.mouse.click(pt[0], pt[1]); page.wait_for_timeout(60)
         # 見えている面（南と東）を押す
-        edge_click(x0 + 2, y1 + 1, True)
-        edge_click(x1 + 1, y0, False)
+        for _ in range(2):
+            pt = page.evaluate("""()=>{const {G,E}=window.__orb;const hs=G.s.world.house;
+              for(const o of E.W.houseOuterEdges(hs,false)){const wl=hs.walls[o.e];if(!wl||wl.t!=='steel')continue;const [t,r]=o.e.split(':');const [ex,ey]=r.split(',').map(Number);
+                const p=G.view.screenOf(ex+(t==='h'?0.5:0),ey+(t==='h'?0:0.5),hs.z+1.3);const f=G.view.pickAt(p[0],p[1]);if(f&&f.type==='wall'&&f.e===o.e)return p;}return null}""")
+            if pt: page.mouse.click(pt[0], pt[1]); page.wait_for_timeout(60)
         n_ins = page.evaluate("()=>Object.values(window.__orb.G.s.world.house.walls).filter(w=>w.t==='ins').length")
         if n_ins < 1: problems.append(f'{tag}: 壁を断熱壁に替えられない {page.inner_text("#isoside")[:160]}')
         # 床を広げる：南どなり2マス
         page.click('[data-tool="grow"]')
-        for dx in (0, 1, 2):
-            tx, ty = x0 + dx, y1 + 1
-            iso_click(page, tx + 0.5, ty + 0.5, top(page, tx, ty))
+        for _ in range(3):
+            pt = page.evaluate(VIS_ADJ, 'grow')
+            if pt: page.mouse.click(pt[0], pt[1]); page.wait_for_timeout(80)
         n_cells = page.evaluate("()=>Object.keys(window.__orb.G.s.world.house.cells).length")
         if n_cells <= len(cells): problems.append(f'{tag}: 床が広がらない {n_cells} {page.inner_text("#isoside")[:200]}')
         page.screenshot(path=f'{OUT}/{tag}_5_house_grown.png')
@@ -68,16 +79,18 @@ def run(viewport, tag):
         page.click('#isox'); page.wait_for_timeout(300)
         # その他：家の東どなりにタンク
         page.click('[data-cat="other"]'); page.wait_for_timeout(100)
-        page.evaluate("([x,y])=>window.__orb.open3D(x,y,'other')", [x1 + 1, y0]); page.wait_for_timeout(300)
-        page.click('[data-mode="hire"]'); page.click('[data-tool="tank"]')
-        tx, ty = x1 + 1, y0
-        iso_click(page, tx + 0.5, ty + 0.5, top(page, tx, ty))
+        page.evaluate("([x,y])=>window.__orb.open3D(x,y,'other')", [x1 + 1, y1]); page.wait_for_timeout(300)
+        page.click('[data-tool="tank"]')
+        # 家のとなりで、画面で見えている地面を探して押す
+        spot = page.evaluate(VIS_ADJ, 'tank')
+        if spot: page.mouse.click(spot[0], spot[1]); page.wait_for_timeout(80)
+        else: problems.append(f'{tag}: 家のとなりにタンクを置ける見える場所がない')
         page.screenshot(path=f'{OUT}/{tag}_6b_other.png'); overflow(page, tag + ' other')
         page.click('#isox'); page.wait_for_timeout(200)
         # 畑：家の南、少し離れたところ
         page.click('[data-cat="farm"]'); page.wait_for_timeout(100)
         page.evaluate("([x,y])=>window.__orb.open3D(x,y,'farm')", [x0 + 2, y1 + 6]); page.wait_for_timeout(300)
-        page.click('[data-mode="hire"]'); page.click('[data-tool="beds"]')
+        page.click('[data-tool="beds"]')
         iso_click(page, x0 + 0.5, y1 + 4.5, top(page, x0, y1 + 4)); iso_click(page, x0 + 4.5, y1 + 7.5, top(page, x0 + 4, y1 + 7)); page.wait_for_timeout(150)
         page.screenshot(path=f'{OUT}/{tag}_6c_farm.png')
         page.click('#isox'); page.wait_for_timeout(300)

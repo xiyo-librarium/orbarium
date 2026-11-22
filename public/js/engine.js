@@ -39,10 +39,12 @@ export const SITES = {
     terrain: 'tokyo'
   },
   med: {
-    name: 'メデジン', sub: '常春の谷・北緯6度・標高約1,500m', lat: 6.25, lon: -75.57, elev: 1495,
-    tmean: [22.8, 23.1, 23.2, 22.8, 23.0, 23.0, 23.1, 23.1, 22.9, 22.3, 22.2, 22.5],
-    tmin: [17.7, 17.9, 18.2, 18.1, 18.1, 17.8, 17.6, 17.8, 17.8, 17.6, 17.7, 17.8],
-    tmax: [28.0, 28.3, 28.1, 27.6, 27.9, 28.2, 28.6, 28.4, 28.0, 27.0, 26.8, 27.3],
+    /* 市街から西へ約11km、サン・クリストバル地区の山腹（標高約1,800m）。谷底の市街（約1,480m）より300mほど高いので、
+       気温は市街の平年値から約2℃下げてある。小さな沢の東側の斜面で、東（右）が上り */
+    name: 'メデジン', sub: 'サン・クリストバルの山腹・北緯6度・標高約1,800m', lat: 6.28, lon: -75.64, elev: 1795,
+    tmean: [20.8, 21.1, 21.2, 20.8, 21.0, 21.0, 21.1, 21.1, 20.9, 20.3, 20.2, 20.5],
+    tmin: [15.7, 15.9, 16.2, 16.1, 16.1, 15.8, 15.6, 15.8, 15.8, 15.6, 15.7, 15.8],
+    tmax: [26.0, 26.3, 26.1, 25.6, 25.9, 26.2, 26.6, 26.4, 26.0, 25.0, 24.8, 25.3],
     rain: [65, 80, 125, 160, 200, 160, 120, 150, 180, 210, 145, 95],
     rainDays: [12, 13, 17, 22, 23, 19, 17, 19, 22, 24, 21, 15],
     sunHours: [5.5, 5.5, 5.0, 4.0, 4.5, 5.5, 6.5, 6.0, 5.0, 4.5, 4.5, 5.0],
@@ -77,9 +79,9 @@ export function terrain(key) {
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
     let e;
     if (key === 'med') {
-      // 西（左）に向かって下る斜面。北東から南西へ浅い沢筋がある
+      // サン・クリストバルの山腹。小さな沢へ向かって西（左）に下る斜面で、北東から南西へ浅い沢筋がある
       const d = (x - 0.55 * y - 6);
-      e = 1488 + 0.24 * x + 0.9 * Math.sin(y / 8) + 0.004 * (y - 25) * (y - 25)
+      e = 1788 + 0.24 * x + 0.9 * Math.sin(y / 8) + 0.004 * (y - 25) * (y - 25)
         - 1.6 * Math.exp(-(d * d) / 40);
     } else if (key === 'tokyo') {
       // 台地を小さな川が削った谷。川はいまは暗渠で、ゆるく曲がった道になっている（場所と向きはぼかしてある）
@@ -243,14 +245,9 @@ export function newGame(opt = {}) {
   const site = opt.site || 'med', seed = opt.seed ?? 1;
   const s = makeGame(site, seed, opt);
   if (site !== 'tokyo' && !opt.empty) {
-    // 最初の家：中古のコンテナ（20ft）。平らにならした高めの場所に置いてある
-    const w = s.world; let best = null;
-    for (let y = 8; y < 40; y++) for (let x = 8; x < 40; x++) {
-      let lo = 99, hi = -99; for (let yy = y; yy < y + 2; yy++) for (let xx = x; xx < x + 6; xx++) { lo = Math.min(lo, W.h(w, xx, yy)); hi = Math.max(hi, W.h(w, xx, yy)); }
-      const score = -(hi - lo) * 10 + lo * 0.6 - Math.abs(x - 22) * 0.1;
-      if (!best || score > best.score) best = { x, y, score, z: hi };
-    }
-    W.placeContainer(w, best.x, best.y);
+    // 最初の家：中古のコンテナ（20ft）。斜面の上のほうの平らな段に、等高線に沿って長く置いてある
+    const w = s.world, sp = W.findContainerSpot(w);
+    if (sp) W.placeContainer(w, sp.x0, sp.y0, sp.rot, { z: sp.z, door: sp.door, win: sp.win });
     s.cash -= opt.containerCost ?? 60;
   }
   return s;

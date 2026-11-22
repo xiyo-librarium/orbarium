@@ -529,19 +529,57 @@ export function houseOuterEdges(hs, onlyBuilt = true) {
   return out;
 }
 /* コンテナ（20ft）を最初の家として置く：6×2マス、鋼板、扉1つ、窓2つ */
-export function placeContainer(w, x0, y0, rot = false) {
+/* 最初のコンテナ（20ft：6×2m）。扉は短い辺の外が同じ段のほう、窓は低い側（眺めと畑の側）の長い辺に */
+export function placeContainer(w, x0, y0, rot = false, o = {}) {
   const nx = rot ? 2 : 6, ny = rot ? 6 : 2;
-  const z = h(w, x0, y0);
+  const z = o.z ?? h(w, x0, y0);
   const hs = { z, cells: {}, walls: {}, roof: 'steel', floor: 'wood', eaves: false, pv: {}, batt: 0, queue: [], roofNext: null };
   for (let y = y0; y < y0 + ny; y++) for (let x = x0; x < x0 + nx; x++) { hs.cells[ck(x, y)] = {}; w.H[idx(x, y)] = z; }
   w.house = hs;
-  for (const o of houseOuterEdges(hs)) hs.walls[o.e] = { t: 'steel' };
-  // 扉は短い辺、窓は南側に2つ
-  const door = rot ? edgeOf(x0, y0 + ny - 1, 's') : edgeOf(x0 + nx - 1, y0, 'e');
-  hs.walls[door] = { t: 'door' };
-  if (!rot) { hs.walls[edgeOf(x0 + 1, y0 + 1, 's')] = { t: 'window' }; hs.walls[edgeOf(x0 + 4, y0 + 1, 's')] = { t: 'window' }; }
-  else { hs.walls[edgeOf(x0 + 1, y0 + 1, 'e')] = { t: 'window' }; hs.walls[edgeOf(x0 + 1, y0 + 4, 'e')] = { t: 'window' }; }
+  for (const e of houseOuterEdges(hs)) hs.walls[e.e] = { t: 'steel' };
+  hs.walls[o.door || (rot ? edgeOf(x0, y0 + ny - 1, 's') : edgeOf(x0 + nx - 1, y0, 'e'))] = { t: 'door' };
+  const ws = o.win || (rot ? 'w' : 's');
+  const along = rot ? [[0, 1], [0, 4]] : [[1, 0], [4, 0]];
+  for (const [dx, dy] of along) {
+    const cx = ws === 'e' ? x0 + 1 : ws === 'w' ? x0 : x0 + dx, cy = ws === 's' ? y0 + 1 : ws === 'n' ? y0 : y0 + dy;
+    hs.walls[edgeOf(rot ? cx : cx, rot ? y0 + dy : cy, ws)] = { t: 'window' };
+  }
   return hs;
+}
+/* コンテナを置く場所を探す：平らで（等高線に沿って長く）、扉の外が同じ段で出られて、高いほう */
+export function findContainerSpot(w, margin = 6) {
+  let best = null;
+  for (const rot of [false, true]) {
+    const nx = rot ? 2 : 6, ny = rot ? 6 : 2;
+    for (let y0 = margin; y0 + ny <= N - margin; y0++) for (let x0 = margin; x0 + nx <= N - margin; x0++) {
+      const z = h(w, x0, y0); let flat = true;
+      for (let y = y0; y < y0 + ny && flat; y++) for (let x = x0; x < x0 + nx; x++) if (h(w, x, y) !== z || at(w, x, y, z) || at(w, x, y, z + 1)) { flat = false; break; }
+      if (!flat) continue;
+      // 扉：短い辺の外（2マスとも同じ段なら、より歩きやすい）
+      const ends = rot
+        ? [[edgeOf(x0, y0, 'n'), x0, y0 - 1, 0, -1], [edgeOf(x0 + 1, y0, 'n'), x0 + 1, y0 - 1, 0, -1], [edgeOf(x0, y0 + ny - 1, 's'), x0, y0 + ny, 0, 1], [edgeOf(x0 + 1, y0 + ny - 1, 's'), x0 + 1, y0 + ny, 0, 1]]
+        : [[edgeOf(x0, y0, 'w'), x0 - 1, y0, -1, 0], [edgeOf(x0, y0 + 1, 'w'), x0 - 1, y0 + 1, -1, 0], [edgeOf(x0 + nx - 1, y0, 'e'), x0 + nx, y0, 1, 0], [edgeOf(x0 + nx - 1, y0 + 1, 'e'), x0 + nx, y0 + 1, 1, 0]];
+      let door = null, doorScore = -1;
+      for (const [e, ox, oy, dx, dy] of ends) {
+        if (h(w, ox, oy) !== z) continue;
+        const sc = 1 + (h(w, ox + dx, oy + dy) === z ? 1 : 0) + (Math.abs(h(w, ox + dx, oy + dy) - z) <= 1 ? 0.5 : 0);
+        if (sc > doorScore) { doorScore = sc; door = e; }
+      }
+      if (!door) continue;
+      // 長い辺の両側の高さ：低いほうに窓、高いほうは同じ段なら家の周りを歩ける
+      const sideA = [], sideB = [];
+      if (rot) for (let y = y0; y < y0 + ny; y++) { sideA.push(h(w, x0 - 1, y)); sideB.push(h(w, x0 + nx, y)); }
+      else for (let x = x0; x < x0 + nx; x++) { sideA.push(h(w, x, y0 - 1)); sideB.push(h(w, x, y0 + ny)); }
+      const mA = sideA.reduce((a, b) => a + b, 0) / sideA.length, mB = sideB.reduce((a, b) => a + b, 0) / sideB.length;
+      const low = mA <= mB ? sideA : sideB, high = mA <= mB ? sideB : sideA;
+      const win = rot ? (mA <= mB ? 'w' : 'e') : (mA <= mB ? 'n' : 's');
+      const walkUp = high.filter(v => v === z).length / high.length;
+      const walkLow = low.filter(v => v === z || v === z - 1).length / low.length;
+      const score = z * 1.0 + walkUp * 1.5 + walkLow * 0.8 + doorScore * 0.6 + (x0 - y0) * 0.01;
+      if (!best || score > best.score) best = { x0, y0, rot, z, door, win, score };
+    }
+  }
+  return best;
 }
 function pay(s, cost, labor, mode, local = false) {
   const price = mode === 'self' ? cost : cost + labor * 1.5;

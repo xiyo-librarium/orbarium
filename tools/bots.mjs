@@ -91,15 +91,15 @@ const STRATS = {
       if (!s.flags.started) {
         s.flags.started = 1;
         const wt = cold ? 'ins' : 'wall';
-        expand(s, cold ? 1 : 2, 'self', wt); if (cold) { W.setFloorType(s, 'slab', 'self'); rewall(s, 'ins', 'self'); }
-        tanks(s, 4, 'self'); beds(s, [12, 10], 'self');
+        expand(s, cold ? 1 : 2, 'hire', wt); if (cold) { W.setFloorType(s, 'slab', 'hire'); rewall(s, 'ins', 'hire'); }
+        tanks(s, 4, 'hire'); beds(s, [12, 10], 'hire');
       }
       setBuild(s);
       const hm = home(s);
-      if (cold && K('insulation') && hs.roof !== 'tinins' && s.cash > 40) W.setRoof(s, 'tinins', 'self');
-      if (cold && K('insulation') && s.cash > 30) rewall(s, 'thick', 'self', 4);
-      if (!cold && hs.walls && Object.values(hs.walls).some(w => w.t === 'steel') && s.cash > 25) rewall(s, 'wall', 'self', 3);
-      if (K('heap') && count(s, 'heap') < 2) single(s, 'heap', 'self', [hm.x0 - 4, hm.y1 + 8]);
+      if (cold && K('insulation') && hs.roof !== 'tinins' && s.cash > 40) W.setRoof(s, 'tinins', 'hire');
+      if (cold && K('insulation') && s.cash > 30) rewall(s, 'thick', 'hire', 4);
+      if (!cold && hs.walls && Object.values(hs.walls).some(w => w.t === 'steel') && s.cash > 25) rewall(s, 'wall', 'hire', 3);
+      if (K('heap') && count(s, 'heap') < 2) single(s, 'heap', 'hire', [hm.x0 - 4, hm.y1 + 8]);
       for (const k in s.world.blocks) {
         const b = s.world.blocks[k]; if (b.t !== 'bed') continue; const [x, y, z] = k.split(',').map(Number);
         if (K('terrace') && !b.s && s.cash > 5 && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => { const n = W.h(s.world, x + dx, y + dy); return n > -99 && n < z; })) W.toggleMark(s, x, y, z, 's');
@@ -107,24 +107,24 @@ const STRATS = {
       }
       if (K('toilet') && !s.world.mods.compostToilet && s.cash > 40) { s.cash -= 30; s.world.mods.compostToilet = true; }
       if (K('saving') && !s.world.mods.saving && s.cash > 20) { s.cash -= 8; s.world.mods.saving = true; }
-      if (K('grey') && !count(s, 'media_sand') && s.cash > 25) { const fx = hm.x1 + 2, fy = hm.y1 + 2; W.prefabPit(s, [fx, fy], [fx + 1, fy + 1], 'media_sand', 'self', 1, 'plant_reed'); }
-      if (K('catch') && count(s, 'pillar') < 4 && s.cash > 30) { const f = flatSpot(s, 4, 3); if (f) { W.prefabShed(s, [f[0], f[1]], [f[0] + 3, f[1] + 2], 'roof_tin', 'self'); for (let i = 0; i < 3; i++) W.put(s, f[0] + i, f[1] + 3, W.h(s.world, f[0] + i, f[1] + 3), 'tank', 'self'); } }
-      if (K('offgrid') && Object.keys(hs.pv || {}).length < 6 && s.cash > 50) roofPv(s, 6, 'self');
-      if (K('offgrid') && !hs.batt && s.cash > 30) { s.cash -= W.blockPrice('batt', 'self'); hs.batt = 1; s.world.spent.far += 15; }
-      if (K('hedge') && count(s, 'tree') < 10) for (let i = 0; i < 3; i++) single(s, 'tree', 'self', [hm.x0 - 3, hm.y0 - 3]);
-      if (K('hedge') && count(s, 'hedge') < 12) for (let i = 0; i < 4; i++) single(s, 'hedge', 'self', [hm.x1 + 3, hm.y0 - 3]);
-      if (K('chicken') && !count(s, 'coop') && s.cash > 20) single(s, 'coop', 'self', [hm.x0 - 3, hm.y1]);
-      if (K('pond') && !count(s, 'pond') && s.cash > 20) { const lo = flatSpot(s, 3, 3, 'low'); if (lo) W.prefabPit(s, [lo[0], lo[1]], [lo[0] + 2, lo[1] + 2], 'pond', 'self', 1); }
-      if (!count(s, 'pump') && s.cash > 20 && E.summarize(s).tankGrav < 0.8) single(s, 'pump', 'self', [hm.x1 + 2, hm.y1 + 3]);
+      if (K('grey') && !count(s, 'media_sand') && s.cash > 25) { const fx = hm.x1 + 2, fy = hm.y1 + 2; W.prefabPit(s, [fx, fy], [fx + 1, fy + 1], 'media_sand', 'hire', 1, 'plant_reed'); }
+      if (K('catch') && count(s, 'pillar') < 4 && s.cash > 30) { const f = flatSpot(s, 4, 3); if (f) { W.prefabShed(s, [f[0], f[1]], [f[0] + 3, f[1] + 2], 'roof_tin', 'hire'); for (let i = 0; i < 3; i++) W.put(s, f[0] + i, f[1] + 3, W.h(s.world, f[0] + i, f[1] + 3), 'tank', 'hire'); } }
+      if (K('offgrid') && Object.keys(hs.pv || {}).length < 6 && s.cash > 50) roofPv(s, 6, 'hire');
+      if (K('offgrid') && !hs.batt && s.cash > 30) { s.cash -= W.blockPrice('batt', 'hire'); hs.batt = 1; s.world.spent.far += 15; }
+      if (K('hedge') && count(s, 'tree') < 10) for (let i = 0; i < 3; i++) single(s, 'tree', 'hire', [hm.x0 - 3, hm.y0 - 3]);
+      if (K('hedge') && count(s, 'hedge') < 12) for (let i = 0; i < 4; i++) single(s, 'hedge', 'hire', [hm.x1 + 3, hm.y0 - 3]);
+      if (K('chicken') && !count(s, 'coop') && s.cash > 20) single(s, 'coop', 'hire', [hm.x0 - 3, hm.y1]);
+      if (K('pond') && !count(s, 'pond') && s.cash > 20) { const lo = flatSpot(s, 3, 3, 'low'); if (lo) W.prefabPit(s, [lo[0], lo[1]], [lo[0] + 2, lo[1] + 2], 'pond', 'hire', 1); }
+      if (!count(s, 'pump') && s.cash > 20 && E.summarize(s).tankGrav < 0.8) single(s, 'pump', 'hire', [hm.x1 + 2, hm.y1 + 3]);
     }
   },
   random: {
     week: null,
     plan(s, r) {
       const hm = home(s);
-      if (r() < 0.5) W.addFloor(s, hm.x0 + Math.floor(r() * 8) - 1, hm.y0 + Math.floor(r() * 6) - 2, r() < 0.5 ? 'self' : 'hire', ['wall', 'ins'][Math.floor(r() * 2)]);
+      if (r() < 0.5) W.addFloor(s, hm.x0 + Math.floor(r() * 8) - 1, hm.y0 + Math.floor(r() * 6) - 2, r() < 0.5 ? 'hire' : 'hire', ['wall', 'ins'][Math.floor(r() * 2)]);
       const types = Object.keys(W.BLOCKS).filter(t => !W.BLOCKS[t].prefabOnly && (!W.BLOCKS[t].learn || s.known.includes(W.BLOCKS[t].learn)));
-      for (let i = 0; i < 4; i++) { const t = types[Math.floor(r() * types.length)], x = Math.floor(r() * 50), y = Math.floor(r() * 50); W.put(s, x, y, W.h(s.world, x, y), t, r() < 0.5 ? 'self' : 'hire'); }
+      for (let i = 0; i < 4; i++) { const t = types[Math.floor(r() * types.length)], x = Math.floor(r() * 50), y = Math.floor(r() * 50); W.put(s, x, y, W.h(s.world, x, y), t, r() < 0.5 ? 'hire' : 'hire'); }
       if (r() < 0.2) { const ws = ['work', 'farm', 'build', 'rest']; s.persons[0].week = s.persons[0].week.map((_, i) => i === 6 ? 'rest' : ws[Math.floor(r() * 4)]); }
     }
   }

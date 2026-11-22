@@ -168,7 +168,7 @@ function game() {
   window.onkeydown = (e) => { if (e.key === 'Escape' && G.cat) { G.cat = null; renderAll(); } };
   window.onresize = () => { if (document.getElementById('map2d')) renderMap(); };
 }
-function renderAll() { renderBar(); renderMap(); renderTools(); renderInspect(); renderTabs(); renderPanel(); renderClose(); }
+function renderAll() { renderBar(); renderTools(); renderMap(); renderInspect(); renderTabs(); renderPanel(); renderClose(); }
 
 function wallet(s, T) {
   if (!s) return `<div class="wallet"><div class="chip"><span>所持金</span><b>${man(300)}</b></div>
@@ -223,43 +223,67 @@ function renderMap() {
   draw2D(wrap, s.world, { label: '敷地の地図。50m四方、1マス1m。色が濃いほど低い段。押すとその場所を3Dで拡大', hint,
     onCell: (x, y) => { const hs = G.s.world.house; if (!G.cat && hs && hs.cells[`${x},${y}`]) open3D(x, y, 'house'); else open3D(x, y, G.cat || 'other'); }, onHover: (p) => { G.hoverCell = p; renderInspect(); } });
 }
-function draw2D(wrap, w, o) {
-  wrap.innerHTML = `<canvas id="map2d" aria-label="${esc(o.label)}"></canvas>${o.hint ? `<div class="hint">${o.hint}</div>` : ''}`;
-  const cv = wrap.querySelector('canvas'), dpr = Math.min(2, window.devicePixelRatio || 1);
-  const r = wrap.getBoundingClientRect(), side = Math.max(120, Math.min(r.width, r.height) - 16);
-  cv.style.width = side + 'px'; cv.style.height = side + 'px'; cv.width = side * dpr; cv.height = side * dpr;
-  const ctx = cv.getContext('2d'), pad = 18 * dpr, c = (cv.width - pad * 2) / 50;
-  const max = Math.max(...w.H);
-  ctx.fillStyle = '#E3E5DC'; ctx.fillRect(0, 0, cv.width, cv.height);
-  for (let y = 0; y < 50; y++) for (let x = 0; x < 50; x++) {
-    const lv = E.W.h(w, x, y), dug = w.H0[y * 50 + x] > lv;
-    ctx.fillStyle = levelColor(lv, max, dug); ctx.fillRect(pad + x * c, pad + y * c, c + 0.5, c + 0.5);
-  }
-  ctx.strokeStyle = 'rgba(90,100,80,.55)'; ctx.lineWidth = 1.2 * dpr; ctx.beginPath();
-  for (let y = 0; y < 50; y++) for (let x = 0; x < 50; x++) {
-    const lv = E.W.h(w, x, y);
-    if (x < 49 && E.W.h(w, x + 1, y) !== lv) { ctx.moveTo(pad + (x + 1) * c, pad + y * c); ctx.lineTo(pad + (x + 1) * c, pad + (y + 1) * c); }
-    if (y < 49 && E.W.h(w, x, y + 1) !== lv) { ctx.moveTo(pad + x * c, pad + (y + 1) * c); ctx.lineTo(pad + (x + 1) * c, pad + (y + 1) * c); }
-  }
-  ctx.stroke();
+/* 敷地を上から描く：段の色・等高線（1mごと、5mごとに太く）・置いたもの・家。labels で等高線に標高を書く */
+function paintPlot(ctx, w, pad, c, dpr, labels) {
+  const max = Math.max(...w.H), H = (x, y) => E.W.h(w, x, y);
+  for (let y = 0; y < 50; y++) for (let x = 0; x < 50; x++) { ctx.fillStyle = levelColor(H(x, y), max, w.H0[y * 50 + x] > H(x, y)); ctx.fillRect(pad + x * c, pad + y * c, c + 0.5, c + 0.5); }
+  const lines = (idx) => {
+    ctx.beginPath();
+    for (let y = 0; y < 50; y++) for (let x = 0; x < 50; x++) {
+      const lv = H(x, y);
+      if (x < 49 && H(x + 1, y) !== lv && ((Math.max(lv, H(x + 1, y)) + w.base) % 5 === 0) === idx) { ctx.moveTo(pad + (x + 1) * c, pad + y * c); ctx.lineTo(pad + (x + 1) * c, pad + (y + 1) * c); }
+      if (y < 49 && H(x, y + 1) !== lv && ((Math.max(lv, H(x, y + 1)) + w.base) % 5 === 0) === idx) { ctx.moveTo(pad + x * c, pad + (y + 1) * c); ctx.lineTo(pad + (x + 1) * c, pad + (y + 1) * c); }
+    }
+    ctx.stroke();
+  };
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(70,80,60,.62)'; ctx.lineWidth = Math.max(1, c * 0.09); lines(false);
+  ctx.strokeStyle = 'rgba(60,66,48,.9)'; ctx.lineWidth = Math.max(1.5, c * 0.16); lines(true);
   for (let y = 0; y < 50; y++) for (let x = 0; x < 50; x++) {
     const tb = topBlock(w, x, y); if (!tb) continue;
     const d = E.W.BLOCKS[tb.b.t];
-    ctx.globalAlpha = tb.b.p ? 0.45 : 1;
-    ctx.fillStyle = d.color;
+    ctx.globalAlpha = tb.b.p ? 0.45 : 1; ctx.fillStyle = d.color;
     const ins = d.overlay ? 0.06 : d.kind === 'tank' || d.kind === 'tree' ? 0.15 : 0.02;
     if (d.kind === 'tank' || d.kind === 'tree') { ctx.beginPath(); ctx.arc(pad + (x + 0.5) * c, pad + (y + 0.5) * c, c * (0.5 - ins), 0, 7); ctx.fill(); }
     else ctx.fillRect(pad + (x + ins) * c, pad + (y + ins) * c, c * (1 - 2 * ins), c * (1 - 2 * ins));
     ctx.globalAlpha = 1;
   }
   if (w.house) {
-    for (const k in w.house.cells) { const [x, y] = k.split(',').map(Number); ctx.globalAlpha = w.house.cells[k].p ? 0.5 : 1; ctx.fillStyle = '#E8A15A'; ctx.fillRect(pad + x * c, pad + y * c, c + 0.5, c + 0.5); ctx.globalAlpha = 1; }
-    ctx.strokeStyle = '#8A4513'; ctx.lineWidth = 2 * dpr; ctx.beginPath();
-    for (const o of E.W.houseOuterEdges(w.house, false)) { const [t, r2] = o.e.split(':'); const [ex, ey] = r2.split(',').map(Number); if (t === 'h') { ctx.moveTo(pad + ex * c, pad + ey * c); ctx.lineTo(pad + (ex + 1) * c, pad + ey * c); } else { ctx.moveTo(pad + ex * c, pad + ey * c); ctx.lineTo(pad + ex * c, pad + (ey + 1) * c); } }
+    ctx.fillStyle = '#E8A15A';
+    for (const k in w.house.cells) { const [x, y] = k.split(',').map(Number); ctx.fillRect(pad + x * c, pad + y * c, c + 0.5, c + 0.5); }
+    ctx.strokeStyle = '#8A4513'; ctx.lineWidth = Math.max(1.5, c * 0.14); ctx.beginPath();
+    for (const o of E.W.houseOuterEdges(w.house, false)) {
+      const [t, r2] = o.e.split(':'); const [ex, ey] = r2.split(',').map(Number), wl = w.house.walls[o.e];
+      if (wl && (E.W.PANELS[wl.t].door)) continue;
+      if (t === 'h') { ctx.moveTo(pad + ex * c, pad + ey * c); ctx.lineTo(pad + (ex + 1) * c, pad + ey * c); } else { ctx.moveTo(pad + ex * c, pad + ey * c); ctx.lineTo(pad + ex * c, pad + (ey + 1) * c); }
+    }
     ctx.stroke();
   }
-  ctx.fillStyle = '#4A544F'; ctx.font = `${10 * dpr}px "IBM Plex Mono", monospace`;
-  for (let y = 4; y < 50; y += 10) for (let x = 4; x < 50; x += 10) ctx.fillText(String(E.W.h(w, x, y) + w.base) + 'm', pad + x * c, pad + y * c);
+  if (!labels) return;
+  // 等高線ごとに1つ、標高を書く（となりの線と重ならないよう、書く行をずらす）
+  const levels = [...new Set(w.H)].sort((a, b) => a - b).slice(1), rows = [9, 21, 33, 45];
+  ctx.font = `${Math.max(10, c * 0.78)}px "IBM Plex Mono", monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  levels.forEach((L, i) => {
+    const idx = (L + w.base) % 5 === 0;
+    for (const ry of idx ? [rows[i % 4], rows[(i + 2) % 4]] : [rows[i % 4]]) {
+      let px = null, py = null;
+      for (let dy = 0; dy < 6 && px == null; dy++) for (const yy of [ry + dy, ry - dy]) { if (yy < 0 || yy > 49) continue; for (let x = 0; x < 49; x++) { const a = H(x, yy), b = H(x + 1, yy); if (a !== b && Math.max(a, b) === L) { px = x + 1; py = yy + 0.5; break; } } if (px != null) break; }
+      if (px == null) continue;
+      const tx = pad + px * c, ty = pad + py * c, label = `${L + w.base}`;
+      ctx.lineWidth = 3 * dpr; ctx.strokeStyle = 'rgba(240,242,234,.95)'; ctx.strokeText(label, tx, ty);
+      ctx.fillStyle = idx ? '#2E3A2A' : '#5A6452'; ctx.font = `${idx ? '600 ' : ''}${Math.max(10, c * 0.78)}px "IBM Plex Mono", monospace`; ctx.fillText(label, tx, ty);
+    }
+  });
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+}
+function draw2D(wrap, w, o) {
+  wrap.innerHTML = `<canvas id="map2d" aria-label="${esc(o.label)}"></canvas>${o.hint ? `<div class="hint">${o.hint}</div>` : ''}`;
+  const cv = wrap.querySelector('canvas'), dpr = Math.min(2, window.devicePixelRatio || 1);
+  const r = wrap.getBoundingClientRect(), side = Math.max(120, Math.min(r.width, r.height) - 16);
+  cv.style.width = side + 'px'; cv.style.height = side + 'px'; cv.width = side * dpr; cv.height = side * dpr;
+  const ctx = cv.getContext('2d'), pad = 18 * dpr, c = (cv.width - pad * 2) / 50;
+  ctx.fillStyle = '#E3E5DC'; ctx.fillRect(0, 0, cv.width, cv.height);
+  paintPlot(ctx, w, pad, c, dpr, true);
   ctx.strokeStyle = '#1F2A2E'; ctx.setLineDash([6 * dpr, 4 * dpr]); ctx.lineWidth = 1.5 * dpr; ctx.strokeRect(pad, pad, c * 50, c * 50); ctx.setLineDash([]);
   ctx.fillStyle = '#4A544F'; ctx.font = `${11 * dpr}px "Noto Sans JP", sans-serif`; ctx.fillText(o.caption || '↑北　1マス=1m・1段=高さ1m', pad, pad - 5 * dpr);
   if (o.overlay) o.overlay(ctx, pad, c, dpr);
@@ -270,7 +294,6 @@ function draw2D(wrap, w, o) {
 function hintText() {
   const s = G.s, S = E.summarize(s);
   if (G.cat) return CAT.find(c => c.id === G.cat).hint;
-  if (S.pending > 0 && !s.persons.some(p => p.week.includes('build'))) return `自分で作っているものがあります（残り作業 ${S.pending.toFixed(0)}日）。右の［予定］で「作業」の日を入れると進みます。`;
   if (s.turn === 0 && s.site === 'med') return 'オレンジ色が、最初に置いてある中古のコンテナ（12m²）。下の［家］で広げたり壁を替えたり、［畑］［その他］で場所を選んで作ります。準備ができたら右下で3か月進めます。';
   return '';
 }
@@ -315,8 +338,8 @@ function open3D(cx, cy, cat, o3 = {}) {
     <aside class="iso-side" id="isoside"></aside></div>`;
   document.body.appendChild(ov);
   const P = PALETTE[cat];
-  const st = { cat, tool: cat === 'house' ? 'grow' : (P.tools.find(t => knownTech(t[2]))?.[0] || 'erase'), panel: 'ins', mode: 'self', a: null, msg: '' };
-  const v = createView(document.getElementById('isoc'), world, { cx, cy, R: cat === 'house' ? 7 : 8 }); G.view = v; if (cat === 'house') v.zoom = 1.3;
+  const st = { cat, tool: cat === 'house' ? 'grow' : (P.tools.find(t => knownTech(t[2]))?.[0] || 'erase'), panel: 'ins', mode: 'hire', a: null, msg: '' };
+  const v = createView(document.getElementById('isoc'), world, { cx, cy, R: cat === 'house' ? 7 : 8 }); G.view = v; if (cat === 'house') { v.zoom = 1.3; v.angle = houseAngle(world.house); }
   const mini = document.getElementById('isomini');
   const tip = document.getElementById('isotip');
   const drawMini = () => miniMap(mini, world, v);
@@ -345,15 +368,25 @@ function open3D(cx, cy, cat, o3 = {}) {
   st.redraw = redraw;
   v.size(); redraw();
 }
+/* 家の窓と扉が手前に見える向き（0・90・180・270度のうち、見える窓と扉がいちばん多いもの） */
+function houseAngle(hs) {
+  if (!hs) return 0;
+  const vis = { 0: ['e', 's'], 90: ['e', 'n'], 180: ['w', 'n'], 270: ['w', 's'] };
+  let best = 0, bs = -1;
+  for (const a of [0, 90, 180, 270]) {
+    let sc = 0;
+    for (const o of E.W.houseOuterEdges(hs, false)) { const wl = hs.walls[o.e]; if (!wl) continue; const P = E.W.PANELS[wl.t]; if ((P.win || P.door) && vis[a].includes(o.dir)) sc += P.door ? 1.5 : 1; }
+    if (sc > bs) { bs = sc; best = a; }
+  }
+  return best;
+}
 function miniMap(cv, w, v) {
   const dpr = Math.min(2, window.devicePixelRatio || 1), size = cv.getBoundingClientRect().width || 150;
   cv.width = size * dpr; cv.height = size * dpr;
-  const ctx = cv.getContext('2d'), c = cv.width / 50, max = Math.max(...w.H);
-  for (let y = 0; y < 50; y++) for (let x = 0; x < 50; x++) { ctx.fillStyle = levelColor(E.W.h(w, x, y), max, w.H0[y * 50 + x] > E.W.h(w, x, y)); ctx.fillRect(x * c, y * c, c + 0.5, c + 0.5); }
-  for (let y = 0; y < 50; y++) for (let x = 0; x < 50; x++) { const tb = topBlock(w, x, y); if (tb) { ctx.fillStyle = E.W.BLOCKS[tb.b.t].color; ctx.fillRect(x * c, y * c, c, c); } }
-  if (w.house) { ctx.fillStyle = '#B8641F'; for (const k in w.house.cells) { const [x, y] = k.split(',').map(Number); ctx.fillRect(x * c, y * c, c, c); } }
-  ctx.strokeStyle = '#1F2A2E'; ctx.lineWidth = 2 * dpr; ctx.strokeRect((v.cx - v.R) * c, (v.cy - v.R) * c, (2 * v.R + 1) * c, (2 * v.R + 1) * c);
-  ctx.fillStyle = '#1F2A2E'; ctx.font = `${10 * dpr}px "Noto Sans JP", sans-serif`; ctx.fillText('北↑', 3 * dpr, 11 * dpr);
+  const ctx = cv.getContext('2d'), c = cv.width / 50;
+  paintPlot(ctx, w, 0, c, dpr, false);
+  ctx.strokeStyle = '#C2410C'; ctx.lineWidth = 2.5 * dpr; ctx.strokeRect((v.cx - v.R) * c, (v.cy - v.R) * c, (2 * v.R + 1) * c, (2 * v.R + 1) * c);
+  ctx.fillStyle = 'rgba(31,42,46,.8)'; ctx.font = `${10 * dpr}px "Noto Sans JP", sans-serif`; ctx.fillText('↑北', 3 * dpr, 12 * dpr);
 }
 function describeFace(f) {
   const w = G.view?.world || G.s.world;
@@ -435,11 +468,10 @@ function houseYearStats(hm) {
 function renderHouseSide(st, v, close) {
   const s = G.s, S = E.summarize(s), el = document.getElementById('isoside'), hs = s.world.house, hm = S.houseM;
   const y = hm ? houseYearStats(hm) : null;
-  const panelBtn = (k) => { const P = E.W.PANELS[k], ok = knownTech(P.learn); return `<button class="opt${st.panel === k && st.tool === 'panel' ? ' on' : ''}" data-panel="${k}" ${ok ? '' : 'disabled'}><i class="sw" style="background:${P.color}"></i>${ok ? P.name : '？ ' + P.name}<span class="pr">${(st.mode === 'self' ? P.cost : P.cost + P.labor * 1.5).toFixed(1)}</span></button>`; };
+  const panelBtn = (k) => { const P = E.W.PANELS[k], ok = knownTech(P.learn); return `<button class="opt${st.panel === k && st.tool === 'panel' ? ' on' : ''}" data-panel="${k}" ${ok ? '' : 'disabled'}><i class="sw" style="background:${P.color}"></i>${ok ? P.name : '？ ' + P.name}<span class="pr">${(P.cost + P.labor * 1.5).toFixed(1)}</span></button>`; };
   const parts = hm ? [['壁', hm.parts.wall, '#C8A87A'], ['屋根', hm.parts.roof, '#8C9499'], ['床', hm.parts.floor, '#A39A8C'], ['窓', hm.parts.window, '#7FB0D8'], ['すきま', hm.parts.air, '#C9CDBF']] : [];
   el.innerHTML = `<header><h2>家</h2><button class="btn ghost" id="isox">地図に戻る</button></header>
-    <div class="small">所持金 ${man(s.cash)} · 作業待ち ${S.pending.toFixed(0)}日</div>
-    <div class="seg-o" role="group" aria-label="作り方"><button class="opt${st.mode === 'self' ? ' on' : ''}" data-mode="self">自分で作る（材料だけ・作業日）</button><button class="opt${st.mode === 'hire' ? ' on' : ''}" data-mode="hire">頼む（人件費・すぐ）</button></div>
+    <div class="small">所持金 ${man(s.cash)} · 作るのは近所の職人さんに頼む（材料費＋人件費。人件費は近所に回る）</div>
     ${hm ? `<div class="stat2"><span>いまの家</span><b>${hm.A}m² · 熱の逃げやすさ ${hm.UA.toFixed(0)} W/K</b><div class="ua">${parts.map(([n, val, c]) => `<i style="width:${(val / hm.UA * 100).toFixed(1)}%;background:${c}" title="${n}"></i>`).join('')}</div><div class="legend">${parts.map(([n, val, c]) => `<span><i style="background:${c}"></i>${n} ${Math.round(val / hm.UA * 100)}%</span>`).join('')}</div>
       <span>${y.elec < 50 ? '暖房はほぼいらない' : `暖房 ${Math.round(y.elec).toLocaleString()}kWh/年`} · 暑すぎる日 ${y.hot}日/年（最高 約${y.peak.toFixed(0)}℃）${hm.condenseProne ? ' · <b class="ng">鋼板が残っていて結露する</b>' : ''}</span></div>` : ''}
     <div class="seg"><div class="seg-h"><b>床を広げる</b><span class="small">家のとなりの地面を押す。1段ちがえば掘るか盛ってそろえる</span></div><div class="seg-o"><button class="opt${st.tool === 'grow' ? ' on' : ''}" data-tool="grow">床を足す（1m²）</button><button class="opt${st.tool === 'shrink' ? ' on' : ''}" data-tool="shrink">床を減らす</button></div></div>
@@ -454,7 +486,6 @@ function renderHouseSide(st, v, close) {
     ${S.diag.length ? `<div class="stat2"><span>気になるところ</span>${S.diag.map(d => `<div class="${d.lv === 'warn' ? 'ng' : 'small'}">${esc(d.text)}</div>`).join('')}</div>` : ''}
     <p class="small">回す ↺↻（Q・Eキー）／ 拡大 ＋−／ 移動 矢印か右上の小さな地図。</p>`;
   el.querySelector('#isox').onclick = close;
-  el.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { st.mode = b.dataset.mode; st.redraw(); });
   el.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { st.tool = b.dataset.tool; st.msg = ''; st.redraw(); });
   el.querySelectorAll('[data-panel]').forEach(b => b.onclick = () => { st.tool = 'panel'; st.panel = b.dataset.panel; st.msg = '替えたい外壁を押してください'; st.redraw(); });
   el.querySelectorAll('[data-roof]').forEach(b => b.onclick = () => { st.msg = E.W.setRoof(G.s, b.dataset.roof, st.mode) || ''; persist(); st.redraw(); });
@@ -484,8 +515,7 @@ function renderIsoSide(st, v, close) {
   const filterOpts = st.cat === 'other' && knownTech('grey') ? `<div class="seg"><div class="seg-h"><b>浄化の穴に入れる層</b></div><div class="seg-o">${['media_gravel', 'media_sand', 'media_char'].map(t => `<button class="opt${MAT.media === t ? ' on' : ''}" data-mat="media:${t}">${esc(E.W.BLOCKS[t].name)}</button>`).join('')}</div>
       ${S.filter ? `<div class="seg-h"><b>きれいになった水の行き先</b></div><div class="seg-o">${Object.entries(E.B.OUTS).map(([k, o]) => `<button class="opt${s.world.mods.out === k ? ' on' : ''}" data-out="${k}">${o.name}</button>`).join('')}</div>` : ''}</div>` : '';
   el.innerHTML = `<header><h2>${st.cat === 'farm' ? '畑' : 'その他'}</h2><button class="btn ghost" id="isox">地図に戻る</button></header>
-    <div class="small">所持金 ${man(s.cash)} · 土の在庫 ${s.world.earth.toFixed(1)}m³ · 作業待ち ${S.pending.toFixed(0)}日</div>
-    <div class="seg-o" role="group" aria-label="作り方"><button class="opt${st.mode === 'self' ? ' on' : ''}" data-mode="self">自分で作る（材料だけ・作業日）</button><button class="opt${st.mode === 'hire' ? ' on' : ''}" data-mode="hire">頼む（人件費・すぐ）</button></div>
+    <div class="small">所持金 ${man(s.cash)} · 土の在庫 ${s.world.earth.toFixed(1)}m³ · 作るのは近所の人に頼む</div>
     <div class="seg"><div class="seg-h"><b>まとめて作る</b></div><div class="seg-o">${P.tools.map(([k, n, l]) => `<button class="opt${st.tool === k ? ' on' : ''}" data-tool="${k}" ${knownTech(l) ? '' : 'disabled'}>${knownTech(l) ? n : '？ ' + n}</button>`).join('')}</div></div>
     ${filterOpts}
     <div class="seg"><div class="seg-h"><b>1つずつ置く</b><span class="small">数字は1つの値段（万円）</span></div><div class="seg-o blocks">${P.blocks.map(blk).join('')}<button class="opt${st.tool === 'erase' ? ' on' : ''}" data-tool="erase">外す</button></div></div>
@@ -494,7 +524,6 @@ function renderIsoSide(st, v, close) {
     ${S.diag.length ? `<div class="stat2"><span>気になるところ</span>${S.diag.map(d => `<div class="${d.lv === 'warn' ? 'ng' : 'small'}">${esc(d.text)}</div>`).join('')}</div>` : ''}
     <p class="small">回す ↺↻（Q・Eキー）／ 拡大 ＋−／ 移動 矢印か右上の小さな地図。面を押すと、その面の外側に置きます。</p>`;
   el.querySelector('#isox').onclick = close;
-  el.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { st.mode = b.dataset.mode; st.redraw(); });
   el.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { st.tool = b.dataset.tool; st.a = null; st.msg = RECT.includes(st.tool) ? '1つ目の角を押してください' : ''; st.redraw(); });
   el.querySelectorAll('[data-mat]').forEach(b => b.onclick = () => { const [k, t] = b.dataset.mat.split(':'); MAT[k] = t; st.redraw(); });
   el.querySelectorAll('[data-out]').forEach(b => b.onclick = () => { G.s.world.mods.out = b.dataset.out; persist(); st.redraw(); });
@@ -578,13 +607,12 @@ function panelBook() {
 function panelPlan() {
   const s = G.s, care = E.careNeed(s), hand = E.hands(s);
   const work = s.persons.reduce((a, p) => a + E.weekCount(p).work, 0);
-  const lab = { work: '仕事', farm: '畑', build: '作業', rest: '休み' };
-  return `<div><h2>予定 · 週の過ごし方</h2><p class="small">マスを押すと 仕事 → 畑 → 作業 → 休み と変わる。「作業」は自分で建てるものを進める日。東京では週5日、会社の仕事だった。</p></div>
+  const lab = { work: '仕事', farm: '畑', build: '畑', rest: '休み' };
+  return `<div><h2>予定 · 週の過ごし方</h2><p class="small">マスを押すと 仕事 → 畑 → 休み と変わる。東京では週5日、会社の仕事だった。</p></div>
     <div class="week"><span></span>${E.WEEKDAYS.map(d => `<span>${d}</span>`).join('')}
     ${s.persons.map((p, pi) => `<span style="text-align:left">${esc(p.name)}</span>${p.week.map((v, di) => `<button class="cell ${v}" data-cell="${pi},${di}" aria-label="${esc(p.name)} ${E.WEEKDAYS[di]}曜 ${lab[v]}">${lab[v]}</button>`).join('')}`).join('')}</div>
     <h3>畑と手入れ</h3><div class="meter${hand < care.total ? ' over' : ''}"><i style="width:${Math.min(100, care.total ? hand / care.total * 100 : 100)}%"></i></div>
     <div class="rows"><span>手入れに要る日数</span><b class="num">週${care.total.toFixed(1)}日</b><span>畑に出る日</span><b class="num">週${hand}日</b></div>
-    <h3>自分で作っているもの</h3>${(() => { const bd = s.persons.reduce((a, p) => a + E.weekCount(p).build, 0); const left = E.W.pendingDays(s.world); if (left <= 0) return '<p class="small">いまはない。3Dで「自分で作る」を選んで置いたものは、ここで進む。</p>'; return `<div class="rows"><span>残り作業</span><b class="num">${left.toFixed(0)}日${bd ? ` · 約${Math.ceil(left / (bd * 11))}季節` : ' · 止まっている'}</b></div>`; })()}
     <h3>外貨の仕事（東京の会社のリモート）</h3>
     <div class="rows"><span>週${work}日 × 日給${E.WAGE}万円</span><b class="num">3か月で約${man(work * E.WAGE * 12)}</b><span>そのほかの暮らし</span><b class="num">3か月で${man(E.LIVING * s.persons.length)}</b></div>`;
 }
@@ -621,8 +649,8 @@ function panelNote() {
 function bindPanel(el) {
   el.querySelectorAll('[data-cell]').forEach(b => b.onclick = () => {
     const [pi, di] = b.dataset.cell.split(',').map(Number);
-    const order = ['work', 'farm', 'build', 'rest'];
-    const s = E.clone(G.s); const v = s.persons[pi].week[di];
+    const order = ['work', 'farm', 'rest'];
+    const s = E.clone(G.s); const v = s.persons[pi].week[di] === 'build' ? 'farm' : s.persons[pi].week[di];
     s.persons[pi].week[di] = order[(order.indexOf(v) + 1) % 3];
     G.s = s; persist(); renderPanel(); renderInspect(); renderMap();
   });
