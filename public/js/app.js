@@ -13,7 +13,14 @@ let stopAnim = null;
 function stop() { if (stopAnim) { stopAnim(); stopAnim = null; } }
 
 function persist() { try { localStorage.setItem(KEY, E.save(G.s)); } catch (e) { /* 保存できない環境 */ } }
-function restore() { try { const v = localStorage.getItem(KEY); return v ? E.load(v) : null; } catch { return null; } }
+function restore() {
+  try {
+    const v = localStorage.getItem(KEY); const s = v ? E.load(v) : null;
+    // 家具ができる前のセーブには、最初の家具を置いておく
+    const hs = s?.world?.house; if (hs && !hs.furn) { hs.furn = []; E.W.autoFurnish(hs); }
+    return s;
+  } catch { return null; }
+}
 function loadAtlasRead() { try { return JSON.parse(localStorage.getItem(KEY + '-atlas') || '[]'); } catch { return []; } }
 function saveAtlasRead() { try { localStorage.setItem(KEY + '-atlas', JSON.stringify(G.atlasRead)); } catch { } }
 
