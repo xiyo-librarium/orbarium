@@ -33,8 +33,12 @@ def run(viewport, tag):
         page.on('pageerror', lambda e: errs.append(str(e)))
         page.goto('http://localhost:8765/index.html'); page.wait_for_timeout(800)
         page.screenshot(path=f'{OUT}/{tag}_1_title.png'); overflow(page, tag + ' title')
-        page.click('#new'); page.wait_for_timeout(300)
+        page.click('#new'); page.wait_for_timeout(1500)
+        page.screenshot(path=f'{OUT}/{tag}_2a_zoom_tokyo.png')
+        page.click('#skip'); page.wait_for_timeout(300)
         page.screenshot(path=f'{OUT}/{tag}_2_prologue.png'); overflow(page, tag + ' prologue')
+        for t in ['book', 'plan', 'sky', 'web']:
+            page.click(f'[data-tt="{t}"]'); page.wait_for_timeout(60)
         for _ in range(6): page.click('#next'); page.wait_for_timeout(80)
         page.screenshot(path=f'{OUT}/{tag}_3_invite.png')
         page.click('#go'); page.wait_for_timeout(1800)
@@ -44,7 +48,20 @@ def run(viewport, tag):
         # 家（ツールは最初から家）
         map_click(page, 30, 20); page.wait_for_timeout(200)
         map_click(page, 40, 14); page.wait_for_timeout(200)   # タンク
-        map_drag(page, 14, 28, 27, 38); page.wait_for_timeout(200)   # 畑
+        map_click(page, 20, 33); page.wait_for_timeout(200)   # 畑：押しただけ → 10×8
+        st0 = page.evaluate("()=>JSON.parse(localStorage.getItem('orbarium-v1'))")
+        g0 = [x for x in st0['items'] if x['type'] == 'garden']
+        if not g0 or g0[0]['w'] * g0[0]['h'] != 80: problems.append(f'{tag}: 押しただけの畑が10×8にならない {g0}')
+        page.click('[data-act="size:w:1"]'); page.wait_for_timeout(100)
+        page.click('[data-act="size:h:1"]'); page.wait_for_timeout(100)
+        st1 = page.evaluate("()=>JSON.parse(localStorage.getItem('orbarium-v1'))")
+        g1 = [x for x in st1['items'] if x['type'] == 'garden']
+        if not g1 or g1[0]['w'] * g1[0]['h'] != 99: problems.append(f'{tag}: 畑を広げられない {g1}')
+        page.click('[data-t="garden"]'); map_drag(page, 6.5, 30.5, 13.5, 37.5); page.wait_for_timeout(200)   # 2枚目はドラッグ
+        st2 = page.evaluate("()=>JSON.parse(localStorage.getItem('orbarium-v1'))")
+        g2 = [x for x in st2['items'] if x['type'] == 'garden']
+        if len(g2) < 2 or g2[1]['w'] * g2[1]['h'] != 64: problems.append(f'{tag}: ドラッグの畑が8×8にならない {g2}')
+        page.keyboard.press('Escape')
         page.screenshot(path=f'{OUT}/{tag}_6_built.png')
         st = page.evaluate("()=>JSON.parse(localStorage.getItem('orbarium-v1'))")
         kinds = [x['type'] for x in st['items']]
@@ -77,7 +94,7 @@ def run_taos(viewport, tag):
         page.on('pageerror', lambda e: errs.append(str(e)))
         page.on('console', lambda m: errs.append(m.text) if m.type == 'error' and 'Failed to load resource' not in m.text else None)
         page.goto('http://localhost:8765/index.html'); page.wait_for_timeout(500)
-        page.click('#new'); page.click('#skip'); page.click('#go'); page.wait_for_timeout(200); page.click('#skip'); page.wait_for_timeout(300)
+        page.click('#new'); page.wait_for_timeout(300); page.click('#skip'); page.wait_for_timeout(200); page.click('#skip'); page.click('#go'); page.wait_for_timeout(200); page.click('#skip'); page.wait_for_timeout(300)
         map_click(page, 30, 20); page.wait_for_timeout(100)
         page.evaluate("()=>{const s=JSON.parse(localStorage.getItem('orbarium-v1'));s.flags.done_med=4;s.cash=600;s.known.push('insulation','greenhouse','catch');localStorage.setItem('orbarium-v1',JSON.stringify(s));}")
         page.reload(); page.wait_for_timeout(500); page.click('#cont'); page.wait_for_timeout(300)

@@ -29,22 +29,28 @@ async function title() {
   let run = true; const spin = () => { if (!run) return; g.lon -= 0.08; g.draw(); requestAnimationFrame(spin); }; spin();
   const onR = () => { g.size(); g.draw(); }; window.addEventListener('resize', onR);
   stopAnim = () => { run = false; window.removeEventListener('resize', onR); };
-  document.getElementById('new').onclick = () => { if (!saved || confirmBox('今の暮らしを消して、はじめからにしますか？')) prologue(); };
+  document.getElementById('new').onclick = () => { if (!saved || confirmBox('今の暮らしを消して、はじめからにしますか？')) travel({ lon: 60, lat: 20, name: '' }, E.SITES.tokyo, prologue); };
   const c = document.getElementById('cont'); if (c) c.onclick = () => { G.s = saved; game(); };
   document.getElementById('atlas').onclick = () => atlas(() => title());
 }
 function confirmBox(msg) { return window.confirm(msg); }
 
-/* ================= 序章（見るだけ） ================= */
+/* ================= 序章：東京（見るだけ。ほかの土地と同じ画面） ================= */
+const TOKYO_TABS = [['web', 'めぐり'], ['book', '家計簿'], ['plan', '予定'], ['sky', '天気'], ['note', 'ノート']];
 function prologue() {
   stop();
   const T = E.tokyoYear();
-  let i = 0;
+  let i = 0, tab = 'web';
   app.innerHTML = `<div class="game">
-    <header class="bar"><div class="brand">Orbarium</div><div class="where">東京・30m²の部屋</div><div class="when">2026 秋</div>
-      ${wallet(null, T)}</header>
+    <header class="bar"><div class="brand">Orbarium</div><div class="where">東京・30m²の賃貸 · 3階</div><div class="when">2026年 秋</div>${wallet(null, T)}</header>
     <section class="left"><div class="mapwrap">${tokyoMap()}</div><div class="story" id="story" aria-live="polite"></div></section>
-    <section class="right"><div class="panel">${tokyoPanel(T)}</div></section></div>`;
+    <section class="right"><nav class="tabs" id="ttabs"></nav><div class="panel" id="tpanel"></div></section></div>`;
+  const tabs = () => {
+    document.getElementById('ttabs').innerHTML = TOKYO_TABS.map(([k, n]) => `<button class="tab${tab === k ? ' on' : ''}" data-tt="${k}">${n}</button>`).join('');
+    document.querySelectorAll('[data-tt]').forEach(b => b.onclick = () => { tab = b.dataset.tt; tabs(); });
+    document.getElementById('tpanel').innerHTML = tokyoPanel(T, tab);
+  };
+  tabs();
   const story = document.getElementById('story');
   const show = () => {
     if (i < PROLOGUE.length) {
@@ -53,54 +59,63 @@ function prologue() {
       document.getElementById('skip').onclick = () => { i = PROLOGUE.length; show(); };
     } else {
       story.innerHTML = `<div class="mailcard"><div class="small">メール · ${esc(INVITE.from)}</div><b>${esc(INVITE.subject)}</b><div>${esc(INVITE.body)}</div></div><div class="row"><button class="btn" id="go">300万円を持って、行ってみる</button></div>`;
-      document.getElementById('go').onclick = travel;
+      document.getElementById('go').onclick = () => travel(E.SITES.tokyo, E.SITES.med, startGame);
     }
   };
   show();
 }
 function tokyoMap() {
-  // 上から見た街区。部屋の矢印は地図の外へ消える
-  const blocks = [];
-  for (let y = 0; y < 5; y++) for (let x = 0; x < 5; x++) blocks.push(`<rect x="${2 + x * 10}" y="${2 + y * 10}" width="8" height="8" fill="#E3E5DC" stroke="#C9CDBF" stroke-width=".1"/>`);
-  const arr = (x1, y1, x2, y2, t, c, tx, ty) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width=".35" marker-end="url(#ah)" stroke-dasharray="1 .6"/><text x="${tx}" y="${ty}" font-size="1.5" fill="${c}">${t}</text>`;
-  return `<svg viewBox="0 0 54 54" role="img" aria-label="東京の部屋。水・電気・食べものは外から来て、下水とごみは外へ消える">
-    <defs><marker id="ah" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0L6 3L0 6z" fill="context-stroke"/></marker></defs>
-    <rect x="0" y="0" width="54" height="54" fill="#EDEFE6"/>${blocks.join('')}
-    <rect x="22" y="22" width="8" height="8" fill="#D8DBCF" stroke="#9AA090" stroke-width=".15"/>
-    <rect x="25" y="25" width="3" height="3" fill="#FBFAF5" stroke="#1F2A2E" stroke-width=".25"/>
-    <text x="23" y="21" font-size="1.6" fill="#1F2A2E" font-weight="700">あなたの部屋 30m²</text>
-    ${arr(-1, 26, 24.6, 26, '水道 ← どこかのダム', '#2B6CB0', 1, 25)}
-    ${arr(28.4, 27, 55, 27, '下水 → 処理場へ', '#8A4513', 38, 29.6)}
-    ${arr(26, -1, 26, 24.6, '電気 ← どこかの発電所', '#C08A1E', 27, 4)}
-    ${arr(27, 55, 27, 28.4, '食べもの ← どこかの畑', '#3F7D4E', 28, 52)}
-    ${arr(25.4, 28.4, 10, 55, 'ごみ → 清掃工場へ', '#6B7462', 3, 50)}
+  // ほかの土地と同じ50m四方・1mマスの地図。真ん中に賃貸マンション、その3階の30m²があなたの部屋
+  const arr = (x1, y1, x2, y2, t, c, tx, ty, anchor = 'start') => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width=".3" marker-end="url(#ah)" stroke-dasharray=".9 .5"/><text x="${tx}" y="${ty}" font-size="1.15" fill="${c}" text-anchor="${anchor}">${t}</text>`;
+  const units = [];
+  for (let k = 0; k < 4; k++) units.push(`<rect x="${17 + k * 5}" y="20" width="5" height="6" fill="${k === 1 ? '#FBFAF5' : '#D8DBCF'}" stroke="${k === 1 ? '#1F2A2E' : '#9AA090'}" stroke-width="${k === 1 ? 0.25 : 0.08}"/>`);
+  return `<svg viewBox="-2.5 -2.5 55 55" role="img" aria-label="東京の部屋。水・電気・食べものはお金を払うと外から来て、下水とごみは外へ消える">
+    <defs><marker id="ah" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0L6 3L0 6z" fill="context-stroke"/></marker>
+      <pattern id="g1" width="1" height="1" patternUnits="userSpaceOnUse"><path d="M1 0H0V1" fill="none" stroke="rgba(31,42,46,.07)" stroke-width=".04"/></pattern>
+      <pattern id="g5" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M5 0H0V5" fill="none" stroke="rgba(31,42,46,.16)" stroke-width=".06"/></pattern></defs>
+    <rect x="-2.5" y="-2.5" width="55" height="55" fill="#E3E5DC"/>
+    <rect x="0" y="0" width="50" height="50" fill="#EDEFE6"/>
+    <rect x="0" y="40" width="50" height="6" fill="#CFD2C6"/><text x="1" y="43.5" font-size="1.1" fill="#6B7462">道路（地面はアスファルト。雨は側溝へ）</text>
+    <rect x="3" y="3" width="10" height="14" fill="#D8DBCF" stroke="#9AA090" stroke-width=".08"/><rect x="36" y="4" width="12" height="16" fill="#D8DBCF" stroke="#9AA090" stroke-width=".08"/>
+    <rect x="3" y="27" width="9" height="10" fill="#D8DBCF" stroke="#9AA090" stroke-width=".08"/><rect x="37" y="26" width="11" height="12" fill="#D8DBCF" stroke="#9AA090" stroke-width=".08"/>
+    <rect x="15" y="18" width="24" height="10" fill="#C9CDBF" stroke="#7F8A72" stroke-width=".12"/>${units.join('')}
+    <text x="24.5" y="23.4" font-size="1.05" text-anchor="middle" fill="#1F2A2E" font-weight="700">あなたの部屋</text><text x="24.5" y="24.9" font-size=".9" text-anchor="middle" fill="#1F2A2E">30m²・3階</text>
+    <rect x="0" y="0" width="50" height="50" fill="url(#g1)"/><rect x="0" y="0" width="50" height="50" fill="url(#g5)"/>
+    <rect x="0" y="0" width="50" height="50" fill="none" stroke="#1F2A2E" stroke-width=".18" stroke-dasharray="1 .6"/>
+    <text x="0" y="-0.8" font-size="1.1" fill="#4A544F">↑北　平らな住宅地　1マス=1m</text>
+    ${arr(-2.5, 21, 21.6, 21, '水道 ← 払うと届く：どこかのダム', '#2B6CB0', 0.3, 20.2)}
+    ${arr(27.4, 22, 52.5, 22, '下水 → 処理場の先の川', '#8A4513', 51, 21.2, 'end')}
+    ${arr(23, -2.5, 23, 19.6, '電気 ← 払うと届く：どこかの発電所', '#C08A1E', 23.6, 1.5)}
+    ${arr(25, 52.5, 25, 26.4, '食べもの ← 払うと届く：どこかの畑', '#3F7D4E', 25.6, 49.2)}
+    ${arr(23.5, 26.4, 14, 52.5, 'ごみ → 清掃工場', '#6B7462', 13.4, 49.2, 'end')}
   </svg>`;
 }
-function tokyoPanel(T) {
+function tokyoPanel(T, tab) {
   const c = T.cost;
-  return `<h2>東京の1年</h2>
-  <div class="rows"><span>給料（週5日）</span><b class="num">+${man(T.income)}</b>
+  if (tab === 'book') return `<div><h2>家計簿 · 東京の1年</h2><p class="small">財布は円の一つだけ。水も電気も食べものも、円で買う。</p></div>
+  <div class="rows"><span>給料（会社で週5日）</span><b class="num">+${man(T.income)}</b>
   <span>家賃</span><b class="num neg">−${man(c.rent)}</b><span>食べもの ${T.flows.food}kg</span><b class="num neg">−${man(c.food)}</b>
   <span>水道 ${Math.round(T.flows.water)}m³</span><b class="num neg">−${man(c.water)}</b><span>電気 ${Math.round(T.flows.power).toLocaleString()}kWh</span><b class="num neg">−${man(c.power)}</b>
   <span>そのほかの暮らし・通勤</span><b class="num neg">−${man(c.living + c.commute)}</b><span class="tot">残る</span><b class="num tot">+${man(T.save)}</b></div>
-  <h3>関わっている相手</h3>${webSVG(tokyoWeb())}
-  <p class="small">太い線は「お金」1本だけ。水も電気も食べものも、お金を通して遠くのどこかとつながっている。そのつながりが良いのか悪いのかは、ここからは見えない。</p>`;
-}
-function tokyoWeb() {
-  return { nodes: [
-    { id: 'money', name: 'お金', v: 1, good: null },
-    { id: 'dam', name: 'どこかのダム', v: 0.25, good: undefined }, { id: 'plant', name: 'どこかの発電所', v: 0.25, good: undefined },
-    { id: 'farm', name: 'どこかの畑', v: 0.25, good: undefined }, { id: 'river', name: '処理場の先の川', v: 0.25, good: undefined }
-  ] };
+  <h3>外から買ったもの・外へ出したもの</h3><div class="rows"><span>水を買った</span><b class="num">${Math.round(T.flows.water)}m³</b><span>電気を買った</span><b class="num">${Math.round(T.flows.power).toLocaleString()}kWh</b><span>食べものを買った</span><b class="num">${T.flows.food}kg</b><span>下水に流した</span><b class="num">${Math.round(T.flows.sewer)}m³</b><span>ごみに出した</span><b class="num">${T.flows.garbage}kg</b></div>`;
+  if (tab === 'plan') return `<div><h2>予定 · 週の過ごし方</h2><p class="small">変えられない。平日は会社、週末は休み。</p></div>
+    <div class="week"><span></span>${E.WEEKDAYS.map(d => `<span>${d}</span>`).join('')}<span style="text-align:left">あなた</span>${['work', 'work', 'work', 'work', 'work', 'rest', 'rest'].map(v => `<button class="cell ${v}" disabled>${v === 'work' ? '会社' : '休み'}</button>`).join('')}</div>
+    <p class="small">外貨（円）を稼ぐ日が5日、ほかは休む日。土や水や生き物に手をかける日はない。</p>`;
+  if (tab === 'sky') return `<div><h2>天気</h2><p class="small">東京の雨は年に1,500mmほど。でも、この部屋の暮らしには関係しない。雨が降っても降らなくても、水道から同じ水が来る。屋根に降った雨は、そのまま側溝から下水へ流れていく。</p></div>`;
+  if (tab === 'note') return `<div><h2>ノート</h2><p class="small">まだ何も書いていない。</p></div>${['家', '雨水タンク', '畑'].map(() => `<div class="note locked"><b>？？？</b><span>まだ知らない。</span></div>`).join('')}`;
+  return `<div><h2>めぐり</h2><p class="small">暮らしを、いくつもの「めぐり」の重なりとして見る。円の大きさは自分の手で回している度合い。灰色の大きな円は、お金のめぐり。</p></div>
+  ${orbSVG(E.tokyoOrbs())}
+  <p class="small">いまは、どのめぐりも小さな点のまま、お金の円の中に閉じこもっている。水も、光と熱も、食も、人とのつながりも、ぜんぶ円を払うことでしか関われていない。</p>
+  <div class="nodes">${E.tokyoOrbs().orbs.map(o => `<div class="node"><i class="d" style="background:${o.color}"></i><b>${esc(o.name)}</b><span class="w">${esc(o.via)}</span></div>`).join('')}</div>`;
 }
 
 /* ================= 地球儀で移動 ================= */
 async function travel(from = E.SITES.tokyo, to = E.SITES.med, after = startGame) {
   stop();
-  app.innerHTML = `<div class="travel"><div class="cap" id="cap">${esc(from.name)}から、${esc(to.name)}へ</div><canvas id="tg" aria-hidden="true"></canvas><button class="btn skip" id="skip">とばす</button></div>`;
+  app.innerHTML = `<div class="travel"><div class="cap" id="cap">${from.name ? `${esc(from.name)}から、${esc(to.name)}へ` : esc(to.name)}</div><canvas id="tg" aria-hidden="true"></canvas><button class="btn skip" id="skip">とばす</button></div>`;
   await loadLand();
   const g = createGlobe(document.getElementById('tg'), { lon: from.lon, lat: from.lat });
-  g.label = { lon: from.lon, lat: from.lat, text: from.name }; g.draw();
+  g.label = from.name ? { lon: from.lon, lat: from.lat, text: from.name } : null; g.draw();
   let done = false;
   const finish = () => { if (done) return; done = true; cancelAnimationFrame(g.raf); after(); };
   document.getElementById('skip').onclick = finish;
@@ -109,7 +124,7 @@ async function travel(from = E.SITES.tokyo, to = E.SITES.med, after = startGame)
     g.label = { lon: to.lon, lat: to.lat, text: to.name };
     flyTo(g, { lon: to.lon, lat: to.lat, scale: 1 }, 3200, () => {
       const cap = document.getElementById('cap'); if (!cap) return;
-      cap.textContent = `${to.name}・標高${to.elev.toLocaleString()}m`;
+      cap.textContent = to.key === 'tokyo' || to === E.SITES.tokyo ? '東京・30m²の賃貸' : `${to.name}・標高${to.elev.toLocaleString()}m`;
       flyTo(g, { lon: to.lon, lat: to.lat, scale: 14 }, 1400, () => { document.querySelector('.travel')?.classList.add('fade-out'); setTimeout(finish, 500); });
     });
   }, 500);
@@ -286,7 +301,7 @@ function hintText() {
   const s = G.s, S = E.summarize(s);
   if (!S.house) return 'まず［家］を置きます。地図をクリックすると置けます。斜面がゆるい場所ほど基礎が浅くてすみます（Rで向きを変える）。';
   if (!S.tankCap) return '［雨水タンク］を置きます。畑より高い場所に置くと、ポンプなしで水が届きます。';
-  if (!S.gArea) return '［畑］は地図をドラッグして広さを決めます。400m²で週1日の手入れが要ります。';
+  if (!S.gArea) return '［畑］は押すと10×8mで置けます。押したまま引っぱると広さを決められ、置いたあとも選んで広げられます。400m²で週1日の手入れ。';
   if (s.turn === 0) return '準備ができたら、右下の［ノートPCを閉じる］で3か月進みます。右の［予定］で、週に何日畑に出るかも決められます。';
   return '';
 }
@@ -294,10 +309,10 @@ function svgPoint(e) {
   const svg = document.getElementById('map'); const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
   return pt.matrixTransform(svg.getScreenCTM().inverse());
 }
-function ghostAt(px, py) {
+function ghostAt(px, py, still) {
   const def = E.ITEMS[G.tool]; let [w, h] = G.toolSize || def.size;
   let x = Math.floor(px - w / 2 + 0.5), y = Math.floor(py - h / 2 + 0.5);
-  if (G.drag) {
+  if (G.drag && !still) {
     const x0 = G.drag.x, y0 = G.drag.y, x1 = Math.floor(px), y1 = Math.floor(py);
     if (G.tool === 'hedge') { if (Math.abs(x1 - x0) >= Math.abs(y1 - y0)) { x = Math.min(x0, x1); y = y0; w = Math.abs(x1 - x0) + 1; h = 1; } else { x = x0; y = Math.min(y0, y1); w = 1; h = Math.abs(y1 - y0) + 1; } }
     else { x = Math.min(x0, x1); y = Math.min(y0, y1); w = Math.max(2, Math.abs(x1 - x0) + 1); h = Math.max(2, Math.abs(y1 - y0) + 1); }
@@ -310,7 +325,9 @@ function ghostAt(px, py) {
 }
 function onMove(e) {
   if (!G.tool) return;
-  const p = svgPoint(e); G.ghost = ghostAt(p.x, p.y); drawGhost(); renderInspect();
+  const p = svgPoint(e);
+  if (G.drag && (Math.floor(p.x) !== G.drag.x || Math.floor(p.y) !== G.drag.y)) G.drag.moved = true;
+  G.ghost = G.drag && !G.drag.moved ? ghostAt(p.x, p.y, true) : ghostAt(p.x, p.y); drawGhost(); renderInspect();
 }
 function onDown(e) {
   const p = svgPoint(e);
@@ -322,11 +339,13 @@ function onDown(e) {
     } else G.sel = id;
     renderMap(); renderInspect(); return;
   }
-  if (E.ITEMS[G.tool].resizable) { G.drag = { x: Math.floor(p.x), y: Math.floor(p.y) }; e.target.setPointerCapture?.(e.pointerId); G.ghost = ghostAt(p.x, p.y); drawGhost(); }
+  if (E.ITEMS[G.tool].resizable) { G.drag = { x: Math.floor(p.x), y: Math.floor(p.y), moved: false }; try { document.getElementById('map').setPointerCapture(e.pointerId); } catch { } G.ghost = ghostAt(p.x, p.y, true); drawGhost(); }
 }
 function onUp(e) {
   if (!G.tool) return;
-  const p = svgPoint(e); G.ghost = ghostAt(p.x, p.y); G.drag = null;
+  const p = svgPoint(e);
+  // ドラッグせずに押しただけなら、見えている既定の大きさで置く
+  G.ghost = G.drag && G.drag.moved ? ghostAt(p.x, p.y) : ghostAt(p.x, p.y, true); G.drag = null;
   const g = G.ghost;
   if (!g.ok) { renderInspect(); return; }
   const r = E.place(G.s, g);
@@ -368,6 +387,7 @@ function renderInspect() {
     const lines = [`${g.w}×${g.h}m · 標高 ${r.elev.toFixed(1)}m · 傾き ${r.slope.toFixed(0)}°`];
     if (g.type === 'house') lines.push(`基礎の深さ ${g.depth.toFixed(1)}m が要る（${E.SITES[s.site].frostDepth ? '凍る深さと斜面' : '斜面が急なほど深い'}）`);
     if (g.type === 'tank' && S.gArea) { const d = r.elev - S.gElev; lines.push(d >= 1.5 ? `畑より${d.toFixed(1)}m高い → 重力で水が届く` : `畑より高くない（${d.toFixed(1)}m） → ポンプが要る`); }
+    if (E.ITEMS[g.type].resizable) lines.push(G.drag && G.drag.moved ? 'はなすと置く' : '押すとこの大きさで置く。押したまま引っぱると広さを決められる');
     if (g.type === 'garden') { lines.push(`手入れ 週${(g.w * g.h / 400).toFixed(2)}日`); if (S.tankCap) { const d = S.tElev - r.elev; lines.push(d >= 1.5 ? `タンクより${d.toFixed(1)}m低い → 重力で水が届く` : 'タンクより低くない → ポンプが要る'); } }
     el.innerHTML = `<div><h3>${E.ITEMS[g.type].name}を置く</h3>${lines.map(esc).join('<br>')}</div><div><b class="num">${man(g.cost)}</b><br>${g.ok ? '<span class="ok">置ける</span>' : `<span class="ng">${esc(g.why || '')}</span>`}</div>`;
     return;
@@ -397,6 +417,11 @@ function renderInspect() {
     }
     info.push(`手入れ 週${(a / 400).toFixed(2)}日`);
   }
+  if (d.resizable) {
+    for (const [k, lab] of [['w', '東西'], ['h', '南北']]) {
+      acts.push(`<button class="btn" data-act="size:${k}:-1" aria-label="${lab}を1m縮める">${lab}−1m</button><button class="btn" data-act="size:${k}:1" aria-label="${lab}を1m広げる">${lab}＋1m</button>`);
+    }
+  }
   if (it.type === 'tank' && S.gArea) { const dd = r.elev - S.gElev; info.push(dd >= 1.5 ? `畑より${dd.toFixed(1)}m高い：重力で給水` : `畑より高くない：ポンプで給水`); }
   if (d.life) info.push(`寿命 ${d.life}年`);
   acts.push(`<button class="btn ghost" data-act="remove">撤去（お金は戻らない）</button>`);
@@ -407,6 +432,7 @@ function renderInspect() {
     else if (a === 'deep') { r2 = E.modify(G.s, it.id, { depth: Math.round((it.depth + 0.3) * 10) / 10 }); }
     else if (a.startsWith('mod:')) { r2 = E.modify(G.s, it.id, { mods: { [a.slice(4)]: true } }); }
     else if (a.startsWith('ins:')) { r2 = E.modify(G.s, it.id, { mods: { ins: a.slice(4) } }); }
+    else if (a.startsWith('size:')) { const [, k, dv] = a.split(':'); r2 = E.modify(G.s, it.id, { [k]: it[k] + Number(dv) }); }
     if (r2) { if (r2.error) { alertBox(r2.error); return; } G.s = r2.state; }
     persist(); renderAll();
   });
@@ -414,7 +440,7 @@ function renderInspect() {
 function alertBox(msg) { modal(`<p>${esc(msg)}</p><button class="btn" data-m="ok">OK</button>`, (m, c) => c()); }
 
 /* ---------- 右のダッシュボード ---------- */
-const TABS = [['web', '関係の網'], ['book', '家計簿'], ['plan', '予定'], ['sky', '天気'], ['note', 'ノート']];
+const TABS = [['web', 'めぐり'], ['book', '家計簿'], ['plan', '予定'], ['sky', '天気'], ['note', 'ノート']];
 function renderTabs() {
   const fresh = G.s.learned.some(l => l.turn === G.s.turn - 1);
   document.getElementById('tabs').innerHTML = TABS.map(([k, n]) => `<button class="tab${G.tab === k ? ' on' : ''}" data-tab="${k}">${n}${k === 'note' && fresh ? '<span class="dot" aria-label="新しい"></span>' : ''}</button>`).join('');
@@ -440,16 +466,43 @@ function webSVG(rel) {
   });
   return `<svg class="web" viewBox="-50 0 420 300" role="img" aria-label="関係の網：${nodes.map(x => `${x.name} ${Math.round(x.v * 100)}`).join('、')}">${lines.join('')}${dots.join('')}<circle cx="${cx}" cy="${cy}" r="18" fill="#1F2A2E"/><text x="${cx}" y="${cy + 4}" font-size="11" text-anchor="middle" fill="#FBFAF5">あなた</text></svg>`;
 }
+function orbSVG(o) {
+  const W = 380, H = 330, cx = W / 2, cy = H / 2 + 6;
+  const Rm = 36 + 84 * Math.max(0, Math.min(1, o.money));
+  const n = o.orbs.length, pos = {};
+  const circles = o.orbs.map((orb, i) => {
+    const a = -Math.PI / 2 + i * 2 * Math.PI / n, d = orb.direct;
+    const r = 7 + 52 * Math.sqrt(d);
+    const dist = (1 - d) * Rm * 0.55 + d * (Rm * 0.35 + 70 + r * 0.5);
+    const x = cx + dist * Math.cos(a), y = cy + dist * Math.sin(a);
+    pos[orb.id] = { x, y, r, a };
+    return { orb, x, y, r, a };
+  });
+  const links = o.links.map(l => { const A = pos[l.a], B = pos[l.b]; return `<line x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" stroke="#1F2A2E" stroke-opacity="${(0.08 + 0.25 * l.v).toFixed(2)}" stroke-width="${(2 + 14 * l.v).toFixed(1)}" stroke-linecap="round"/>`; }).join('');
+  const body = circles.map(({ orb, x, y, r }) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="${orb.color}" fill-opacity="${(0.22 + 0.25 * orb.direct).toFixed(2)}" stroke="${orb.color}" stroke-width="1.5"/>${orb.hurt > 0.15 ? `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(r + 4).toFixed(1)}" fill="none" stroke="#B8641F" stroke-width="${(1 + 3 * orb.hurt).toFixed(1)}" stroke-dasharray="3 3"/>` : ''}`).join('');
+  const labels = circles.map(({ orb, x, y, r, a }) => {
+    const out = r < 26, lx = out ? x + Math.cos(a) * (r + 8) : x, ly = out ? y + Math.sin(a) * (r + 8) + 4 : y + 4;
+    const anchor = out ? (Math.cos(a) > 0.3 ? 'start' : Math.cos(a) < -0.3 ? 'end' : 'middle') : 'middle';
+    return `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="11" text-anchor="${anchor}" fill="#1F2A2E">${esc(orb.name.replace('のめぐり', ''))} ${Math.round(orb.direct * 100)}%</text>`;
+  }).join('');
+  return `<svg class="web" viewBox="-30 0 ${W + 60} ${H}" role="img" aria-label="めぐりの重なり。お金 ${Math.round(o.money * 100)}%、${o.orbs.map(x => `${x.name} ${Math.round(x.direct * 100)}%`).join('、')}">
+    <circle cx="${cx}" cy="${cy}" r="${Rm.toFixed(1)}" fill="#6B7462" fill-opacity=".13" stroke="#6B7462" stroke-width="1.5" stroke-dasharray="5 4"/>
+    ${links}${body}${labels}
+    <text x="${cx}" y="${cy - 2}" font-size="11" text-anchor="middle" fill="#4A544F">お金の</text><text x="${cx}" y="${cy + 12}" font-size="11" text-anchor="middle" fill="#4A544F">めぐり ${Math.round(o.money * 100)}%</text></svg>`;
+}
 function panelWeb() {
-  const rel = E.relations(G.s);
+  const rel = E.relations(G.s), ob = E.orbs(G.s);
   const good = rel.nodes.filter(x => x.good === true && x.v > 0.15).length;
   const sorted = [...rel.nodes].sort((a, b) => b.v - a.v);
-  return `<div><h2>関係の網</h2><p class="small">線の太さが関わりの強さ。緑は相手を豊かにしている関係、橙は相手を傷めている関係、灰色はお金で済ませている割合。</p></div>
-    ${webSVG(rel)}
+  return `<div><h2>めぐり</h2><p class="small">暮らしを、いくつもの「めぐり」の重なりとして見る。色の円が自分の手で回しているめぐり、灰色の点線の円がお金のめぐり。お金の円の中にあるものは、まだお金を通してしか関われていない。円をつなぐ太い帯は、めぐり同士がつながっているところ。橙の点線は、そのめぐりの先で何かを傷めている印。</p></div>
+    ${orbSVG(ob)}
     <div><div class="rows"><span>豊かな関係（この章の目標 ${GOAL}）</span><b class="num">${good} / ${GOAL}</b></div><div class="meter"><i style="width:${Math.min(100, good / GOAL * 100)}%"></i></div></div>
-    <div class="rows"><span>網の強さ（東京のとき −0.2）</span><b class="num">${rel.score.toFixed(1)}</b></div>
+    <div class="rows"><span>お金のめぐり（東京のとき 100%）</span><b class="num">${Math.round(ob.money * 100)}%</b></div>
     ${G.s.log.length ? '' : '<p class="small">3か月を過ごすと、網に暮らしの結果が出ます。</p>'}
-    <div class="nodes">${sorted.map(x => `<div class="node"><i class="d" style="background:${x.good === true ? '#3F7D4E' : x.good === false ? '#B8641F' : '#6B7462'};opacity:${0.3 + 0.7 * x.v}"></i><b>${esc(x.name)}</b><span class="w">${esc(x.why)}</span></div>`).join('')}</div>`;
+    ${ob.links.length ? `<h3>つながっているめぐり</h3><div class="nodes">${ob.links.map(l => `<div class="node"><i class="d" style="background:#1F2A2E;opacity:${0.3 + 0.7 * l.v}"></i><b>${esc(E.ORBS.find(x => x.id === l.a).name.replace('のめぐり', ''))}×${esc(E.ORBS.find(x => x.id === l.b).name.replace('のめぐり', ''))}</b><span class="w">${esc(l.why)}</span></div>`).join('')}</div>` : ''}
+    <h3>関わっている相手</h3>
+    ${ob.orbs.map(o => `<div class="nodes"><div class="small" style="color:${o.color};font-weight:700">${esc(o.name)} ${Math.round(o.direct * 100)}%</div>${o.nodes.map(x => `<div class="node"><i class="d" style="background:${x.good === false ? '#B8641F' : o.color};opacity:${0.3 + 0.7 * x.v}"></i><b>${esc(x.name)}</b><span class="w">${esc(x.why)}</span></div>`).join('')}</div>`).join('')}
+    <div class="nodes"><div class="small" style="font-weight:700">お金のめぐり ${Math.round(ob.money * 100)}%</div><div class="node"><i class="d" style="background:#6B7462"></i><b>お金</b><span class="w">暮らしに要るものを、買って済ませている割合</span></div></div>`;
 }
 function panelBook() {
   const s = G.s, last = s.log[s.log.length - 1], T = E.tokyoYear();
@@ -566,7 +619,7 @@ function wake(before, rep, lessons) {
       <div class="stat"><span>電気を太陽で</span><b>${pct(rep.powerSelf)}</b></div>
       <div class="stat"><span>食べものを畑で</span><b>${pct(rep.foodSelf)}</b><span>収穫 ${Math.round(rep.harvest + rep.treeFood)}kg</span></div>
       <div class="stat"><span>土の有機物</span><b>${rep.om.toFixed(2)}%</b></div>
-      <div class="stat"><span>関係の網</span><b>${relA.toFixed(1)}</b><span>${relA >= relB ? '+' : '−'}${Math.abs(relA - relB).toFixed(1)}</span></div>
+      <div class="stat"><span>お金のめぐり</span><b>${Math.round(E.orbs(s).money * 100)}%</b><span>東京のとき 100%</span></div>
     </div>
     ${mails ? `<div class="cards">${mails}</div>` : ''}
     <div class="cards">${evs.length ? evs.map(({ e, t }) => `<div class="card ${t.tone}"><span class="k">出来事</span><b>${esc(t.title)}</b><span>${esc(t.body)}</span>${choiceHTML(t.choice)}</div>`).join('') : '<div class="card"><b>穏やかな3か月だった</b><span>大きな出来事はなかった。</span></div>'}</div>
@@ -596,7 +649,7 @@ function endHTML() {
   const good = rel.nodes.filter(x => x.good === true && x.v > 0.15).map(x => x.name);
   const years = (G.s.turn / 4).toFixed(1), site = E.SITES[G.s.site];
   const more = Object.keys(LANDS).some(k => k !== G.s.site);
-  return `<div class="card good"><b>${esc(site.name)}で、めぐりができた（${years}年）</b><span>東京では、関わる相手は「お金」1本だった。いまは ${good.length}の相手と豊かに関わっている：${esc(good.join('、'))}。</span><span class="k">${more ? '学んだことを持って、次の土地へ行ける。ここで続けてもいい。' : '地球儀から好きな土地を選ぶ章は準備中。ここで続けられる。'}</span></div>`;
+  return `<div class="card good"><b>${esc(site.name)}で、めぐりができた（${years}年）</b><span>東京では、どのめぐりもお金の円の中にあった。いまは ${good.length}の相手と豊かに関わっている：${esc(good.join('、'))}。</span><span class="k">${more ? '学んだことを持って、次の土地へ行ける。ここで続けてもいい。' : '地球儀から好きな土地を選ぶ章は準備中。ここで続けられる。'}</span></div>`;
 }
 const GOAL = 12;
 const MODHINT = { toilet: '家を選ぶと工夫として足せる', saving: '家を選ぶと工夫として足せる', insulation: '家を選ぶと断熱を足せる', deep: '家を選ぶと基礎を深くできる', mulch: '畑を選ぶと工夫として足せる', terrace: '畑を選ぶと工夫として足せる' };

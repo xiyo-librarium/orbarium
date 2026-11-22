@@ -664,6 +664,53 @@ export function relations(s) {
   return { nodes, score };
 }
 
+/* ---------- めぐり（orb）：暮らしを複数の循環の重ね合わせとして見る ----------
+   direct = 自分の手で回している度合い。残りはお金を通して、遠くのどこかで回っている */
+export const ORBS = [
+  { id: 'water', name: '水のめぐり', color: '#2B6CB0', members: ['rain', 'ground', 'river'] },
+  { id: 'energy', name: '光と熱のめぐり', color: '#C08A1E', members: ['sun'] },
+  { id: 'soil', name: '土と養分のめぐり', color: '#8A6A42', members: ['soil', 'worms'] },
+  { id: 'food', name: '食のめぐり', color: '#3F7D4E', members: ['crops', 'hens'] },
+  { id: 'life', name: '生き物のめぐり', color: '#2E8B7A', members: ['insects', 'birds', 'lizards', 'frogs'] },
+  { id: 'social', name: '人のめぐり', color: '#A0527A', members: ['neighbors', 'friend'] }
+];
+export function orbs(s) {
+  const rel = relations(s), N = Object.fromEntries(rel.nodes.map(x => [x.id, x]));
+  const avg = (ids) => ids.reduce((a, id) => a + (N[id]?.v || 0), 0) / ids.length;
+  const direct = {
+    water: N.rain.v * 0.75 + N.ground.v * 0.25,
+    energy: N.sun.v,
+    soil: avg(['soil', 'worms']),
+    food: Math.min(1, N.crops.v * 0.8 + N.hens.v * 0.2),
+    life: avg(['insects', 'birds', 'lizards', 'frogs']),
+    social: avg(['neighbors', 'friend'])
+  };
+  const list = ORBS.map(o => ({ ...o, direct: Math.max(0, Math.min(1, direct[o.id])), hurt: Math.max(0, ...o.members.map(id => N[id].good === false ? N[id].v : 0)), nodes: o.members.map(id => N[id]) }));
+  const D = Object.fromEntries(list.map(o => [o.id, o.direct]));
+  const S = summarize(s);
+  const links = [
+    ['water', 'food', S.gArea ? Math.min(D.water, D.food) : 0, '雨と排水で畑を育てる'],
+    ['soil', 'food', Math.min(D.soil, D.food), '堆肥が実りになり、残りが土に還る'],
+    ['food', 'social', N.neighbors.v, '採れた野菜を分ける'],
+    ['life', 'food', Math.min(D.life, D.food), '虫が受粉し、天敵が害虫を食べる'],
+    ['water', 'soil', Math.min(N.ground.v, D.soil), '雨が土に浸み、地下へ還る'],
+    ['water', 'life', N.frogs.v, 'ため池に水の生き物が集まる'],
+    ['energy', 'water', S.pvKw && S.tankCap ? Math.min(D.energy, D.water) * 0.6 : 0, '太陽の電気でポンプを回す']
+  ].filter(l => l[2] > 0.05).map(([a, b, v, why]) => ({ a, b, v, why }));
+  return { money: N.money.v, orbs: list, links };
+}
+/* 東京：すべてがお金を通している */
+export function tokyoOrbs() {
+  const mk = (id, via) => ({ ...ORBS.find(o => o.id === id), direct: 0.02, via });
+  return {
+    money: 1, links: [],
+    orbs: [
+      mk('water', '水道料金 → どこかのダムと処理場'), mk('energy', '電気料金 → どこかの発電所'), mk('soil', '（関わりなし）生ごみは清掃工場へ'),
+      mk('food', '食費 → スーパー → どこかの畑'), mk('life', '（関わりなし）'), mk('social', '給料と家賃 → 会社と大家さん')
+    ]
+  };
+}
+
 /* ---------- 東京の1年（序章） ---------- */
 export function tokyoYear() {
   const n = 1, workDays = 5;
@@ -699,7 +746,8 @@ export function place(s, x) {
   const cost = itemCost(x);
   if (cost > s.cash + 1e-9) return { state: s, error: 'お金が足りない' };
   const t = clone(s);
-  const it = { ...x, id: t.nextId++, built: t.turn, mods: x.mods || {} };
+  const it = { type: x.type, x: x.x, y: x.y, w: x.w, h: x.h, id: t.nextId++, built: t.turn, mods: x.mods || {} };
+  if (x.depth) it.depth = x.depth;
   if (it.type === 'house' && !it.depth) it.depth = depthNeed(s.site, c.slope);
   t.items.push(it); t.cash -= cost;
   return { state: t, cost, item: it };
@@ -711,7 +759,11 @@ export function removeItem(s, id) {
 export function modify(s, id, change) {
   const t = clone(s), it = t.items.find(x => x.id === id); if (!it) return { state: s, error: 'ない' };
   const before = itemCost(it);
-  const next = { ...it, mods: { ...it.mods, ...(change.mods || {}) }, depth: change.depth ?? it.depth };
+  const next = { ...it, mods: { ...it.mods, ...(change.mods || {}) }, depth: change.depth ?? it.depth, x: change.x ?? it.x, y: change.y ?? it.y, w: change.w ?? it.w, h: change.h ?? it.h };
+  if (change.w != null || change.h != null || change.x != null || change.y != null) {
+    if (next.w < 1 || next.h < 1) return { state: s, error: 'これより小さくできない' };
+    const c = canPlace(s, next); if (!c.ok) return { state: s, error: c.why };
+  }
   let cost = Math.max(0, itemCost(next) - before);
   if (change.depth != null && change.depth > it.depth) cost *= 2;      // 後から基礎を深くすると2倍
   if (cost > t.cash + 1e-9) return { state: s, error: 'お金が足りない' };
