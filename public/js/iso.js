@@ -779,77 +779,102 @@ export function createView(canvas, world, opt = {}) {
     };
   }
   /* ---------- 家具 ---------- */
-  function drawFurn(list, f, z, meta, alpha, tint2) {
+  function drawFurn(outList, f, z, meta, alpha, tint2) {
+    const list = [], mark = (bb) => { list[list.length - 1].bb = bb; };   // 部品をいったん集めて、あとで前後を決める
     // 向き r：fwd は頭→足の向き、side はその右。(a, b)＝頭からの距離・横の位置 → 世界の座標
     const [fx, fy] = FDIR[(f.r || 0) % 4], sx = -fy, sy = fx, L = FURN[f.t].d, g = geom();
     const ox = f.x + 0.5 - fx * 0.5, oy = f.y + 0.5 - fy * 0.5;
     const W = (a, b) => [ox + fx * a + sx * b, oy + fy * a + sy * b];
-    // 箱。o.bias：重なった部品の描く順（脚は先、上にのるものは後）。o.decor(cx, pt)：pt(fa, fb) は上面の中の位置（頭→足、左→右）
+    // 箱。o.decor(cx, pt)：pt(fa, fb) は上面の中の位置（頭→足、左→右）
     const R = (a0, a1, b0, b1, z0, ht, col, o = {}) => {
       const p = W(a0, b0), q = W(a1, b1), X0 = Math.min(p[0], q[0]), X1 = Math.max(p[0], q[0]), Y0 = Math.min(p[1], q[1]), Y1 = Math.max(p[1], q[1]);
       const decor = o.decor && !tint2 ? (cx, t) => o.decor(cx, (fa, fb) => { const [wx, wy] = W(a0 + fa * (a1 - a0), b0 + fb * (b1 - b0)); return faceAt(t, (wx - X0) / (X1 - X0), (wy - Y0) / (Y1 - Y0)); }) : null;
-      rbox(list, X0, Y0, X1, Y1, z0, ht, tint2 || col, { ...meta, dbias: o.bias || 0, decor }, o.al ?? alpha);
+      rbox(list, X0, Y0, X1, Y1, z0, ht, tint2 || col, { ...meta, decor }, o.al ?? alpha); mark([X0, X1, Y0, Y1, z0, z0 + ht]);
     };
-    const Cy = (a, b, z0, r, ht, col, o = {}) => { const [wx, wy] = W(a, b); cylinder(list, wx, wy, z0, r, ht, tint2 || col, meta, (v.top ? (z0 + ht) * 10 : project(wx, wy, z0, g)[2] + z0 * 0.001 + ht * 0.0005) + (o.bias || 0), o); };
+    const Cy = (a, b, z0, r, ht, col, o = {}) => { const [wx, wy] = W(a, b); cylinder(list, wx, wy, z0, r, ht, tint2 || col, meta, 0, o); mark([wx - r, wx + r, wy - r, wy + r, z0, z0 + ht]); };
     const ln = (cx, A, B, c, w = 1) => { cx.strokeStyle = c; cx.lineWidth = w * v.dpr; lineOn(cx, A, B); };
     const fillQ = (cx, pt, a0, b0, a1, b1, c) => { const q = [pt(a0, b0), pt(a1, b0), pt(a1, b1), pt(a0, b1)]; cx.fillStyle = c; cx.beginPath(); cx.moveTo(q[0][0], q[0][1]); for (const r of q) cx.lineTo(r[0], r[1]); cx.closePath(); cx.fill(); };
     const grain = (cx, pt) => { for (const fb of [0.22, 0.47, 0.71]) ln(cx, pt(0.06, fb), pt(0.94, fb + 0.02), 'rgba(110,70,35,.16)'); };
     const b = z + 0.1, ctr = W(L / 2, 0);
     if (!tint2) blob(list, ctr[0], ctr[1], b, L === 2 ? 0.8 : 0.45, 0.22, dep(Math.floor(ctr[0]), Math.floor(ctr[1]), z, 0.1) + 1e-6);
-    const leg = (a, c, top, col) => R(a - 0.03, a + 0.03, c - 0.03, c + 0.03, b, top, col, { bias: -0.25 });
+    const leg = (a, c, top, col) => R(a - 0.03, a + 0.03, c - 0.03, c + 0.03, b, top, col);
     if (f.t === 'toilet') {
       R(0.04, 0.24, -0.2, 0.2, b, 0.8, '#F2F2EE');
-      R(0.03, 0.25, -0.21, 0.21, b + 0.8, 0.035, '#FFFFFF', { bias: 0.2 });
-      Cy(0.14, 0, b + 0.835, 0.03, 0.015, '#C9CED2', { bias: 0.3 });
-      Cy(0.46, 0, b, 0.12, 0.3, '#ECECE8', { bias: -0.2 });
+      R(0.03, 0.25, -0.21, 0.21, b + 0.8, 0.035, '#FFFFFF');
+      Cy(0.14, 0, b + 0.835, 0.03, 0.015, '#C9CED2');
+      Cy(0.46, 0, b, 0.12, 0.28, '#ECECE8');
       Cy(0.48, 0, b + 0.28, 0.2, 0.12, '#F6F6F2', { top: '#FFFFFF', lid: '#BFD3DA' });
     } else if (f.t === 'ctoilet') {
       R(0.05, 0.72, -0.34, 0.34, b, 0.46, '#B98B58', { decor: (cx, pt) => { for (const fb of [0.25, 0.5, 0.75]) ln(cx, pt(0, fb), pt(1, fb), 'rgba(80,50,25,.25)'); const c = pt(0.55, 0.5), e = pt(0.55, 0.78), rr = Math.hypot(e[0] - c[0], e[1] - c[1]); cx.fillStyle = '#F4F1EA'; cx.beginPath(); cx.ellipse(c[0], c[1], rr, rr * 0.55, 0, 0, 7); cx.fill(); cx.fillStyle = '#3A2E24'; cx.beginPath(); cx.ellipse(c[0], c[1], rr * 0.6, rr * 0.33, 0, 0, 7); cx.fill(); } });
       Cy(0.86, 0.26, b, 0.1, 0.3, '#D8CDB8', { top: '#E3C995' });
-      Cy(0.1, -0.26, b + 0.46, 0.035, 1.6, '#8A8F92', { bias: 0.1 });
+      Cy(0.1, -0.26, b + 0.46, 0.035, 1.6, '#8A8F92');
     } else if (f.t === 'shower' || f.t === 'shower2') {
       R(0.04, 0.96, -0.46, 0.46, b, 0.06, FURN[f.t].color, { decor: (cx, pt) => { for (const k of [0.25, 0.5, 0.75]) { ln(cx, pt(k, 0.03), pt(k, 0.97), 'rgba(80,110,130,.22)'); ln(cx, pt(0.03, k), pt(0.97, k), 'rgba(80,110,130,.22)'); } const c = pt(0.5, 0.5); cx.fillStyle = '#7E8C94'; cx.beginPath(); cx.ellipse(c[0], c[1], 3 * v.dpr, 1.8 * v.dpr, 0, 0, 7); cx.fill(); } });
-      Cy(0.12, 0.38, b + 0.06, 0.022, 1.94, '#B8C2C8', { bias: 0.05 });
-      R(0.09, 0.15, 0.32, 0.44, b + 1.0, 0.1, '#9AA5AC', { bias: 0.1 });
-      R(0.12, 0.38, 0.36, 0.4, b + 1.98, 0.035, '#B8C2C8', { bias: 0.1 });
-      Cy(0.38, 0.38, b + 1.9, 0.08, 0.06, '#C9D2D7', { bias: 0.15, top: '#DDE5E9' });
-      R(0.04, 0.96, -0.47, -0.43, b + 0.06, 1.9, '#D9ECF5', { al: Math.min(alpha, 0.32), bias: 0.05 });
-      R(0.3, 0.62, -0.5, -0.4, b + 1.72, 0.24, f.t === 'shower2' ? '#9FC7A8' : '#E8A79C', { bias: 0.15 });
+      Cy(0.12, 0.38, b + 0.06, 0.022, 1.92, '#B8C2C8');
+      R(0.09, 0.15, 0.25, 0.35, b + 1.0, 0.1, '#9AA5AC');
+      R(0.12, 0.38, 0.36, 0.4, b + 1.98, 0.035, '#B8C2C8');
+      Cy(0.38, 0.38, b + 1.9, 0.08, 0.06, '#C9D2D7', { top: '#DDE5E9' });
+      R(0.04, 0.96, -0.47, -0.43, b + 0.06, 1.9, '#D9ECF5', { al: Math.min(alpha, 0.32) });
+      const towel = f.t === 'shower2' ? '#9FC7A8' : '#E8A79C';   // ガラスの上に掛けたタオル（外・上・内の3枚）
+      R(0.3, 0.62, -0.5, -0.47, b + 1.66, 0.3, towel); R(0.3, 0.62, -0.5, -0.4, b + 1.96, 0.03, towel); R(0.3, 0.62, -0.43, -0.4, b + 1.7, 0.26, towel);
     } else if (f.t === 'bed') {
       const wood = '#A07850', woodD = '#7E5C3C';
-      for (const [a, c] of [[0.1, -0.42], [0.1, 0.42], [L - 0.06, -0.42], [L - 0.06, 0.42]]) leg(a, c, 0.14, woodD);
+      for (const [a, c] of [[0.1, -0.42], [0.1, 0.42], [L - 0.06, -0.42], [L - 0.06, 0.42]]) leg(a, c, 0.12, woodD);
       R(0.07, L - 0.02, -0.46, 0.46, b + 0.12, 0.18, wood, { decor: grain });
-      R(0.0, 0.07, -0.47, -0.39, b, 0.98, woodD); R(0.0, 0.07, 0.39, 0.47, b, 0.98, woodD);
-      R(0.01, 0.06, -0.39, 0.39, b + 0.84, 0.1, woodD);
+      R(0.0, 0.07, -0.47, -0.39, b, 0.84, woodD); R(0.0, 0.07, 0.39, 0.47, b, 0.84, woodD);
+      R(0.0, 0.07, -0.47, 0.47, b + 0.84, 0.11, woodD);
       for (const k of [-0.24, -0.08, 0.08, 0.24]) R(0.018, 0.052, k - 0.055, k + 0.055, b + 0.3, 0.54, wood);
-      R(0.08, 0.62, -0.42, 0.42, b + 0.3, 0.16, '#F3EFE6', { bias: 0.2 });
-      R(0.62, L - 0.04, -0.45, 0.45, b + 0.3, 0.2, '#88AACB', { bias: 0.2, decor: (cx, pt) => {
+      R(0.08, 0.62, -0.42, 0.42, b + 0.3, 0.16, '#F3EFE6');
+      R(0.62, L - 0.04, -0.45, 0.45, b + 0.3, 0.2, '#88AACB', { decor: (cx, pt) => {
         fillQ(cx, pt, 0, 0, 0.1, 1, '#FBFAF4');
         for (const k of [0.33, 0.66]) ln(cx, pt(0.1, k), pt(1, k), 'rgba(40,60,90,.16)');
         for (const k of [0.35, 0.6]) ln(cx, pt(k, 0.02), pt(k, 0.98), 'rgba(40,60,90,.12)');
         fillQ(cx, pt, 0.72, 0, 0.95, 1, '#D98E5A'); for (const k of [0.76, 0.91]) ln(cx, pt(k, 0), pt(k, 1), 'rgba(250,225,190,.8)', 1.4);
       } });
-      R(0.12, 0.44, -0.3, 0.3, b + 0.46, 0.1, '#FFFFFF', { bias: 0.35, decor: (cx, pt) => { ln(cx, pt(0.5, 0.15), pt(0.5, 0.85), 'rgba(150,150,140,.35)'); const c = pt(0.35, 0.3); cx.fillStyle = 'rgba(255,255,255,.7)'; cx.beginPath(); cx.arc(c[0], c[1], 2.5 * v.dpr, 0, 7); cx.fill(); } });
+      R(0.12, 0.44, -0.3, 0.3, b + 0.46, 0.1, '#FFFFFF', { decor: (cx, pt) => { ln(cx, pt(0.5, 0.15), pt(0.5, 0.85), 'rgba(150,150,140,.35)'); const c = pt(0.35, 0.3); cx.fillStyle = 'rgba(255,255,255,.7)'; cx.beginPath(); cx.arc(c[0], c[1], 2.5 * v.dpr, 0, 7); cx.fill(); } });
     } else if (f.t === 'table') {
       const wood = '#B98B58', woodD = '#8E6A44';
-      for (const [a, c] of [[0.56, -0.32], [0.56, 0.32], [1.44, -0.32], [1.44, 0.32]]) leg(a, c, 0.69, woodD);
-      R(0.56, 1.44, -0.32, 0.32, b + 0.6, 0.09, woodD, { bias: -0.1 });
+      for (const [a, c] of [[0.56, -0.32], [0.56, 0.32], [1.44, -0.32], [1.44, 0.32]]) leg(a, c, 0.6, woodD);
+      R(0.56, 1.44, -0.32, 0.32, b + 0.6, 0.09, woodD);
       R(0.5, 1.5, -0.38, 0.38, b + 0.69, 0.05, wood, { decor: grain });
-      Cy(1.15, 0.18, b + 0.74, 0.05, 0.08, '#C0704A', { bias: 0.3, top: '#6B4A30' });
-      sphere(list, ...W(1.15, 0.18), b + 0.88, 0.08, '#5E9A4C', meta, (v.top ? (b + 1) * 10 : project(...W(1.15, 0.18), b + 0.74, g)[2]) + 0.35);
-      Cy(0.8, -0.12, b + 0.74, 0.08, 0.015, '#F4F1EA', { bias: 0.3, lid: '#E9E2D2' });
+      Cy(1.15, 0.18, b + 0.74, 0.05, 0.08, '#C0704A', { top: '#6B4A30' });
+      { const [px, py] = W(1.15, 0.18); sphere(list, px, py, b + 0.9, 0.08, '#5E9A4C', meta, 0); mark([px - 0.08, px + 0.08, py - 0.08, py + 0.08, b + 0.82, b + 0.98]); }
+      Cy(0.8, -0.12, b + 0.74, 0.08, 0.015, '#F4F1EA', { lid: '#E9E2D2' });
       const chair = (s) => {   // s=1：頭側（背もたれが外）、s=-1：足側
         const A = (a) => s > 0 ? a : L - a;
         const a0 = Math.min(A(0.06), A(0.44)), a1 = Math.max(A(0.06), A(0.44));
         for (const [a, c] of [[0.09, -0.17], [0.09, 0.17], [0.41, -0.17], [0.41, 0.17]]) leg(A(a), c, 0.42, woodD);
         R(a0, a1, -0.2, 0.2, b + 0.42, 0.04, wood);
-        R(Math.min(A(0.1), A(0.4)), Math.max(A(0.1), A(0.4)), -0.17, 0.17, b + 0.46, 0.035, '#C8604A', { bias: 0.15 });
+        R(Math.min(A(0.1), A(0.4)), Math.max(A(0.1), A(0.4)), -0.17, 0.17, b + 0.46, 0.035, '#C8604A');
         const k0 = Math.min(A(0.06), A(0.1)), k1 = Math.max(A(0.06), A(0.1));
-        R(k0, k1, -0.2, -0.16, b + 0.46, 0.5, woodD, { bias: 0.1 }); R(k0, k1, 0.16, 0.2, b + 0.46, 0.5, woodD, { bias: 0.1 });
-        R(k0, k1, -0.2, 0.2, b + 0.84, 0.1, wood, { bias: 0.12 }); R(k0, k1, -0.04, 0.04, b + 0.5, 0.34, wood, { bias: 0.11 });
+        R(k0, k1, -0.2, -0.16, b + 0.46, 0.38, woodD); R(k0, k1, 0.16, 0.2, b + 0.46, 0.38, woodD);
+        R(k0, k1, -0.2, 0.2, b + 0.84, 0.1, wood); R(k0, k1, -0.04, 0.04, b + 0.46, 0.38, wood);
       };
       chair(1); chair(-1);
     }
+    // 部品の前後：重ならない向き（回したあとの x・y、高さ）で、奥のもの・下のものを先に描く。家具全体は床のあと
+    const an = v.angle * Math.PI / 180, ca = Math.cos(an), sa = Math.sin(an), E2 = 1e-4;
+    const rot = (q) => { const xs = [], ys = []; for (const px of [q[0], q[1]]) for (const py of [q[2], q[3]]) { xs.push(px * ca - py * sa); ys.push(px * sa + py * ca); } return [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), q[4], q[5]]; };
+    const ps = list.map((it) => { const r = it.bb ? rot(it.bb) : null; return { it, r, d: r ? (r[0] + r[1] + r[2] + r[3]) / 2 + r[4] * 0.8 : -1e9 }; });
+    let order;
+    if (v.top) order = ps.slice().sort((p, q) => (p.r ? p.r[5] : -1e9) - (q.r ? q.r[5] : -1e9) || (p.r ? p.r[4] : 0) - (q.r ? q.r[4] : 0));
+    else {
+      const behind = (A, B) => A.r[1] <= B.r[0] + E2 || A.r[3] <= B.r[2] + E2 || A.r[5] <= B.r[4] + E2;
+      const n = ps.length, indeg = new Array(n).fill(0), out = ps.map(() => []);
+      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+        if (!ps[i].r || !ps[j].r) { if (ps[i].r || ps[j].r) { const [a2, b2] = ps[i].r ? [j, i] : [i, j]; out[a2].push(b2); indeg[b2]++; } continue; }   // 床の影は先
+        const ab = behind(ps[i], ps[j]), ba = behind(ps[j], ps[i]);
+        if (ab && !ba) { out[i].push(j); indeg[j]++; } else if (ba && !ab) { out[j].push(i); indeg[i]++; }
+      }
+      order = []; const done = new Array(n).fill(false);
+      for (let k = 0; k < n; k++) {
+        let best = -1; for (let i = 0; i < n; i++) if (!done[i] && indeg[i] === 0 && (best < 0 || ps[i].d < ps[best].d)) best = i;
+        if (best < 0) for (let i = 0; i < n; i++) if (!done[i] && (best < 0 || ps[i].d < ps[best].d)) best = i;   // 輪になったら近い順
+        done[best] = true; order.push(ps[best]); for (const j of out[best]) indeg[j]--;
+      }
+    }
+    const D = v.top ? (z + 0.1) * 10 + 0.05 : Math.max(...furnCells(f).map(([cx2, cy2]) => dep(cx2, cy2, z, 0.1))) + 0.02;
+    outList.push({ depth: D, meta, draw: (cx, pc) => { for (const p of order) p.it.draw(cx, pc); } });
   }
   function decorFor(b, d) {
     if (d.kind === 'window') return (cx, t) => { cx.strokeStyle = '#2B6CB0'; cx.lineWidth = 1.5; cx.beginPath(); cx.moveTo((t[0][0] + t[2][0]) / 2, t[0][1]); cx.stroke(); };

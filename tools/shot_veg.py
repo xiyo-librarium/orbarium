@@ -31,6 +31,9 @@ try:
         page.screenshot(path=f'{OUT}/4_house_cut.png')
         page.evaluate("()=>{const v=window.__orb.G.view;v.wallMode='up';v.draw()}"); page.wait_for_timeout(300)
         page.screenshot(path=f'{OUT}/5_house_up.png')
+        for k, ang in enumerate([0, 90, 180, 270]):   # 家具の前後が崩れていないか、4方向から近づいて
+            page.evaluate("(a)=>{const v=window.__orb.G.view;v.angle=a;v.wallMode='cut';v.zoom=2.4;v.draw()}", ang); page.wait_for_timeout(250)
+            page.screenshot(path=f'{OUT}/6_furn_{ang}.png', clip={'x': 300, 'y': 200, 'width': 760, 'height': 560})
         print('errors', errs[:5])
 finally:
     srv.terminate()

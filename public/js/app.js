@@ -170,8 +170,7 @@ function topBlock(w, x, y) {
 }
 function renderMap() {
   const s = G.s, wrap = document.getElementById('mapwrap');
-  const hint = hintText();
-  draw2D(wrap, s.world, { label: '敷地の地図。50m四方、1マス1m。色が濃いほど低い段。押すとその場所を3Dで拡大', hint,
+  draw2D(wrap, s.world, { label: '敷地の地図。50m四方、1マス1m。色が濃いほど低い段。押すとその場所を3Dで拡大',
     onCell: (x, y) => { const hs = G.s.world.house; openBuild(x, y, { cat: hs && hs.cells[`${x},${y}`] ? 'house' : null }); }, onHover: (p) => { G.hoverCell = p; renderInspect(); } });
 }
 /* 敷地を上から描く：段の色・等高線（1mごと、5mごとに太く）・置いたもの・家。labels で等高線に標高を書く */
@@ -267,11 +266,15 @@ function draw2D(wrap, w, o) {
 }
 function hintText() {
   const s = G.s, S = E.summarize(s);
-  if (s.turn === 0 && s.site === 'med') return `${s.real ? `ここはメデジン西部、サン・クリストバル地区の実在の山腹。等高線は実際の標高、${s.world.veg && s.real.lc ? '木と草地は衛星から見た実際の植生、' : ''}気温と雨は2014〜2023年の実際の気象から。${s.real.pick?.checked?.length ? `区画は、人の家や道にかからない50m四方を選んでいます（${s.real.pick.checked.join('・')}で確認）。` : ''}` : '実際の標高と気候を取れなかったので、仮の地形で始めています（通信を確かめて、はじめからやり直すと取り直します）。'}オレンジ色が、ルシアの祖父母が建てた小さな板壁の家（12m²、高さ3m。トイレ・シャワー・ベッド・テーブルつき）。地図を押すとその場所を拡大して、何を作るか選べます。`;
+  if (s.turn === 0 && s.site === 'med') return `${s.real ? `メデジン西部、サン・クリストバル地区の実在の山腹です。等高線は実際の標高、${s.world.veg && s.real.lc ? '木や草地は衛星から見た実際の植生、' : ''}気温と雨は2014〜2023年の実際の気象。${s.real.pick?.checked?.length ? '区画は、人の家や道にかからない50m四方を選んでいます。' : ''}` : '実際の標高と気候を取れなかったので、仮の地形で始めています（通信を確かめて、はじめからやり直すと取り直します）。'}オレンジ色が、ルシアの祖父母の小さな板壁の家（12m²、高さ3m。トイレ・シャワー・ベッド・テーブルつき）。地図を押すと拡大して、何を作るか選べます。`;
   return '';
 }
+/* 地図の下の帯：はじめは土地の説明（地図には重ねない。閉じられる）、ふだんは操作の一言 */
 function renderTools() {
-  document.getElementById('tools').innerHTML = `<p class="tools-hint">地図を押すと、その場所を拡大します。拡大した先で、家・畑・水まわりなど何を作るか選べます。</p>`;
+  const el = document.getElementById('tools'), hint = G.s.flags.welcomeClosed ? '' : hintText();
+  if (!hint) { el.innerHTML = `<p class="tools-hint">地図を押すと、その場所を拡大します。拡大した先で、家・畑・水まわりなど何を作るか選べます。</p>`; return; }
+  el.innerHTML = `<div class="welcome"><p>${hint}</p><button class="btn ghost" id="welcomex" aria-label="説明を閉じる">閉じる</button></div>`;
+  document.getElementById('welcomex').onclick = () => { G.s.flags.welcomeClosed = 1; persist(); renderTools(); renderMap(); };
 }
 function renderInspect() {
   const el = document.getElementById('inspect'); if (!el) return;

@@ -333,3 +333,8 @@ h1, h2, h3 { margin: 0; }
 dl.src { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; font-size: 13px; line-height: 1.5; margin: 8px 0 0; }
 dl.src dt { font-weight: 600; color: var(--ink, #1F2A2E); }
 dl.src dd { margin: 0; color: #4A544F; overflow-wrap: anywhere; }
+/* はじめの土地の説明：地図の下の帯に（地図には重ねない） */
+.welcome { display: flex; gap: 10px; align-items: flex-start; width: 100%; padding: 4px 4px 4px 8px; }
+.welcome p { margin: 0; flex: 1; font-size: 13px; line-height: 1.65; color: var(--ink); }
+.welcome .btn { flex: 0 0 auto; padding: 6px 12px; font-size: 13px; }
+@media (max-width: 860px) { .welcome p { font-size: 12.5px; } }
