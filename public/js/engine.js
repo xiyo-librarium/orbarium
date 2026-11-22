@@ -131,7 +131,7 @@ export const ITEMS = {
   house: { name: '家', cost: (o) => B.houseModel(houseSpec(o), { lat: 0 }, 1).materials, labor: (o) => B.houseModel(houseSpec(o), { lat: 0 }, 1).labor, life: 60, size: [4, 4], learn: null, color: '#FBFAF5', design: true },
   tank: { name: '雨水タンク', cost: () => 8, life: 25, size: [2, 2], learn: null, cap: 3 },
   garden: { name: '畑', cost: (o) => o.w * o.h * 0.1, life: 0, size: [10, 8], resizable: true, learn: null },
-  heap: { name: '堆肥場', cost: () => 5, life: 15, size: [2, 2], learn: 'heap' },
+  heap: { name: '堆肥小屋', cost: () => 6, life: 15, size: [2, 2], learn: 'heap' },
   grey: { name: '排水の浄化（バイオフィルター）', cost: (o) => B.filterModel(filterSpec(o), 120).materials, labor: (o) => B.filterModel(filterSpec(o), 120).labor, life: 20, size: [2, 2], learn: 'grey', design: true },
   pv: { name: '太陽光パネル', cost: () => 11, life: 25, size: [2, 1], learn: 'offgrid', kw: 0.4 },
   batt: { name: '蓄電池', cost: () => 15, life: 12, size: [1, 1], learn: 'offgrid', kwh: 5 },
@@ -300,8 +300,31 @@ export function analyzeWorld(s) {
   const a = W.analyze(s.world, SITES[s.site], s.persons.length);
   _anaCache.set(key, { sig, a, n: s.persons.length }); return a;
 }
+/* 堆肥のめぐり（m³/年）：台所の生ごみ・コンポストトイレのし尿・ニワトリのふん・畑の残さを、
+   落ち葉や刈り草（足りなければ製材所のおがくず）と混ぜて、堆肥小屋の区画で寝かせる。
+   1区画（1m³）がさばける量は、暖かい所ほど多い（分解が速い）。入る量が多すぎると、さばけない分は畑に戻らない */
+export function compostBalance(s, A) {
+  const w = s.world, n = s.persons.length, site = SITES[s.site];
+  const tm = (site.tmean || [15]).reduce((a, b) => a + b, 0) / (site.tmean || [15]).length;
+  const bays = A.heap || 0, perBay = 1.6 * Math.max(0.4, Math.min(1.1, tm / 18)), cap = bays * perBay;   // し尿は1年寝かせるので、1区画で年1.6m³ほど
+  const scraps = bays ? 0.3 * n : 0;                         // 小屋がなければ生ごみはごみに出す
+  const toilet = w.mods.compostToilet ? 0.5 * n : 0;        // し尿（かけるおがくず込み）
+  const hens = (A.coops || 0) * 0.8;                        // ふんと敷きわら
+  const resid = bays ? ((A.gArea || 0) + (A.ghBeds || 0)) * 0.004 : 0;   // 畑の残さ
+  const greens = scraps + toilet + hens + resid;
+  const brownNeed = 0.8 * (scraps + hens + resid) + 0.3 * toilet;
+  let forest = 0; if (w.veg) for (const c of w.veg) if (c === 10 || c === 95) forest++;
+  const leaves = forest * 0.008 + (A.trees || 0) * 0.15 + (A.hedge || 0) * 0.03;   // 集められる落ち葉と刈り草
+  const fromPlot = Math.min(brownNeed, leaves), buy = bays ? Math.max(0, brownNeed - fromPlot) : 0;
+  const load = greens + brownNeed, f = !bays ? 0 : load > 0 ? Math.min(1, cap / load) : 1;
+  return { bays, perBay, cap, scraps, toilet, hens, resid, greens, brownNeed, leaves, fromPlot, buy, load, f };
+}
 export function summarize(s) {
   const T = siteTerrain(s.site), w = s.world, A = analyzeWorld(s);
+  const C = compostBalance(s, A), cd = [];
+  if (C.toilet && !C.bays) cd.push({ lv: 'warn', text: 'コンポストトイレのし尿をさばく堆肥小屋がない（汲み取りを頼んでいる）' });
+  if (C.bays && C.f < 0.999) cd.push({ lv: 'warn', text: `堆肥小屋が足りない：年に${C.load.toFixed(1)}m³入るのに、${C.cap.toFixed(1)}m³ぶんしかさばけない（区画を足す）` });
+  if (C.buy > 0.05) cd.push({ lv: 'info', text: `落ち葉や刈り草が足りない分、おがくずを年${C.buy.toFixed(1)}m³ 製材所から買う` });
   const HM = A.house ? A.house.m : null;
   let hRect = null;
   if (A.house) { const cc = A.house.cells.map(k => k.split(',').map(Number)); const xs = cc.map(c => c[0]), ys = cc.map(c => c[1]); hRect = T.rect({ x: Math.min(...xs) - 1, y: Math.min(...ys) - 1, w: Math.max(...xs) - Math.min(...xs) + 2, h: Math.max(...ys) - Math.min(...ys) + 2 }); }
@@ -317,14 +340,14 @@ export function summarize(s) {
     filter: A.filter ? { ...A.filter, m: B.filterModel(A.filter.spec, grey) } : null,
     heap: A.heap, pvKw: A.pvKw, battKwh: A.battKwh, trees: A.trees, coops: A.coops,
     pondCap: A.pondCap, pondArea: A.pondArea, pondCatch: A.pondCatch, hedgeLen: A.hedge, wallLen: A.stoneRisers * 2 + A.greenRoof * 0.5,
-    pending: W.pendingDays(w), diag: A.diag
+    pending: W.pendingDays(w), diag: [...A.diag, ...cd], compost: C
   };
 }
 export function careNeed(s) {
   const S = summarize(s);
   return {
     garden: S.gArea / 400 + S.mulchArea / 1600 + S.ghArea / 300,
-    fixed: (S.compostToilet ? 0.3 : 0) + S.heap * 0.15 + (S.filter ? 0.1 : 0) + S.trees * 0.01 + S.hedgeLen * 0.005 + S.coops * 0.25 + (S.pondArea ? 0.05 : 0),
+    fixed: (S.compostToilet ? 0.3 : 0) + S.compost.load * 0.04 + (S.filter ? 0.1 : 0) + S.trees * 0.01 + S.hedgeLen * 0.005 + S.coops * 0.25 + (S.pondArea ? 0.05 : 0),
     get total() { return this.garden + this.fixed; }
   };
 }
@@ -336,10 +359,10 @@ export function hands(s) {
 export function nutrients(s) {
   const S = summarize(s), n = s.persons.length;
   const src = [
-    ['コンポストトイレ', S.compostToilet ? 4.0 * n : 0],
-    ['堆肥場', Math.min(S.heap, 2) * 1.0 * n],
+    ['コンポストトイレ', S.compostToilet ? 4.0 * n * S.compost.f : 0],
+    ['台所の生ごみ', S.compost.scraps ? 1.0 * n * S.compost.f : 0],
     ['排水の浄化', S.filter && ['garden', 'pond'].includes(S.filter.spec.out) ? 0.4 * n : 0],
-    ['ニワトリのふん', S.coops * 1.5]
+    ['ニワトリのふん', S.coops * 1.5 * (S.compost.bays ? S.compost.f : 0.3)]
   ];
   const supply = src.reduce((a, x) => a + x[1], 0), need = (S.gArea + S.ghArea) * 0.01;
   return { src, supply, need, nf: need > 0 ? Math.min(1, supply / need) : 0 };
@@ -528,10 +551,12 @@ export function advance(state) {
   if (s.food > keep) { foodSold = s.food - keep; s.food = keep; }   // 余りは近所の市場で売る
 
   // 土の有機物（％）
-  const inputKg = (S.heap ? Math.min(S.heap, 2) * 60 * n : 0) * qFrac * 4 / 4
-    + (S.compostToilet ? 30 * n * qFrac : 0)
+  const Cb = S.compost;
+  const inputKg = (Cb.scraps ? 120 * n * Cb.f : 0) * qFrac
+    + (S.compostToilet ? 30 * n * Cb.f * qFrac : 0)
+    + Cb.fromPlot * 100 * Cb.f * qFrac
     + S.mulchArea * 1.5 * qFrac
-    + 0.3 * harvest + S.trees * 3 * qFrac + S.coops * 40 * qFrac;
+    + 0.3 * harvest + S.trees * 3 * qFrac + S.coops * 40 * (Cb.bays ? Cb.f : 0.3) * qFrac;
   if (S.gArea > 0) {
     const gain = 0.3 * inputKg / S.gArea / 2.6;
     const decay = 0.035 * s.om * qFrac;
@@ -589,8 +614,10 @@ export function advance(state) {
   const pr = VOX.progress(s.world, buildDays);
   if (pending0 > 0 && pr.left <= 1e-9) events.push({ kind: 'built', names: ['作っていたもの'] });
   if (pending0 > 0 && buildDays < 0.5) events.push({ kind: 'stalled', names: ['作りかけのもの'] });
-  const outflow = { income, sell, jobCost, living, water: cWater, power: cPower, food: cFood, maint, replace, repair, rent };
-  const net = income + sell - jobCost - living - cWater - cPower - cFood - maint - replace - repair - rent;
+  const sawdust = Cb.buy * 0.5 * qFrac;                                  // おがくず（近所の製材所）
+  const pumpout = Cb.toilet * (1 - Cb.f) * 4 * qFrac;                    // さばけないし尿の汲み取り（遠くの業者）
+  const outflow = { income, sell, jobCost, living, water: cWater, power: cPower, food: cFood, maint, replace, repair, rent, sawdust, pumpout };
+  const net = income + sell - jobCost - living - cWater - cPower - cFood - maint - replace - repair - rent - sawdust - pumpout;
   s.cash += net;
 
   if (A.outDays) events.push({ kind: 'blackout', days: A.outDays, covered: A.outShort < 0.5, short: A.outShort });
@@ -777,8 +804,8 @@ export function cycles(s) {
   // お金（万円）：近所と遠く
   const m = (f) => sum(x => f(x.money || {}));
   const inFar = m(x => x.income), inLoc = m(x => x.sell);
-  const outLoc = m(x => (x.rent || 0) + 0.5 * (x.food || 0) + 0.2 * (x.living || 0) + 0.5 * (x.maint || 0) + 0.5 * (x.repair || 0)) + sum(x => x.spent?.local || 0);
-  const outFar = m(x => (x.jobCost || 0) + 0.5 * (x.food || 0) + 0.8 * (x.living || 0) + (x.water || 0) + (x.power || 0) + 0.5 * (x.maint || 0) + (x.replace || 0) + 0.5 * (x.repair || 0)) + sum(x => x.spent?.far || 0);
+  const outLoc = m(x => (x.rent || 0) + 0.5 * (x.food || 0) + 0.2 * (x.living || 0) + 0.5 * (x.maint || 0) + 0.5 * (x.repair || 0) + (x.sawdust || 0)) + sum(x => x.spent?.local || 0);
+  const outFar = m(x => (x.jobCost || 0) + 0.5 * (x.food || 0) + 0.8 * (x.living || 0) + (x.water || 0) + (x.power || 0) + 0.5 * (x.maint || 0) + (x.replace || 0) + 0.5 * (x.repair || 0) + (x.pumpout || 0)) + sum(x => x.spent?.far || 0);
   const mTot = inFar + inLoc + outLoc + outFar;
   return [
     { id: 'water', name: '水', color: '#2B6CB0', unit: 'm³', flow: use, closure: 0.5 * wSup + 0.5 * wRet,

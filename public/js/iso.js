@@ -1,5 +1,6 @@
 /* 斜め上から見下ろす3D（アイソメトリック）。カメラは固定。回転ボタンを押したときだけ短くなめらかに回る */
-import { BLOCKS, N, h, at, WALLS, ROOFS, FLOORS, OPENINGS, FURN, FDIR, HOUSE_H, houseOuterEdges, furnCells } from './world.js';
+import { BLOCKS, N, h, at, WALLS, ROOFS, FLOORS, OPENINGS, FURN, FDIR, HOUSE_H, houseOuterEdges, furnCells, vegObjects } from './world.js';
+export { vegObjects };
 
 const SIDE = [[1, 0], [0, 1], [-1, 0], [0, -1]];   // +x, +y, -x, -y
 function shade(hex, f) {
@@ -49,32 +50,6 @@ function terrainColor(lv, maxLv) {
   return `#${a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join('')}`;
 }
 
-/* 植生の形：林は3m四方に1本の木、やぶは2m四方に1つの茂み。場所と大きさは決まった乱数なので、だれが見ても同じ。
-   木の種類：この辺りの山の林は、在来の広葉樹にマツとユーカリの植林がまじる */
-const _veg = new WeakMap();
-export function vegObjects(world) {
-  const vg = world.veg; if (!vg) return [];
-  let sig = vg.length; for (let i = 0; i < vg.length; i++) sig = (sig * 31 + vg[i]) | 0;
-  const c = _veg.get(world); if (c && c.sig === sig) return c.list;
-  const V = (x, y) => (x < 0 || y < 0 || x >= N || y >= N) ? 0 : vg[y * N + x], used = new Set(), out = [];
-  const add = (o) => { const k = o.cx + ',' + o.cy; if (used.has(k)) return; used.add(k); out.push(o); };
-  for (let by = 0; by < N; by += 3) for (let bx = 0; bx < N; bx += 3) {
-    const x = bx + Math.floor(hash(bx, by, 101) * 3), y = by + Math.floor(hash(bx, by, 102) * 3); if (x >= N || y >= N) continue;
-    const cl = V(x, y), r1 = hash(x, y, 103), r2 = hash(x, y, 104), r3 = hash(x, y, 105), px = x + 0.3 + r2 * 0.4, py = y + 0.3 + r3 * 0.4;
-    if ((cl === 10 || cl === 95) && r1 < 0.86) {
-      const k = r2 < 0.25 ? 'pine' : r2 > 0.8 ? 'euca' : 'broad';
-      add({ kind: k, cx: x, cy: y, x: px, y: py, h: k === 'pine' ? 6 + r3 * 3 : k === 'euca' ? 7 + r3 * 3 : 4.5 + r3 * 2.5, r: k === 'pine' ? 1.1 + r1 * 0.4 : k === 'euca' ? 1.2 + r1 * 0.5 : 1.5 + r1 * 0.8, s: hash(x, y, 106) });
-    } else if (cl === 20 && r1 < 0.22) add({ kind: 'broad', cx: x, cy: y, x: px, y: py, h: 3 + r3 * 1.5, r: 1.0 + r1 * 0.9, s: hash(x, y, 106) });
-  }
-  for (let by = 0; by < N; by += 2) for (let bx = 0; bx < N; bx += 2) {
-    const x = bx + (hash(bx, by, 111) > 0.5 ? 1 : 0), y = by + (hash(bx, by, 112) > 0.5 ? 1 : 0); if (x >= N || y >= N) continue;
-    const cl = V(x, y), r1 = hash(x, y, 113), r2 = hash(x, y, 114);
-    if (cl === 20 && r1 < 0.72) add({ kind: 'shrub', cx: x, cy: y, x: x + 0.25 + r2 * 0.5, y: y + 0.25 + hash(x, y, 115) * 0.5, h: 0.7 + r2 * 0.8, r: 0.45 + r1 * 0.5, s: r2 });
-    else if ((cl === 10 || cl === 95) && r1 < 0.2) add({ kind: 'shrub', cx: x, cy: y, x: x + 0.5, y: y + 0.5, h: 0.5 + r2 * 0.5, r: 0.35 + r2 * 0.3, s: r2 });
-  }
-  _veg.set(world, { sig, list: out });
-  return out;
-}
 /* 地面の色（植生ごと）。草地は低い所ほど濃い緑 */
 function vegRGB(cl, lv, maxLv, x, y) {
   const t = maxLv ? lv / maxLv : 0.5, j = (smooth(x, y, 3) - 0.5) * 18 + (hash(x, y) - 0.5) * 4;
@@ -109,7 +84,7 @@ export function createView(canvas, world, opt = {}) {
     occW = xe - occX0 + 1; const occH = ye - occY0 + 1; occ = new Float32Array(occW * occH); occMax = 0;
     for (let y = occY0; y <= ye; y++) for (let x = occX0; x <= xe; x++) occ[(y - occY0) * occW + (x - occX0)] = h(world, x, y);
     const up = (x, y, z) => { if (x < occX0 || y < occY0 || x > xe || y > ye) return; const i = (y - occY0) * occW + (x - occX0); if (z > occ[i]) occ[i] = z; };
-    for (const k in world.blocks) { const [x, y, z] = k.split(',').map(Number), d = BLOCKS[world.blocks[k].t]; if (d.overlay || d.pit) continue; up(x, y, z + (d.kind === 'roof' ? 0.35 : d.kind === 'pv' ? 0.12 : d.kind === 'tree' ? 2.2 : 1)); }
+    for (const k in world.blocks) { const [x, y, z] = k.split(',').map(Number), d = BLOCKS[world.blocks[k].t]; if (d.overlay || d.pit) continue; up(x, y, z + (d.kind === 'roof' ? 0.35 : d.kind === 'pv' ? 0.12 : d.kind === 'tree' ? 2.2 : d.kind === 'heap' ? 2.35 : 1)); }
     if (hs) { const top = v.wallMode === 'up' && !v.top ? HOUSE_H + 0.2 : 0.45; for (const k in hs.cells) { const [x, y] = k.split(',').map(Number); up(x, y, hs.z + top); } }
     // 木と茂み：葉の広がりのマスを、その高さまでふさぐ（林の下は日かげになる）
     for (const t of vegObjects(world)) {
@@ -438,7 +413,20 @@ export function createView(canvas, world, opt = {}) {
       [[0.3, 0.3], [0.7, 0.3], [0.3, 0.7], [0.7, 0.7]].forEach(([px, py], i) => sphere(list, x + px, y + py, z + 0.55 + hash(x, y, 60 + i) * 0.12, 0.3, '#3C7445', meta, D + i * 1e-5));
       return;
     }
-    if (d.kind === 'heap') { blob(list, x + 0.5, y + 0.5, z, 0.6, 0.3, onGround); sphere(list, x + 0.5, y + 0.5, z + 0.15, 0.48, '#8A6A42', { ...meta }, dep(x, y, z, 0.6), a, 0.72); return; }
+    if (d.kind === 'heap') {   // 堆肥小屋の1区画：板の囲いに堆肥、四隅の柱、トタン屋根（雨よけの半屋外）
+      const parts = [], mk = (bb) => { parts[parts.length - 1].bb = bb; };
+      const B = (u0, v0, u1, v1, z0, ht, col, m2 = {}) => { rbox(parts, x + u0, y + v0, x + u1, y + v1, z0, ht, col, { ...meta, ...m2 }, a); mk([x + u0, x + u1, y + v0, y + v1, z0, z0 + ht]); };
+      blob(parts, x + 0.5, y + 0.5, z, 0.75, 0.3, 0);
+      for (const [u, w2] of [[0.03, 0.03], [0.89, 0.03], [0.03, 0.89], [0.89, 0.89]]) B(u, w2, u + 0.08, w2 + 0.08, z, 2.2, '#7A5A3A');
+      const wh = 0.72, wd = '#A88457';
+      B(0.13, 0.1, 0.87, 0.16, z, wh, wd, { sideDecor: slats }); B(0.13, 0.84, 0.87, 0.9, z, wh, wd, { sideDecor: slats });
+      B(0.1, 0.1, 0.16, 0.9, z, wh, wd, { sideDecor: slats }); B(0.84, 0.1, 0.9, 0.9, z, wh, wd, { sideDecor: slats });
+      B(0.16, 0.16, 0.84, 0.84, z, 0.5, '#5E4834', { decor: compostTop(x, y) });
+      sphere(parts, x + 0.5, y + 0.5, z + 0.5, 0.3, '#6B5238', meta, 0, a, 0.6); mk([x + 0.2, x + 0.8, y + 0.2, y + 0.8, z + 0.5, z + 0.7]);
+      B(-0.05, -0.05, 1.05, 1.05, z + 2.2, 0.1, '#8E979C', { decor: roofDecor('tin', x, y) });
+      pushCompound(list, parts, onGround + 0.01, meta);
+      return;
+    }
     if (d.kind === 'coop') {
       blob(list, x + 0.5, y + 0.5, z, 0.65, 0.28, onGround);
       rbox(list, x + 0.12, y + 0.12, x + 0.88, y + 0.88, z, 0.6, '#E8C98A', { ...meta, sideDecor: (cx, p, face) => { if (face !== 1 && face !== 0) return; const m = (fx, fy) => [p[0][0] + (p[1][0] - p[0][0]) * fx + (p[3][0] - p[0][0]) * fy, p[0][1] + (p[1][1] - p[0][1]) * fx + (p[3][1] - p[0][1]) * fy]; const q = [m(0.4, 0), m(0.6, 0), m(0.6, 0.5), m(0.4, 0.5)]; cx.fillStyle = '#5A4030'; cx.beginPath(); cx.moveTo(q[0][0], q[0][1]); for (const r of q) cx.lineTo(r[0], r[1]); cx.fill(); } }, a);
@@ -481,6 +469,17 @@ export function createView(canvas, world, opt = {}) {
       cx.strokeStyle = 'rgba(255,255,255,.55)'; cx.lineWidth = 1.2 * v.dpr; for (let i = 0; i < 2; i++) { const [px, py] = at(0.25 + hash(x, y, 70 + i) * 0.5, 0.25 + hash(x, y, 80 + i) * 0.5); cx.beginPath(); cx.ellipse(px, py, 6 * v.dpr, 2.5 * v.dpr, 0, Math.PI * 1.1, Math.PI * 1.9); cx.stroke(); }
     };
   }
+  function slats(cx, p) {   // すのこの囲い：板のすき間
+    cx.strokeStyle = 'rgba(40,25,12,.45)'; cx.lineWidth = 1.2 * v.dpr;
+    for (let i = 1; i < 6; i++) { const A = faceAt(p, i / 6, 0.04), B = faceAt(p, i / 6, 0.96); cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.stroke(); }
+    cx.strokeStyle = 'rgba(255,240,215,.25)'; const A = faceAt(p, 0, 0.92), B = faceAt(p, 1, 0.92); cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.stroke();
+  }
+  function compostTop(x, y) {   // 堆肥の表面：黒い土に、わらと落ち葉と野菜くず
+    return (cx, p) => {
+      const cols = ['#C9A55C', '#A9793F', '#7E9A4E', '#D8C08A'];
+      for (let i = 0; i < 14; i++) { const [px, py] = faceAt(p, 0.1 + hash(x, y, 300 + i) * 0.8, 0.1 + hash(x, y, 320 + i) * 0.8); cx.fillStyle = cols[i % 4]; cx.beginPath(); cx.ellipse(px, py, 2.2 * v.dpr, 1.1 * v.dpr, hash(x, y, 340 + i) * 3, 0, 7); cx.fill(); }
+    };
+  }
   /* 家：床・壁（窓と扉つき）・屋根。設計中は新しい床を青く、なくなる床を赤く */
   function drawHouse(list, hs, base, x0, x1, y0, y1, floorLv) {
     const z = hs.z, Wm = WALLS[hs.wall], F = FLOORS[hs.floor], R = ROOFS[hs.roof];
@@ -499,6 +498,7 @@ export function createView(canvas, world, opt = {}) {
     const ang = ((Math.round(v.angle / 90) * 90) % 360 + 360) % 360;
     const FRONT = { 0: ['e', 's'], 90: ['e', 'n'], 180: ['w', 'n'], 270: ['w', 's'] }[ang];
     const T = v.top ? 0.26 : 0.14, LOW = 0.45;
+    const outerDir = {}; for (const o of houseOuterEdges(hs)) outerDir[o.e] = o.dir;
     for (const o of houseOuterEdges(hs)) {
       const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number);
       if (!inView(o.x, o.y)) continue;
@@ -529,11 +529,14 @@ export function createView(canvas, world, opt = {}) {
         // 扉の前の踏み石
         if (!hs.cells[`${ox},${oy}`] && !v.top) { const gz = h(world, ox, oy), c0 = [o.x + 0.5 + (ox - o.x) * 0.72, o.y + 0.5 + (oy - o.y) * 0.72]; rbox(list, c0[0] - 0.3, c0[1] - 0.22 + (o.dir === 'e' || o.dir === 'w' ? -0.08 : 0), c0[0] + 0.3, c0[1] + 0.22, gz, 0.06, '#B7B2A6', { type: 'ghost' }, 1); }
       } else if (op) {
+        // となりの壁も窓なら、つなげて1本の連窓に（あいだの枠をなくし、窓台も続ける）
+        const isWin = (k) => ['window', 'window2'].includes(hs.open[k]) && outerDir[k] === o.dir;
+        const cont = t === 'h' ? { lo: isWin(`h:${ex - 1},${ey}`), hi: isWin(`h:${ex + 1},${ey}`) } : { lo: isWin(`v:${ex},${ey - 1}`), hi: isWin(`v:${ex},${ey + 1}`) };
         rbox(list, ...rect, z, 0.9, Wm.color, { ...meta, sideDecor: tex(0, 0.9) }, alpha);
-        rbox(list, ...rect, z + 0.9, 1.3, O.color, { ...meta, sideDecor: windowDecor(op) }, 1);
+        rbox(list, ...rect, z + 0.9, 1.3, O.color, { ...meta, sideDecor: windowDecor(op, t, cont) }, 1);
         rbox(list, ...rect, z + 2.2, HOUSE_H - 2.2, Wm.color, { ...meta, sideDecor: tex(2.2, HOUSE_H) }, alpha);
         // 窓台
-        const SD = 0.1, sr = t === 'h' ? [ex + 0.12, ey - T / 2 - SD, ex + 0.88, ey + T / 2 + SD] : [ex - T / 2 - SD, ey + 0.12, ex + T / 2 + SD, ey + 0.88];
+        const SD = 0.1, s0 = cont.lo ? 0 : 0.12, s1 = cont.hi ? 1 : 0.88, sr = t === 'h' ? [ex + s0, ey - T / 2 - SD, ex + s1, ey + T / 2 + SD] : [ex - T / 2 - SD, ey + s0, ex + T / 2 + SD, ey + s1];
         rbox(list, ...sr, z + 0.86, 0.05, '#F2EEE4', meta, 1);
       }
       else rbox(list, ...rect, z, HOUSE_H, Wm.color, { ...meta, sideDecor: tex(0, HOUSE_H) }, alpha);
@@ -577,13 +580,14 @@ export function createView(canvas, world, opt = {}) {
   const lineOn = (cx, A, B) => { cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.stroke(); };
   const tone = (t, k) => t > 0 ? `rgba(255,244,222,${(t * k).toFixed(3)})` : `rgba(60,36,16,${(-t * k).toFixed(3)})`;
   /* ---------- 木と茂み ---------- */
-  function leafBall(list, wx, wy, wz, r, col, lit, d, alpha, seed) {   // 葉のかたまり：ふちを少しでこぼこに、日の側を明るく、葉の粒をのせる
+  function leafBall(list, wx, wy, wz, r, col, lit, d, alpha, seed, meta) {   // 葉のかたまり：ふちを少しでこぼこに、日の側を明るく、葉の粒をのせる
     const g = geom(), c = project(wx, wy, wz, g), R = r * g.tw * 0.72, sd = sunScreen(); seed = Math.floor(seed);
-    list.push({ depth: d, draw: (cx, pc) => {
-      if (pc) return;
-      cx.globalAlpha = alpha; cx.beginPath();
+    list.push({ depth: d, meta, draw: (cx, pc) => {
+      cx.beginPath();
       for (let i = 0; i <= 16; i++) { const a = i / 16 * Math.PI * 2, rr = R * (0.88 + hash(seed, i % 16, 7) * 0.18), px = c[0] + Math.cos(a) * rr, py = c[1] + Math.sin(a) * rr; if (i) cx.lineTo(px, py); else cx.moveTo(px, py); }
       cx.closePath();
+      if (pc) { cx.fillStyle = pc(4); cx.fill(); return; }
+      cx.globalAlpha = alpha;
       const gr = cx.createRadialGradient(c[0] + sd[0] * R * 0.4, c[1] + sd[1] * R * 0.4 - R * 0.2, R * 0.1, c[0], c[1], R * 1.1);
       gr.addColorStop(0, lightCol(col, 1, lit, 1.12)); gr.addColorStop(0.55, lightCol(col, 0.55, lit)); gr.addColorStop(1, lightCol(col, 0.05, lit, 0.72));
       cx.fillStyle = gr; cx.fill();
@@ -595,13 +599,14 @@ export function createView(canvas, world, opt = {}) {
       cx.globalAlpha = 1;
     } });
   }
-  function cone(list, wx, wy, wz, r, ht, col, lit, d, alpha) {   // マツの葉の段：先のとがった円すい、下のふちはぎざぎざ
+  function cone(list, wx, wy, wz, r, ht, col, lit, d, alpha, meta) {   // マツの葉の段：先のとがった円すい、下のふちはぎざぎざ
     const g = geom(), cb = project(wx, wy, wz, g), ct = project(wx, wy, wz + ht, g), Rx = r * g.tw / Math.SQRT2, Ry = r * g.th / Math.SQRT2, sd = sunScreen();
-    list.push({ depth: d, draw: (cx, pc) => {
-      if (pc) return;
-      cx.globalAlpha = alpha; cx.beginPath(); cx.moveTo(ct[0], ct[1]);
+    list.push({ depth: d, meta, draw: (cx, pc) => {
+      cx.beginPath(); cx.moveTo(ct[0], ct[1]);
       for (let i = 0; i <= 12; i++) { const a = Math.PI - i / 12 * Math.PI, k = i % 2 ? 0.82 : 1; cx.lineTo(cb[0] + Math.cos(a) * Rx * k, cb[1] + Math.sin(a) * Ry * k + (i % 2 ? 0 : Ry * 0.35)); }
       cx.closePath();
+      if (pc) { cx.fillStyle = pc(4); cx.fill(); return; }
+      cx.globalAlpha = alpha;
       const gr = cx.createLinearGradient(cb[0] - Rx, 0, cb[0] + Rx, 0), lt = sd[0] > 0;
       gr.addColorStop(0, lightCol(col, lt ? 0.1 : 1, lit, lt ? 0.78 : 1.1)); gr.addColorStop(0.5, lightCol(col, 0.6, lit)); gr.addColorStop(1, lightCol(col, lt ? 1 : 0.1, lit, lt ? 1.1 : 0.78));
       cx.fillStyle = gr; cx.fill(); cx.globalAlpha = 1;
@@ -616,26 +621,27 @@ export function createView(canvas, world, opt = {}) {
       return;
     }
     const base = project(t.x, t.y, z, g), topP = project(t.x, t.y, z + t.h, g), Rs = t.r * g.tw * 0.8;
-    let alpha = 1;   // 奥の家やカーソルを隠すなら薄く
+    let alpha = 1;   // 奥の家やカーソルを隠すなら薄く（薄いときは押しても奥に届く）
     for (const p of tg) if (p[2] < base[2] - 0.3 && Math.abs(p[0] - base[0]) < Rs + g.tw * 0.3 && p[1] > topP[1] - Rs * 0.5 && p[1] < base[1] + g.th) { alpha = 0.28; break; }
+    const vm = { type: 'veg', x: t.cx, y: t.cy, z, kind: t.kind, nopick: alpha < 1 };
     const d0 = terrainDepth(t.cx, t.cy, floorLv), b0 = base[2];
     const sub = (wx, wy, wz) => ((project(wx, wy, wz, g)[2] - b0) + (wz - z) * 0.8) * 0.02;   // 同じ木の中の前後
     blob(list, t.x, t.y, z, t.kind === 'shrub' ? t.r * 1.1 : t.r * 0.6, t.kind === 'shrub' ? 0.25 : 0.32, d0 + 1e-5);
     if (t.kind === 'shrub') {
       const D = d0 + 0.6;
-      for (const [dx, dy, hz, rk] of [[-0.35, 0.15, 0.4, 0.6], [0.3, -0.2, 0.42, 0.62], [0, 0, 0.55, 0.85]]) { const wx = t.x + dx * t.r, wy = t.y + dy * t.r, wz = z + t.h * hz; leafBall(list, wx, wy, wz, t.r * rk, col, lit, D + sub(wx, wy, wz), alpha, seed + dx * 100 + 7); }
+      for (const [dx, dy, hz, rk] of [[-0.35, 0.15, 0.4, 0.6], [0.3, -0.2, 0.42, 0.62], [0, 0, 0.55, 0.85]]) { const wx = t.x + dx * t.r, wy = t.y + dy * t.r, wz = z + t.h * hz; leafBall(list, wx, wy, wz, t.r * rk, col, lit, D + sub(wx, wy, wz), alpha, seed + dx * 100 + 7, vm); }
       return;
     }
     const D = d0 + 1.2, trunkH = t.kind === 'pine' ? t.h * 0.4 : t.kind === 'euca' ? t.h * 0.7 : t.h * 0.55, tr = t.kind === 'euca' ? 0.07 : 0.08 + t.r * 0.02;
-    rbox(list, t.x - tr, t.y - tr, t.x + tr, t.y + tr, z, trunkH, t.kind === 'euca' ? '#C2B9A6' : '#6B4E33', { type: 'veg', nopick: true, dbias: 1.15 }, alpha);
-    if (t.kind === 'pine') { for (let i = 0; i < 4; i++) cone(list, t.x, t.y, z + t.h * (0.22 + i * 0.17), t.r * (1 - i * 0.2), t.h * 0.3, col, lit, D + i * 0.002, alpha); return; }
+    rbox(list, t.x - tr, t.y - tr, t.x + tr, t.y + tr, z, trunkH, t.kind === 'euca' ? '#C2B9A6' : '#6B4E33', { ...vm, dbias: 1.15 }, alpha);
+    if (t.kind === 'pine') { for (let i = 0; i < 4; i++) cone(list, t.x, t.y, z + t.h * (0.22 + i * 0.17), t.r * (1 - i * 0.2), t.h * 0.3, col, lit, D + i * 0.002, alpha, vm); return; }
     const n = t.kind === 'euca' ? 4 : 6, balls = [];
     for (let i = 0; i < n; i++) {
       const a = (i / n + t.s) * Math.PI * 2, rr = t.r * (t.kind === 'euca' ? 0.5 : 0.42) * (0.8 + hash(seed, i, 3) * 0.4);
       balls.push([t.x + Math.cos(a) * rr, t.y + Math.sin(a) * rr, z + t.h * (0.58 + hash(seed, i, 4) * 0.18), t.r * (t.kind === 'euca' ? 0.42 : 0.56) * (0.85 + hash(seed, i, 5) * 0.3)]);
     }
     balls.push([t.x, t.y, z + t.h * 0.86, t.r * (t.kind === 'euca' ? 0.45 : 0.6)]);
-    balls.forEach(([wx, wy, wz, r], i) => leafBall(list, wx, wy, wz, r, col, lit, D + sub(wx, wy, wz), alpha, seed + i * 17));
+    balls.forEach(([wx, wy, wz, r], i) => leafBall(list, wx, wy, wz, r, col, lit, D + sub(wx, wy, wz), alpha, seed + i * 17, vm));
   }
   /* ---------- 地面の草と小物 ---------- */
   function bladesOn(cx, at, x, y, n, hMin, hMax, cols, M, clumps, k0) {   // 草の葉：株ごとにまとまって、少し風になびく。色ごとにまとめて塗る
@@ -734,16 +740,22 @@ export function createView(canvas, world, opt = {}) {
       for (let r = 0; r < rows; r++) for (let k = 0; k < 6; k++) { const f = (k + (r % 2) * 0.5) / 5; if (f > 0.02 && f < 0.98) lineOn(cx, faceAt(p, f, r / rows), faceAt(p, f, (r + 1) / rows)); }
     };
   }
-  function windowDecor(op) {
-    return (cx, p) => {
-      const Q = (a0, b0, a1, b1, f) => quadOn(cx, p, a0, b0, a1, b1, f);
-      Q(0.06, 0.0, 0.94, 1.0, '#EFE9DD');   // 枠
+  function windowDecor(op, et, cont = {}) {
+    return (cx, p, face) => {
+      // 壁の長い面だけに描く（壁の端の細い面には描かない）。面の左（fx=0）がどちら向きかで、つながる側を決める
+      if ((et === 'h' && face !== 1 && face !== 3) || (et === 'v' && face !== 0 && face !== 2)) return;
+      const inc = (et === 'h' && face === 3) || (et === 'v' && face === 0), L = inc ? cont.lo : cont.hi, Rt = inc ? cont.hi : cont.lo;
+      const Q = (a0, b0, a1, b1, f) => quadOn(cx, p, a0, b0, a1, b1, f), FR = '#EFE9DD';
+      const g0 = L ? 0 : 0.13, g1 = Rt ? 1 : 0.87, f0 = L ? 0 : 0.06, f1 = Rt ? 1 : 0.94;
+      Q(f0, 0.0, f1, 1.0, FR);   // 枠
       const A = faceAt(p, 0.5, 0.94), B = faceAt(p, 0.5, 0.06), gr = cx.createLinearGradient(A[0], A[1], B[0], B[1]);
       gr.addColorStop(0, '#E3EFF6'); gr.addColorStop(0.45, op === 'window2' ? '#93B9D4' : '#A2C5DC'); gr.addColorStop(1, '#4F6E86');   // 空の映りこみ
-      Q(0.13, 0.07, 0.87, 0.93, gr);
-      Q(0.16, 0.1, 0.3, 0.88, 'rgba(236,222,190,.40)');   // 中のカーテン
-      Q(0.13, 0.84, 0.87, 0.93, 'rgba(25,35,45,.28)'); Q(0.13, 0.07, 0.18, 0.93, 'rgba(25,35,45,.16)');   // 枠の奥の影
-      Q(0.48, 0.07, 0.52, 0.93, '#EFE9DD'); if (op === 'window2') Q(0.13, 0.48, 0.87, 0.52, '#EFE9DD');
+      Q(g0, 0.07, g1, 0.93, gr);
+      if (!L) Q(0.16, 0.1, 0.3, 0.88, 'rgba(236,222,190,.40)');   // 中のカーテン（連窓の端だけ）
+      if (!Rt && (L || !cont.lo && !cont.hi)) { if (L) Q(0.7, 0.1, 0.84, 0.88, 'rgba(236,222,190,.40)'); }
+      Q(g0, 0.84, g1, 0.93, 'rgba(25,35,45,.28)'); if (!L) Q(0.13, 0.07, 0.18, 0.93, 'rgba(25,35,45,.16)');   // 枠の奥の影
+      Q(0.485, 0.07, 0.515, 0.93, FR); if (L) Q(0, 0.07, 0.018, 0.93, FR); if (Rt) Q(0.982, 0.07, 1, 0.93, FR);   // 桟（つなぎ目は細く）
+      if (op === 'window2') Q(g0, 0.48, g1, 0.52, FR);
       cx.strokeStyle = 'rgba(255,255,255,.6)'; cx.lineWidth = 1.6 * v.dpr; lineOn(cx, faceAt(p, 0.57, 0.32), faceAt(p, 0.7, 0.76)); lineOn(cx, faceAt(p, 0.64, 0.26), faceAt(p, 0.73, 0.48));
     };
   }
@@ -859,7 +871,12 @@ export function createView(canvas, world, opt = {}) {
       };
       chair(1); chair(-1);
     }
-    // 部品の前後：重ならない向き（回したあとの x・y、高さ）で、奥のもの・下のものを先に描く。家具全体は床のあと
+    const D = v.top ? (z + 0.1) * 10 + 0.05 : Math.max(...furnCells(f).map(([cx2, cy2]) => dep(cx2, cy2, z, 0.1))) + 0.02;
+    pushCompound(outList, list, D, meta);
+  }
+  /* いくつかの部品でできたもの（家具・堆肥小屋）：部品の前後を、重ならない向き（回したあとの x・y、高さ）で決めて、1つのものとして描く。
+     部品にはそれぞれ bb＝[x0, x1, y0, y1, z0, z1]。bb のないもの（床の影）は先に */
+  function pushCompound(outList, list, D, meta) {
     const an = v.angle * Math.PI / 180, ca = Math.cos(an), sa = Math.sin(an), E2 = 1e-4;
     const rot = (q) => { const xs = [], ys = []; for (const px of [q[0], q[1]]) for (const py of [q[2], q[3]]) { xs.push(px * ca - py * sa); ys.push(px * sa + py * ca); } return [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), q[4], q[5]]; };
     const ps = list.map((it) => { const r = it.bb ? rot(it.bb) : null; return { it, r, d: r ? (r[0] + r[1] + r[2] + r[3]) / 2 + r[4] * 0.8 : -1e9 }; });
@@ -869,18 +886,17 @@ export function createView(canvas, world, opt = {}) {
       const behind = (A, B) => A.r[1] <= B.r[0] + E2 || A.r[3] <= B.r[2] + E2 || A.r[5] <= B.r[4] + E2;
       const n = ps.length, indeg = new Array(n).fill(0), out = ps.map(() => []);
       for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-        if (!ps[i].r || !ps[j].r) { if (ps[i].r || ps[j].r) { const [a2, b2] = ps[i].r ? [j, i] : [i, j]; out[a2].push(b2); indeg[b2]++; } continue; }   // 床の影は先
+        if (!ps[i].r || !ps[j].r) { if (ps[i].r || ps[j].r) { const [a2, b2] = ps[i].r ? [j, i] : [i, j]; out[a2].push(b2); indeg[b2]++; } continue; }
         const ab = behind(ps[i], ps[j]), ba = behind(ps[j], ps[i]);
         if (ab && !ba) { out[i].push(j); indeg[j]++; } else if (ba && !ab) { out[j].push(i); indeg[i]++; }
       }
       order = []; const done = new Array(n).fill(false);
       for (let k = 0; k < n; k++) {
         let best = -1; for (let i = 0; i < n; i++) if (!done[i] && indeg[i] === 0 && (best < 0 || ps[i].d < ps[best].d)) best = i;
-        if (best < 0) for (let i = 0; i < n; i++) if (!done[i] && (best < 0 || ps[i].d < ps[best].d)) best = i;   // 輪になったら近い順
+        if (best < 0) for (let i = 0; i < n; i++) if (!done[i] && (best < 0 || ps[i].d < ps[best].d)) best = i;
         done[best] = true; order.push(ps[best]); for (const j of out[best]) indeg[j]--;
       }
     }
-    const D = v.top ? (z + 0.1) * 10 + 0.05 : Math.max(...furnCells(f).map(([cx2, cy2]) => dep(cx2, cy2, z, 0.1))) + 0.02;
     outList.push({ depth: D, meta, draw: (cx, pc) => { for (const p of order) p.it.draw(cx, pc); } });
   }
   function decorFor(b, d) {

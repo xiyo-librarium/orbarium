@@ -38,7 +38,7 @@ export const BLOCKS = {
   bed: { local: true, name: '畑', kind: 'bed', cost: 0.1, labor: 0.05, color: '#8DB872', learn: null, overlay: true },
   tree: { local: true, name: '果樹', kind: 'tree', cost: 0.5, labor: 0.1, color: '#4E8F5B', learn: 'hedge' },
   hedge: { local: true, name: '生け垣', kind: 'hedge', cost: 0.2, labor: 0.1, color: '#2C5A37', learn: 'hedge' },
-  heap: { local: true, name: '堆肥の山', kind: 'heap', cost: 5, labor: 0.5, life: 15, color: '#8A6A42', learn: 'heap' },
+  heap: { local: true, name: '堆肥小屋（1区画1m³）', kind: 'heap', cost: 4, labor: 1.2, life: 15, color: '#8A6A42', learn: 'heap' },
   coop: { name: 'ニワトリ小屋', kind: 'coop', cost: 10, labor: 2, life: 15, color: '#E8C98A', learn: 'chicken' },
   pv: { name: '太陽光パネル 0.2kW', kind: 'pv', kw: 0.2, cost: 5.5, labor: 0.2, life: 25, color: '#30476B', learn: 'offgrid' },
   batt: { name: '蓄電池 5kWh', kind: 'batt', kwh: 5, cost: 15, labor: 0.2, life: 12, color: '#3A3F42', learn: 'offgrid' },
@@ -82,6 +82,7 @@ export function canPut(w, x, y, z, t) {
   const g = h(w, x, y);
   if (z < g) return '地面の中';
   if (at(w, x, y, z)) return 'もう何かある';
+  if (z === g) { const tw = treeWhy(w, x, y); if (tw) return tw; }
   if (w.house && w.house.cells[`${x},${y}`] && z >= w.house.z - 1 && z < w.house.z + HOUSE_H && !['batt'].includes(d.kind)) return '家の中';
   if (d.overlay && z !== g) return d.kind === 'bed' ? '畑は地面の上に' : '床や植物は地面の上に';
   if (d.overlay && d.kind === 'plant') { const below = at(w, x, y, z - 1); if (!below || BLOCKS[below.t].kind !== 'media') return 'ヨシやカンナは、浄化の層の上に植える'; }
@@ -113,6 +114,51 @@ export function clearVeg(w, x, y, r = 0) {
   if (!w.veg) return;
   for (let yy = y - r; yy <= y + r; yy++) for (let xx = x - r; xx <= x + r; xx++) if (xx >= 0 && yy >= 0 && xx < N && yy < N && [10, 20, 90, 95].includes(w.veg[idx(xx, yy)])) w.veg[idx(xx, yy)] = 30;
 }
+/* 植生の形：林は3m四方に1本の木、やぶは2m四方に1つの茂み。場所と大きさは決まった乱数なので、だれが見ても同じ。
+   木の種類：この辺りの山の林は、在来の広葉樹にマツとユーカリの植林がまじる */
+const vhash = (x, y, k = 0) => { let n = (x * 374761393 + y * 668265263 + k * 2147483647) | 0; n = (n ^ (n >>> 13)) * 1274126177; return ((n ^ (n >>> 16)) >>> 0) / 4294967295; };
+const _veg = new WeakMap();
+export function vegObjects(w) {
+  const vg = w.veg; if (!vg) return [];
+  let sig = vg.length; for (let i = 0; i < vg.length; i++) sig = (sig * 31 + vg[i]) | 0;
+  const c = _veg.get(w); if (c && c.sig === sig) return c.list;
+  const V = (x, y) => (x < 0 || y < 0 || x >= N || y >= N) ? 0 : vg[y * N + x], used = new Set(), out = [];
+  const add = (o) => { const k = o.cx + ',' + o.cy; if (used.has(k)) return; used.add(k); out.push(o); };
+  for (let by = 0; by < N; by += 3) for (let bx = 0; bx < N; bx += 3) {
+    const x = bx + Math.floor(vhash(bx, by, 101) * 3), y = by + Math.floor(vhash(bx, by, 102) * 3); if (x >= N || y >= N) continue;
+    const cl = V(x, y), r1 = vhash(x, y, 103), r2 = vhash(x, y, 104), r3 = vhash(x, y, 105), px = x + 0.3 + r2 * 0.4, py = y + 0.3 + r3 * 0.4;
+    if ((cl === 10 || cl === 95) && r1 < 0.86) {
+      const k = r2 < 0.25 ? 'pine' : r2 > 0.8 ? 'euca' : 'broad';
+      add({ kind: k, cx: x, cy: y, x: px, y: py, h: k === 'pine' ? 6 + r3 * 3 : k === 'euca' ? 7 + r3 * 3 : 4.5 + r3 * 2.5, r: k === 'pine' ? 1.1 + r1 * 0.4 : k === 'euca' ? 1.2 + r1 * 0.5 : 1.5 + r1 * 0.8, s: vhash(x, y, 106) });
+    } else if (cl === 20 && r1 < 0.22) add({ kind: 'broad', cx: x, cy: y, x: px, y: py, h: 3 + r3 * 1.5, r: 1.0 + r1 * 0.9, s: vhash(x, y, 106) });
+  }
+  for (let by = 0; by < N; by += 2) for (let bx = 0; bx < N; bx += 2) {
+    const x = bx + (vhash(bx, by, 111) > 0.5 ? 1 : 0), y = by + (vhash(bx, by, 112) > 0.5 ? 1 : 0); if (x >= N || y >= N) continue;
+    const cl = V(x, y), r1 = vhash(x, y, 113), r2 = vhash(x, y, 114);
+    if (cl === 20 && r1 < 0.72) add({ kind: 'shrub', cx: x, cy: y, x: x + 0.25 + r2 * 0.5, y: y + 0.25 + vhash(x, y, 115) * 0.5, h: 0.7 + r2 * 0.8, r: 0.45 + r1 * 0.5, s: r2 });
+    else if ((cl === 10 || cl === 95) && r1 < 0.2) add({ kind: 'shrub', cx: x, cy: y, x: x + 0.5, y: y + 0.5, h: 0.5 + r2 * 0.5, r: 0.35 + r2 * 0.3, s: r2 });
+  }
+  _veg.set(w, { sig, list: out });
+  return out;
+}
+/* そのマスに生えている木・茂み（根元がそのマス） */
+export function vegAt(w, x, y) { for (const o of vegObjects(w)) if (o.cx === x && o.cy === y) return o; return null; }
+/* 木を切る・やぶを刈る：近所の人に頼む。切った木は薪と材としてとっておく */
+export const CUT = { broad: { name: '広葉樹', cost: 1.2, wood: 0.4 }, pine: { name: 'マツ', cost: 1.5, wood: 0.6 }, euca: { name: 'ユーカリ', cost: 1.5, wood: 0.7 }, shrub: { name: '茂み', cost: 0.3, wood: 0.05 }, tree: { name: '果樹', cost: 0.3, wood: 0.1 }, hedge: { name: '生け垣', cost: 0.1, wood: 0.02 } };
+export function cutInfo(w, x, y) {
+  const o = vegAt(w, x, y); if (o) return { ...CUT[o.kind], kind: o.kind };
+  for (const t of ['tree', 'hedge']) { const g = h(w, x, y); const b = at(w, x, y, g); if (b && b.t === t) return { ...CUT[t], kind: t, z: g }; }
+  return null;
+}
+export function cutTree(s, x, y) {
+  const w = s.world, c = cutInfo(w, x, y); if (!c) return '切る木がない';
+  if (c.cost > s.cash + 1e-9) return 'お金が足りない';
+  s.cash -= c.cost; spend(w, c.cost, 0); w.wood = (w.wood || 0) + c.wood;
+  if (c.z != null) delete w.blocks[K(x, y, c.z)];
+  else if (w.veg) w.veg[idx(x, y)] = 30;
+  return null;
+}
+const treeWhy = (w, x, y) => { const o = vegAt(w, x, y); return o ? (o.kind === 'shrub' ? 'やぶがある（先に［木を切る］で刈る）' : '木がある（先に［木を切る］）') : null; };
 export function put(s, x, y, z, t, mode, extra = {}) {
   const w = s.world, d = BLOCKS[t];
   const why = canPut(w, x, y, z, t); if (why) return why;
@@ -129,8 +175,9 @@ export function put(s, x, y, z, t, mode, extra = {}) {
   w.blocks[K(x, y, z)] = b;
   return null;
 }
-export function remove(s, x, y, z) {
+export function remove(s, x, y, z, force = false) {
   const w = s.world, k = K(x, y, z), b = w.blocks[k]; if (!b) return '何もない';
+  if (!force && ['tree', 'hedge'].includes(BLOCKS[b.t].kind)) return '木は［木を切る］で切る';
   const above = at(w, x, y, z + 1);
   if (above && !BLOCKS[b.t].overlay && BLOCKS[above.t].kind !== 'roof') return '上に乗っているものを先に外す';
   delete w.blocks[k]; w.queue = w.queue.filter(q => q !== k);
@@ -141,6 +188,7 @@ export function remove(s, x, y, z) {
 export function dig(s, x, y, mode) {
   const w = s.world, g = h(w, x, y);
   if (at(w, x, y, g)) return '上に何かある';
+  { const tw = treeWhy(w, x, y); if (tw) return tw; }
   if (g <= 0) return 'これ以上は掘れない（岩盤）';
   if (w.H0[idx(x, y)] - g >= 3) return '3mより深くは掘れない';
   const price = mode === 'self' ? 0 : DIG_LABOR * 1.5;
@@ -152,6 +200,7 @@ export function dig(s, x, y, mode) {
 export function fill(s, x, y, mode) {
   const w = s.world, g = h(w, x, y);
   if (at(w, x, y, g)) return '上に何かある';
+  { const tw = treeWhy(w, x, y); if (tw) return tw; }
   if (g - w.H0[idx(x, y)] >= 2) return '2mより高くは盛れない';
   const buy = w.earth >= 1 ? 0 : (1 - w.earth) * EARTH_PRICE;
   const price = buy + (mode === 'self' ? 0 : FILL_LABOR * 1.5);
@@ -218,6 +267,12 @@ export function prefabShed(s, a, b, roof, mode) {
   for (const [x, y] of corners) { const g = h(w, x, y); for (let z = g; z < top; z++) put(s, x, y, z, 'pillar', mode); }
   for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) if (!at(w, x, y, top)) put(s, x, y, top, roof, mode);
   return null;
+}
+/* 堆肥小屋：なぞった四角の1マスが1区画（屋根と柱つき、半屋外） */
+export function prefabBays(s, a, b, mode) {
+  const w = s.world, r = rect(a[0], a[1], b[0], b[1]); let n = 0, why = null;
+  for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) { const e = put(s, x, y, h(w, x, y), 'heap', mode); if (e) why = why || e; else n++; }
+  return n ? null : (why || '置ける場所がない');
 }
 export function prefabBeds(s, a, b, mode) {
   const w = s.world, r = rect(a[0], a[1], b[0], b[1]); let n = 0;
@@ -630,6 +685,7 @@ export function cellProblem(w, d, x, y) {
   const g = h(w, x, y);
   if (Math.abs(g - d.z) > 1) return g > d.z ? '地面が2段以上高い' : '地面が2段以上低い';
   for (let z = Math.min(g, d.z) - 1; z < d.z + HOUSE_H; z++) if (at(w, x, y, z)) return 'ほかのものがある';
+  { const tw = treeWhy(w, x, y); if (tw) return tw.startsWith('やぶ') ? 'やぶがある' : '木がある'; }
   return null;
 }
 /* 長方形の範囲に床を足す。いまの床につながるマスだけ（なぞった範囲の中で、つながりをたどって広げる） */
@@ -705,7 +761,7 @@ export function buildHouse(s, d) {
   if (est.total > s.cash + 1e-9) return `お金が足りない（${Math.round(est.total)}万円かかる）`;
   s.cash -= est.total;
   w.spent = w.spent || { local: 0, far: 0 }; w.spent.local += est.local; w.spent.far += est.far;
-  for (const k in d.cells) { const [x, y] = k.split(',').map(Number); w.H[idx(x, y)] = d.z; clearVeg(w, x, y, 2); }
+  for (const k in d.cells) { const [x, y] = k.split(',').map(Number); w.H[idx(x, y)] = d.z; clearVeg(w, x, y); }
   w.earth = Math.max(0, w.earth + est.dig - est.fil);
   w.house = cloneHouse(d);
   w.mods.compostToilet = houseHas(d, 'ctoilet'); w.mods.saving = houseHas(d, 'shower2'); if (d.eq.depth) w.mods.depth = d.eq.depth;

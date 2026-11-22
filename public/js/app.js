@@ -294,7 +294,7 @@ function alertBox(msg) { modal(`<p>${esc(msg)}</p><button class="btn" data-m="ok
    家も畑も水まわりも、ここでいじるのは設計図（下書きの世界）。お金はかからない。
    下の［この設計で頼む］で、見積もりの額を払って近所の職人さんが作る。
    作り方：道具を選んで、地面を押す（1つ）か、なぞる（四角・並べる）。覚えていない作り方は出さない */
-const CATS = [['house', '家'], ['farm', '畑'], ['water', '水'], ['gear', '小屋・設備'], ['land', '地形']];
+const CATS = [['house', '家'], ['farm', '畑'], ['water', '水'], ['gear', '小屋・設備'], ['land', '土地・木']];
 // how：area＝なぞった四角 / point＝押して置く（なぞると並べる）/ mark＝畑に足す / cell＝1マスずつ（なぞると続けて）/ erase＝外す
 const TOOLS = {
   farm: [
@@ -302,7 +302,7 @@ const TOOLS = {
     { id: 'stone', how: 'mark', mark: 's', name: '石垣', learn: 'terrace', price: 0.15, color: '#9B988E', note: '段差のある畑のふちを石で支える。大雨で土が流れない' },
     { id: 'mulch', how: 'mark', mark: 'm', name: 'マルチ', learn: 'mulch', price: 0.01, color: '#B9935A', note: '刈った草で畑を覆う。乾きにくく、草も生えにくい' },
     { id: 'cover', how: 'mark', mark: 'g', name: '温室の覆い', learn: 'greenhouse', price: 1.2, color: '#DDE8EC', note: '畑に覆いをかける。外より暖かく、冬も育つ' },
-    { id: 'heap', how: 'point', block: 'heap', note: '生ごみと落ち葉を積んで、土に返す' },
+    { id: 'heap', how: 'area', name: '堆肥小屋', block: 'heap', note: 'なぞった列に、屋根つき・半屋外の堆肥の区画（1区画1m³）。生ごみ・し尿・ふんを落ち葉と混ぜて寝かせる。積む・寝かせる・使うの3区画がおすすめ' },
     { id: 'tree', how: 'point', block: 'tree', note: '実がなり、根で斜面を押さえる。なぞると並べて植える' },
     { id: 'hedge', how: 'point', block: 'hedge', note: 'なぞると並べて植える。風よけ・獣よけ' }
   ],
@@ -319,6 +319,7 @@ const TOOLS = {
     { id: 'coop', how: 'point', block: 'coop', note: '残り物を食べて、卵とふんを返す' }
   ],
   land: [
+    { id: 'cut', how: 'cut', name: '木を切る', note: '木や茂みを切る（なぞると続けて）。木のある所には何も作れない。切った木は薪と材としてとっておく' },
     { id: 'dig', how: 'cell', name: '掘る（1段）', note: '押したマスを1段掘る。なぞると続けて。出た土はとっておく' },
     { id: 'fill', how: 'cell', name: '盛る（1段）', note: 'とってある土で1段盛る。足りない分は買う' },
     { id: 'level', how: 'area', name: '平らにする', note: 'なぞった四角を、まん中の高さにそろえる' }
@@ -332,9 +333,9 @@ const toolLearn = (t) => t.learn !== undefined ? t.learn : t.block ? E.W.BLOCKS[
 function toolPrice(t) {   // 1マス・1つあたりの目安（万円）
   const P = (b) => E.W.blockPrice(b, 'hire'), D = E.W.DIG_LABOR * 1.5;
   if (t.price != null) return t.price;
-  return { beds: P('bed'), pond: D + P('pond'), filter: D + P(MAT.media) + P(MAT.plant), shed: P(MAT.roof), dig: D, fill: E.W.FILL_LABOR * 1.5, level: null, erase: 0 }[t.id] ?? (t.block ? P(t.block) : null);
+  return { cut: null, heap: P('heap'), beds: P('bed'), pond: D + P('pond'), filter: D + P(MAT.media) + P(MAT.plant), shed: P(MAT.roof), dig: D, fill: E.W.FILL_LABOR * 1.5, level: null, erase: 0 }[t.id] ?? (t.block ? P(t.block) : null);
 }
-const toolUnit = (t) => ({ area: '1m²', point: '1つ', mark: '1m²', cell: '1マス', erase: '' })[t.how];
+const toolUnit = (t) => t.id === 'heap' ? '1区画' : ({ area: '1m²', point: '1つ', mark: '1m²', cell: '1マス', erase: '', cut: '' })[t.how];
 function knownTech(id) { return !id || G.s.known.includes(id); }
 const clone = (x) => JSON.parse(JSON.stringify(x));
 function houseCenter() { const hs = G.s.world.house; if (!hs) return [25, 25]; const cs = Object.keys(hs.cells).map(k => k.split(',').map(Number)); return [Math.round(cs.reduce((a, c) => a + c[0], 0) / cs.length), Math.round(cs.reduce((a, c) => a + c[1], 0) / cs.length)]; }
@@ -443,7 +444,7 @@ function openBuild(cx, cy, o = {}) {
   const isOpenTool = () => ['window', 'window2', 'door', 'unopen'].includes(st.tool);
   const isHouseFace = (f) => f && ['floor', 'wall', 'roof', 'furn'].includes(f.type);
   // 家のほか：押した面 → そのマス（側面でもそのマスの上）
-  const cellAny = (f) => !f ? null : ['terrain', 'block', 'floor', 'furn', 'wall', 'roof'].includes(f.type) ? [f.x, f.y] : null;
+  const cellAny = (f) => !f ? null : ['terrain', 'block', 'floor', 'furn', 'wall', 'roof', 'veg'].includes(f.type) ? [f.x, f.y] : null;
   const inDraftHouse = (x, y) => (st.draft && st.draft.cells[`${x},${y}`]) || (dw.house && dw.house.cells[`${x},${y}`]);
   const T = () => toolDef(st.cat, st.tool);
   const pointZ = (f, x, y) => f && f.type === 'block' && f.face === 4 && f.x === x && f.y === y && !E.W.BLOCKS[f.b.t].overlay ? f.z + 1 : E.W.h(dw, x, y);
@@ -467,16 +468,18 @@ function openBuild(cx, cy, o = {}) {
     }
     if (t.how === 'mark') { const tb = topAt(x, y), ok = tb && E.W.BLOCKS[tb.b.t].kind === 'bed'; return { ghost: { ok, cells: [[x, y, E.W.h(dw, x, y), 0.18]] }, say: ok ? `${toolName(t)}を${tb.b[t.mark] ? '外す' : 'つける'}` : '畑の上を押す' }; }
     if (t.how === 'cell') { const g = E.W.h(dw, x, y), ok = !topAt(x, y) && !inDraftHouse(x, y); return { ghost: { ok, cells: [[x, y, g + (t.id === 'fill' ? 0 : -0.01), t.id === 'fill' ? 1 : 0.15]] }, say: ok ? `${toolName(t)} · ${toolPrice(t).toFixed(1)}万円` : '上に何かある' }; }
-    if (t.how === 'erase') { const tb = topAt(x, y); return { ghost: tb ? { ok: true, cells: [[x, y, tb.z, 1.02]] } : null, say: tb ? `${E.W.BLOCKS[tb.b.t].name}を外す` : '外すものを押す' }; }
+    if (t.how === 'erase') { const tb = topAt(x, y), tree = tb && ['tree', 'hedge'].includes(E.W.BLOCKS[tb.b.t].kind) && base.blocks[`${x},${y},${tb.z}`]; return { ghost: tb ? { ok: !tree, cells: [[x, y, tb.z, 1.02]] } : null, say: !tb ? '外すものを押す' : tree ? '木は［土地・木］の［木を切る］で切る' : `${E.W.BLOCKS[tb.b.t].name}を外す` }; }
+    if (t.how === 'cut') { const ci = E.W.cutInfo(dw, x, y), g = E.W.h(dw, x, y); return { ghost: ci ? { ok: true, cells: [[x, y, g, 0.2]] } : null, say: ci ? `${ci.name}を切る · ${ci.cost.toFixed(1)}万円 · 薪と材 ${ci.wood}m³` : '切る木がない（木の根元を押す）' }; }
     if (t.how === 'area') { const g = E.W.h(dw, x, y); return { ghost: { ok: !inDraftHouse(x, y), cells: [[x, y, g, 0.12]] }, say: `なぞって四角を決める（${toolName(t)}）` }; }
     return null;
   };
   // なぞった四角に作る
-  const areaOk = (t) => (x, y) => !inDraftHouse(x, y) && (t.id === 'beds' ? !E.W.canPut(dw, x, y, E.W.h(dw, x, y), 'bed') : t.id === 'pond' || t.id === 'filter' ? !topAt(x, y) : true);
+  const areaOk = (t) => (x, y) => !inDraftHouse(x, y) && (t.id === 'beds' || t.id === 'heap' ? !E.W.canPut(dw, x, y, E.W.h(dw, x, y), t.block) : t.id === 'pond' || t.id === 'filter' ? !topAt(x, y) : true);
   const applyArea = (t, a, b) => {
     const r = rectFrom(a, b);
     for (let y = r.ya; y <= r.yb; y++) for (let x = r.xa; x <= r.xb; x++) if (inDraftHouse(x, y)) return '家（設計中）と重なる';
     if (t.id === 'beds') return E.W.prefabBeds(ds, a, b, 'hire');
+    if (t.id === 'heap') return E.W.prefabBays(ds, a, b, 'hire');
     if (t.id === 'pond') return E.W.prefabPit(ds, a, b, 'pond', 'hire', 1);
     if (t.id === 'filter') return E.W.prefabPit(ds, a, b, MAT.media, 'hire', 1, MAT.plant);
     if (t.id === 'shed') return E.W.prefabShed(ds, a, b, MAT.roof, 'hire');
@@ -487,7 +490,7 @@ function openBuild(cx, cy, o = {}) {
   const unput = (x, y, z) => {
     const k = `${x},${y},${z}`, bk = dw.blocks[k]; if (!bk) return '何もない';
     const fresh = !base.blocks[k] || base.blocks[k].t !== bk.t;
-    const err = E.W.remove(ds, x, y, z); if (err) return err;
+    const err = E.W.remove(ds, x, y, z, fresh); if (err) return err;
     if (fresh) { const d = E.W.BLOCKS[bk.t], pr = E.W.blockPrice(bk.t, 'hire'); ds.cash += pr; dw.spent.local -= (d.local ? d.cost : 0) + d.labor * 1.5; dw.spent.far -= d.local ? 0 : d.cost; }
     if (dw.veg && base.veg && !topAt(x, y)) dw.veg[y * 50 + x] = base.veg[y * 50 + x];
     return null;
@@ -502,6 +505,7 @@ function openBuild(cx, cy, o = {}) {
     }
     if (t.how === 'cell') { if (inDraftHouse(x, y)) return '家の下は掘れない'; return t.id === 'dig' ? E.W.dig(ds, x, y, 'hire') : E.W.fill(ds, x, y, 'hire'); }
     if (t.how === 'erase') { const tb = topAt(x, y); return tb ? unput(x, y, tb.z) : null; }
+    if (t.how === 'cut') return E.W.cutTree(ds, x, y);
     return null;
   };
   cv.style.touchAction = 'none';
@@ -523,7 +527,7 @@ function openBuild(cx, cy, o = {}) {
   });
   cv.addEventListener('pointermove', (e) => {
     const f = v.pickAt(e.clientX, e.clientY);
-    const hc = f && ['terrain', 'floor', 'block', 'furn'].includes(f.type) ? [f.x, f.y] : null, moved = String(hc) !== String(v.hoverCell);
+    const hc = f && ['terrain', 'floor', 'block', 'furn', 'veg'].includes(f.type) ? [f.x, f.y] : null, moved = String(hc) !== String(v.hoverCell);
     v.hoverCell = hc;
     if (!st.cat) { tip.textContent = f ? describeFace(f) : ''; cv.style.cursor = isHouseFace(f) ? 'pointer' : 'default'; if (moved) v.draw(); return; }
     cv.style.cursor = 'crosshair';
@@ -533,7 +537,7 @@ function openBuild(cx, cy, o = {}) {
         const c = cellAny(f); if (!c) return; st.drag.b = c;
         if (t.how === 'area') { const r = rectFrom(st.drag.a, c), n = (r.xb - r.xa + 1) * (r.yb - r.ya + 1), pr = toolPrice(t); v.rect = { ...r, mode: 'add', ok: areaOk(t) }; tip.textContent = `${toolName(t)} ${r.xb - r.xa + 1}×${r.yb - r.ya + 1}m${pr != null ? ` · 約${(n * pr).toFixed(1)}万円` : ''}`; v.draw(); return; }
         if (!st.drag.seen.has(String(c))) { st.drag.seen.add(String(c)); st.drag.path.push(c); }
-        v.ghost = { ok: true, cells: st.drag.path.map(([x, y]) => [x, y, t.how === 'point' ? E.W.h(dw, x, y) : E.W.h(dw, x, y), t.how === 'point' ? 1 : 0.15]) };
+        v.ghost = { ok: true, cells: st.drag.path.map(([x, y]) => [x, y, E.W.h(dw, x, y), t.how === 'point' ? 1 : t.how === 'cut' ? 0.2 : 0.15]) };
         tip.textContent = `${toolName(t)} ×${st.drag.path.length}${toolPrice(t) ? ` · 約${(st.drag.path.length * toolPrice(t)).toFixed(1)}万円` : ''}`; v.draw(); return;
       }
       const hi = hoverInfo(f); v.ghost = hi ? hi.ghost : null; tip.textContent = hi ? hi.say : f ? describeFace(f) : ''; v.draw(); return;
@@ -600,6 +604,7 @@ function describeFace(f) {
   if (f.type === 'roof') return E.W.ROOFS[hs.roof].name;
   if (f.type === 'furn') return E.W.FURN[hs.furn[f.i].t].name;
   if (f.type === 'block') { const d = E.W.BLOCKS[f.b.t]; return `${d.name} · 高さ ${f.z + w.base}m`; }
+  if (f.type === 'veg') return `${E.W.CUT[f.kind].name}${f.kind === 'shrub' ? '' : 'の木'}（切らないと、ここには何も作れない）`;
   return '';
 }
 /* 設計で変わること（下書きの世界といまの世界の差）。値段は目安 */
@@ -614,7 +619,14 @@ function draftLines(base, dw) {
   for (const m of ['s', 'm', 'g']) if (marks[m]) lines.push({ label: `${MK[m][0]} ＋${marks[m]}m²`, cost: marks[m] * MK[m][1] });
   if (dig) lines.push({ label: `掘る ${dig}m³`, cost: dig * E.W.DIG_LABOR * 1.5 });
   if (fil) lines.push({ label: `盛る ${fil}m³`, cost: fil * E.W.FILL_LABOR * 1.5 });
-  for (const [t, n] of Object.entries(rem)) lines.push({ label: `外す：${E.W.BLOCKS[t].name} ${n}${unit(t)}`, cost: 0 });
+  for (const [t, n] of Object.entries(rem)) if (!['tree', 'hedge'].includes(E.W.BLOCKS[t].kind)) lines.push({ label: `外す：${E.W.BLOCKS[t].name} ${n}${unit(t)}`, cost: 0 });
+  // 木を切る：林の木・茂みと、植えた果樹・生け垣
+  const now = new Set(E.W.vegObjects(dw).map(o => o.cx + ',' + o.cy)), cut = {};
+  for (const o of E.W.vegObjects(base)) if (!now.has(o.cx + ',' + o.cy)) cut[o.kind] = (cut[o.kind] || 0) + 1;
+  for (const t of ['tree', 'hedge']) if (rem[t]) cut[t] = (cut[t] || 0) + rem[t];
+  const wood = (dw.wood || 0) - (base.wood || 0);
+  for (const [k, n] of Object.entries(cut)) lines.push({ label: `木を切る：${E.W.CUT[k].name} ${n}本`, cost: n * E.W.CUT[k].cost });
+  if (wood > 0.005) lines.push({ label: `とっておく薪と材 ＋${wood.toFixed(1)}m³`, cost: 0 });
   return lines;
 }
 /* ---------- 右（スマホでは下）の設計図の板 ---------- */
@@ -648,7 +660,7 @@ function renderBuildSide(st) {
 }
 function trayBody(st) {
   const all = TOOLS[st.cat], known = all.filter(t => knownTech(toolLearn(t))), hidden = all.length - known.length, t = toolDef(st.cat, st.tool);
-  const how = { area: 'なぞる', point: '押す・なぞると並べる', mark: '畑を押す・なぞる', cell: '押す・なぞる', erase: '押す・なぞる' };
+  const how = { area: 'なぞる', point: '押す・なぞると並べる', mark: '畑を押す・なぞる', cell: '押す・なぞる', erase: '押す・なぞる', cut: '木を押す・なぞる' };
   const card = (tl) => { const pr = toolPrice(tl), col = tl.color || (tl.block ? E.W.BLOCKS[tl.block].color : '#D9534F'); return `<button class="tcard${st.tool === tl.id ? ' on' : ''}" data-tool="${tl.id}" aria-pressed="${st.tool === tl.id}"><i class="sw" style="background:${col}"></i><span><b>${esc(toolName(tl))}</b><span class="how">${how[tl.how]}</span></span><span class="pr">${pr ? `${pr.toFixed(pr < 1 ? 2 : 1)}<small>万円/${toolUnit(tl)}</small>` : ''}</span></button>`; };
   let opts = '';
   if (st.tool === 'filter') opts = `<div class="seg"><div class="seg-h"><b>入れる層</b></div><div class="seg-o">${['media_gravel', 'media_sand', 'media_char'].map(k => `<button class="opt${MAT.media === k ? ' on' : ''}" data-mat="media:${k}">${esc(E.W.BLOCKS[k].name)}</button>`).join('')}</div><div class="seg-h"><b>植える草</b></div><div class="seg-o">${['plant_reed', 'plant_canna'].map(k => `<button class="opt${MAT.plant === k ? ' on' : ''}" data-mat="plant:${k}">${esc(E.W.BLOCKS[k].name)}</button>`).join('')}</div></div>`;
@@ -727,6 +739,8 @@ function estimateBody(st) {
   rows.push(cmp('タンクに入る屋根', `${Math.round(S0.A.roofCatch / 0.85)}m²`, `${Math.round(S1.A.roofCatch / 0.85)}m²`, S1.A.roofCatch >= S0.A.roofCatch), cmp('タンク', `${S0.tankCap / 1000}m³`, `${S1.tankCap / 1000}m³`, S1.tankCap >= S0.tankCap), cmp('畑', `${Math.round(S0.gArea)}m²`, `${Math.round(S1.gArea)}m²`, S1.gArea >= S0.gArea));
   if (S0.pvKw || S1.pvKw) rows.push(cmp('太陽光', `${S0.pvKw.toFixed(1)}kW`, `${S1.pvKw.toFixed(1)}kW`, S1.pvKw >= S0.pvKw));
   if (S0.pondCap || S1.pondCap) rows.push(cmp('ため池', `${S0.pondCap / 1000}m³`, `${S1.pondCap / 1000}m³`, S1.pondCap >= S0.pondCap));
+  const cTxt = (C) => !C.load ? '—' : `${Math.round(Math.min(1, C.f) * 100)}%（${C.cap.toFixed(1)}/${C.load.toFixed(1)}m³）`;
+  if (S0.compost.load || S1.compost.load || S0.compost.toilet || S1.compost.toilet) rows.push(cmp('堆肥でさばける', cTxt(S0.compost), cTxt(S1.compost), S1.compost.f >= S0.compost.f));
   const probs = [...(hd ? E.W.houseProblems(st.draft) : [])];
   if (dirty && total > s.cash + 1e-9) probs.push(`お金が足りない（あと${Math.ceil(total - s.cash)}万円）`);
   const was = new Set(S0.diag.map(d => d.text)), warn = dirty ? S1.diag.filter(d => d.lv === 'warn' && !was.has(d.text)).slice(0, 3) : [];
@@ -833,7 +847,7 @@ function panelBook() {
   let ledger = '<p class="small">まだ3か月を過ごしていません。</p>';
   if (last) {
     const m = last.money;
-    const items = [['仮住まい', -(m.rent || 0)], ['外貨の仕事', m.income], ['野菜・電気を売った', m.sell], ['仕事の経費', -m.jobCost], ['そのほかの暮らし', -m.living], ['食べものを買った', -m.food], ['水を買った', -m.water], ['電気を買った', -m.power], ['家の維持', -m.maint], ['設備の交換', -m.replace], ['修理', -m.repair]].filter(x => Math.abs(x[1]) >= 0.05);
+    const items = [['仮住まい', -(m.rent || 0)], ['外貨の仕事', m.income], ['野菜・電気を売った', m.sell], ['仕事の経費', -m.jobCost], ['そのほかの暮らし', -m.living], ['食べものを買った', -m.food], ['水を買った', -m.water], ['電気を買った', -m.power], ['家の維持', -m.maint], ['設備の交換', -m.replace], ['修理', -m.repair], ['おがくずを買った', -(m.sawdust || 0)], ['し尿の汲み取り', -(m.pumpout || 0)]].filter(x => Math.abs(x[1]) >= 0.05);
     ledger = `<div class="rows">${items.map(([n, v]) => `<span>${n}</span><b class="num${v < 0 ? ' neg' : ''}">${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}万円</b>`).join('')}<span class="tot">差し引き</span><b class="num tot">${last.net >= 0 ? '+' : '−'}${Math.abs(last.net).toFixed(1)}万円</b></div>`;
   }
   return `<div><h2>家計簿</h2><p class="small">円の財布だけでなく、水・電気・食べもの・土の財布で暮らしを見る。</p></div>
