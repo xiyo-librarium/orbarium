@@ -295,7 +295,7 @@ export function applyReal(key, real) {
 /* 置いたものの集計 */
 const _anaCache = new WeakMap();
 export function analyzeWorld(s) {
-  const key = s.world; const sig = JSON.stringify([s.world.H, s.world.blocks, s.world.mods]).length + ':' + Object.keys(s.world.blocks).length + ':' + s.world.queue.length + ':' + s.world.H.reduce((a, b, i) => a + b * (i % 7 + 1), 0) + ':' + JSON.stringify(s.world.mods) + ':' + JSON.stringify(s.world.house) + ':' + Object.values(s.world.blocks).reduce((a, b) => a + (b.p ? 1 : 0) + (b.s ? 3 : 0) + (b.m ? 5 : 0), 0);
+  const key = s.world; const sig = JSON.stringify([s.world.H, s.world.blocks, s.world.mods]).length + ':' + Object.keys(s.world.stone || {}).join(';') + ':' + Object.keys(s.world.blocks).length + ':' + s.world.queue.length + ':' + s.world.H.reduce((a, b, i) => a + b * (i % 7 + 1), 0) + ':' + JSON.stringify(s.world.mods) + ':' + JSON.stringify(s.world.house) + ':' + Object.values(s.world.blocks).reduce((a, b) => a + (b.p ? 1 : 0) + (b.s ? 3 : 0) + (b.m ? 5 : 0), 0);
   const c = _anaCache.get(key); if (c && c.sig === sig && c.n === s.persons.length) return c.a;
   const a = W.analyze(s.world, SITES[s.site], s.persons.length);
   _anaCache.set(key, { sig, a, n: s.persons.length }); return a;
@@ -342,7 +342,7 @@ export function summarize(s) {
     bareRisers: bare, risers: A.risers, tankCap: A.tankCap, tankGrav: A.tankGrav, pondGrav: A.pondGrav, pumps: A.pumps,
     filter: A.filter ? { ...A.filter, m: B.filterModel(A.filter.spec, grey) } : null,
     heap: A.heap, pvKw: A.pvKw, battKwh: A.battKwh, trees: A.trees, coops: A.coops,
-    pondCap: A.pondCap, pondArea: A.pondArea, pondCatch: A.pondCatch, hedgeLen: A.hedge, wallLen: A.stoneRisers * 2 + A.greenRoof * 0.5,
+    pondCap: A.pondCap, pondArea: A.pondArea, pondCatch: A.pondCatch, hedgeLen: A.hedge, wallLen: A.wallArea * 2 + A.greenRoof * 0.5, wallArea: A.wallArea, wallBedShare: A.wallBedShare,
     pending: W.pendingDays(w), diag: [...A.diag, ...cd], compost: C
   };
 }
@@ -485,7 +485,9 @@ export function advance(state) {
       if (stress < 0.6) A.dryStressDays++;
       if (s.soil > cap) { A.recharge += (s.soil - cap) * S.gArea / 1000; s.soil = cap; }
       A.soilMin = Math.min(A.soilMin, s.soil);
-      A.growth += cold ? 0 : (etc > 0 ? aet / etc : 1); A.growDays++;
+      // 石垣のそばの畑は、昼に石がためた熱で夜も約2℃暖かい：寒い日も育ち、涼しい日は少しよく育つ
+      const gday = etc > 0 ? aet / etc : 1, sw = S.wallBedShare || 0;
+      A.growth += (1 - sw) * (cold ? 0 : gday) + sw * (d.t + 2 < 5 ? 0 : gday * (d.t < 18 ? 1.06 : 1)); A.growDays++;
     }
     if (d.t < 5) A.coldDays++;
     // 温室：雨は入らない。外より12℃暖かく、蒸発は半分
@@ -543,7 +545,7 @@ export function advance(state) {
 
   // 収穫（3か月分）
   let pest = false;
-  const pestP = S.gArea ? Math.max(0.05, 0.28 - 0.03 * S.trees - 0.012 * S.hedgeLen) : 0;
+  const pestP = S.gArea ? Math.max(0.05, 0.28 - 0.03 * S.trees - 0.012 * S.hedgeLen - 0.004 * Math.min(25, S.wallArea || 0)) : 0;   // 石垣のすき間のトカゲ・クモ・甲虫が虫を食べる
   if (S.gArea && r() < pestP) pest = true;
   const growF = A.growDays ? A.growth / A.growDays : 0;
   const pestF = pest ? (s.flags.pestHand ? 0.92 : 0.8) : 1;
@@ -628,10 +630,13 @@ export function advance(state) {
   if (pending0 > 0 && buildDays < 0.5) events.push({ kind: 'stalled', names: ['作りかけのもの'] });
   const sawdust = Cb.buy * 0.5 * qFrac;                                  // おがくず（近所の製材所）
   const chipper = chipWood * 0.3;                                        // 木をチップにする手間（近所の人がチッパーで）
+  // 余った木は薪として近所に売る（かまどがあれば1年分、なければ堆肥のチップ用に少し残す。3か月に1m³まで）
+  const keepWood = stove ? 1.0 * n * 365 / 400 + 0.3 : 0.5, woodSold = Math.min(1, Math.max(0, woodLeft - keepWood));
+  woodLeft -= woodSold; const woodSale = woodSold * 0.6;
   s.world.wood = woodLeft;
   const pumpout = Cb.toilet * (1 - Cb.f) * 4 * qFrac;                    // さばけないし尿の汲み取り（遠くの業者）
-  const outflow = { income, sell, jobCost, living, water: cWater, power: cPower, food: cFood, maint, replace, repair, rent, sawdust, pumpout, chipper };
-  const net = income + sell - jobCost - living - cWater - cPower - cFood - maint - replace - repair - rent - sawdust - pumpout - chipper;
+  const outflow = { income, sell, jobCost, living, water: cWater, power: cPower, food: cFood, maint, replace, repair, rent, sawdust, pumpout, chipper, woodSale };
+  const net = income + sell + woodSale - jobCost - living - cWater - cPower - cFood - maint - replace - repair - rent - sawdust - pumpout - chipper;
   s.cash += net;
 
   if (A.outDays) events.push({ kind: 'blackout', days: A.outDays, covered: A.outShort < 0.5, short: A.outShort });
@@ -745,11 +750,11 @@ export function relations(s) {
     { id: 'soil', name: '土', v: clamp((s.om - 1.5) / 4), good: s.om >= (SITES[s.site].soilOM || 2), why: `土の有機物 ${s.om.toFixed(1)}%（はじめ ${SITES[s.site].soilOM}%）` },
     { id: 'crops', name: '作物', v: clamp(fs) * (S.gArea ? 1 : 0), good: true, why: `食べものの${Math.round(fs * 100)}%を畑から` },
     { id: 'worms', name: 'ミミズと微生物', v: clamp((S.heap ? 0.35 : 0) + (S.compostToilet ? 0.25 : 0) + (S.mulchArea / Math.max(1, S.gArea)) * 0.4) * tend, good: true, why: '堆肥とマルチが土の中の生き物を養う' },
-    { id: 'insects', name: '虫（受粉と天敵）', v: clamp(S.hedgeLen / 30 + S.trees / 12 + (S.gArea ? 0.1 : 0)), good: true, why: '生け垣と果樹が花と隠れ家になる' },
+    { id: 'insects', name: '虫（受粉と天敵）', v: clamp(S.hedgeLen / 30 + S.trees / 12 + (S.wallArea || 0) / 80 + (S.gArea ? 0.1 : 0)), good: true, why: '生け垣と果樹が花と隠れ家に、石垣のすき間が天敵の住みかになる' },
     { id: 'birds', name: '鳥', v: clamp(S.trees / 10 + S.hedgeLen / 40), good: true, why: '木が増えると鳥がとまる' },
     { id: 'hens', name: 'ニワトリ', v: clamp(S.coops * 0.6 * tend), good: true, why: S.coops ? '残り物を食べ、卵とふんを返してくれる' : 'まだいない' },
     { id: 'frogs', name: 'カエルとトンボ', v: clamp(S.pondArea / 15 + (S.filter ? S.filter.m.life : 0)), good: true, why: S.pondArea || S.filter ? 'ため池やバイオフィルターの水辺に生き物が集まる' : '水辺がない' },
-    { id: 'lizards', name: 'トカゲと苔', v: clamp(S.wallLen / 60), good: true, why: '石垣のすき間が住みかになる' },
+    { id: 'lizards', name: 'トカゲと苔', v: clamp(S.wallLen / 60), good: true, why: S.wallArea ? `石垣${Math.round(S.wallArea)}m²のすき間が住みかになり、畑の虫を食べる` : '石垣のすき間が住みかになる' },
     { id: 'neighbors', name: '近所の人', v: clamp(localYen / 40), good: true, why: localYen > 0.5 ? `この1年、近所とのやりとり ${Math.round(localYen)}万円（野菜を売る・工事を頼む・材料を買う）` : 'まだ付き合いは薄い' },
     { id: 'friend', name: 'ルシア', v: s.site === 'med' ? 0.5 : 0.2, good: true, why: s.site === 'med' ? '祖父母の土地を貸してくれた' : '世界のどこかから時々メールが来る' },
     { id: 'river', name: '下流の川', v: clamp((sewer * 0.6 + runoff * 0.15) / 40), good: false, why: `下水 ${sewer.toFixed(0)}m³・畑から流れた雨 ${runoff.toFixed(0)}m³` },
@@ -817,7 +822,7 @@ export function cycles(s) {
   const ps = load ? Math.max(0, 1 - grid / load) : 0;
   // お金（万円）：近所と遠く
   const m = (f) => sum(x => f(x.money || {}));
-  const inFar = m(x => x.income), inLoc = m(x => x.sell);
+  const inFar = m(x => x.income), inLoc = m(x => x.sell + (x.woodSale || 0));
   const outLoc = m(x => (x.rent || 0) + 0.5 * (x.food || 0) + 0.2 * (x.living || 0) + 0.5 * (x.maint || 0) + 0.5 * (x.repair || 0) + (x.sawdust || 0) + (x.chipper || 0)) + sum(x => x.spent?.local || 0);
   const outFar = m(x => (x.jobCost || 0) + 0.5 * (x.food || 0) + 0.8 * (x.living || 0) + (x.water || 0) + (x.power || 0) + 0.5 * (x.maint || 0) + (x.replace || 0) + 0.5 * (x.repair || 0) + (x.pumpout || 0)) + sum(x => x.spent?.far || 0);
   const mTot = inFar + inLoc + outLoc + outFar;

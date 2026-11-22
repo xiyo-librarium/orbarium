@@ -158,6 +158,17 @@ export function cutTree(s, x, y) {
   else if (w.veg) w.veg[idx(x, y)] = 30;
   return null;
 }
+/* 石垣：段差のふち（上の段のマス）に積む。そのマスの下がっている面ぜんぶを、石で留める。
+   石は畑から出た石と近くの川原の石、積むのは近所の石工さん（1m²＝長さ1m×段差1m） */
+export const STONE_PRICE = 0.25;
+export function dropArea(w, x, y) { const g = h(w, x, y); let a = 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nh = h(w, x + dx, y + dy); if (nh !== -99 && nh < g) a += g - nh; } return a; }
+export function buildStone(s, x, y) {
+  const w = s.world, k = `${x},${y}`, a = dropArea(w, x, y);
+  if (!a) return '段差のふちではない（上の段のはしをなぞる）';
+  if (w.stone && w.stone[k]) return 'もう石垣がある';
+  const price = a * STONE_PRICE; if (price > s.cash + 1e-9) return 'お金が足りない';
+  s.cash -= price; spend(w, price, 0); w.stone = w.stone || {}; w.stone[k] = 1; return null;
+}
 const treeWhy = (w, x, y) => { const o = vegAt(w, x, y); return o ? (o.kind === 'shrub' ? 'やぶがある（先に［木を切る］で刈る）' : '木がある（先に［木を切る］）') : null; };
 export function put(s, x, y, z, t, mode, extra = {}) {
   const w = s.world, d = BLOCKS[t];
@@ -194,7 +205,7 @@ export function dig(s, x, y, mode) {
   const price = mode === 'self' ? 0 : DIG_LABOR * 1.5;
   if (price > s.cash + 1e-9) return 'お金が足りない';
   s.cash -= price; spend(w, price, 0); if (mode === 'self') w.debt += DIG_LABOR;
-  w.H[idx(x, y)] = g - 1; w.earth += 1;
+  w.H[idx(x, y)] = g - 1; w.earth += 1; if (w.stone) delete w.stone[`${x},${y}`];
   return null;
 }
 export function fill(s, x, y, mode) {
@@ -207,7 +218,7 @@ export function fill(s, x, y, mode) {
   if (price > s.cash + 1e-9) return 'お金が足りない';
   s.cash -= price; spend(w, price, 0); if (mode === 'self') w.debt += FILL_LABOR;
   w.earth = Math.max(0, w.earth - 1);
-  w.H[idx(x, y)] = g + 1;
+  w.H[idx(x, y)] = g + 1; if (w.stone) delete w.stone[`${x},${y}`];
   return null;
 }
 /* 畑の工夫（石垣・マルチ）はブロックの印 */
@@ -484,11 +495,18 @@ export function analyze(w, site, persons = 1) {
   // 畑
   const beds = blocksOf(w, 'bed');
   const bedSet = new Set(beds.map(b => `${b.x},${b.y}`));
+  // 段差：ふちまで畑にした段差（上の段が畑）。石垣があれば留まる
   let risers = 0, stoneRisers = 0;
+  const stoned = (x, y, b) => (w.stone && w.stone[`${x},${y}`]) || (b && b.b.s);
   for (const b of beds) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     const nh = h(w, b.x + dx, b.y + dy); if (nh === -99) continue;
-    if (nh < b.z) { risers += b.z - nh; if (b.b.s) stoneRisers += b.z - nh; }
+    if (nh < b.z) { risers += b.z - nh; if (stoned(b.x, b.y, b)) stoneRisers += b.z - nh; }
   }
+  // 石垣の面積と、石垣に接する畑（上の段のふちと、石垣の足もと）
+  let wallArea = 0; const nearWall = new Set();
+  for (const k in (w.stone || {})) { const [x, y] = k.split(',').map(Number); const a = dropArea(w, x, y); wallArea += a; if (!a) continue; nearWall.add(k); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (h(w, x + dx, y + dy) < h(w, x, y)) nearWall.add(`${x + dx},${y + dy}`); }
+  for (const b of beds) if (b.b.s && !(w.stone && w.stone[`${b.x},${b.y}`])) { wallArea += dropArea(w, b.x, b.y); nearWall.add(`${b.x},${b.y}`); }
+  const wallBedShare = beds.length ? beds.filter(b => nearWall.has(`${b.x},${b.y}`)).length / beds.length : 0;
   const gArea = beds.filter(b => !b.b.g).length, ghBeds = beds.filter(b => b.b.g).length;
   const bedMaxZ = beds.length ? Math.max(...beds.map(b => b.z)) : null;
   const pumps = blocksOf(w, 'pump').length;
@@ -528,7 +546,7 @@ export function analyze(w, site, persons = 1) {
   const count = (kind) => blocksOf(w, kind).length;
   return {
     groups, house, gh, ghBeds, roofComps, roofCatch, roofLost, tanks: tanks.length, fedTanks: fed.length, tankCap: fed.length * 1000, tankBase,
-    beds: beds.length, gArea, bedMaxZ, risers, stoneRisers, mulch: beds.filter(b => b.b.m).length, bedSet,
+    beds: beds.length, gArea, bedMaxZ, risers, stoneRisers, wallArea, wallBedShare, mulch: beds.filter(b => b.b.m).length, bedSet,
     tankGrav, pondGrav, pumps, ponds: ponds.length, pondCap: ponds.length * 1000, pondArea: new Set(ponds.map(p => `${p.x},${p.y}`)).size, pondCatch, pondTop,
     filter, pvKw: (count('pv') + (w.house?.pv || 0)) * BLOCKS.pv.kw, battKwh: (count('batt') + (w.house?.batt || 0)) * BLOCKS.batt.kwh, heap: count('heap'), coops: count('coop'), trees: count('tree'), hedge: count('hedge'),
     greenRoof: roofs.filter(r => r.b.t === 'roof_green').length, diag

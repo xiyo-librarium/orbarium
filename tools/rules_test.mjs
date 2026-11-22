@@ -41,4 +41,26 @@ check('林の落ち葉で炭素が足りる', S.compost.buy < 0.01);
   const r3 = E.advance(s3).report, r4 = E.advance(s4).report;
   check(`かまどがあると薪を使い、電気が減る（${r4.A.load.toFixed(0)}→${r3.A.load.toFixed(0)}kWh）`, r3.A.firewood > 0 && r3.A.load < r4.A.load);
 }
+// 石垣：段差のふち（上の段）に積む。ふちまで耕した段差が留まり、水と土が流れにくく、虫が減り、そばの畑が暖かい
+{
+  const s5 = E.newGame({ seed: 11 }), w5 = s5.world; s5.known.push('terrace');
+  const edges = []; for (let y = 5; y < 45; y++) for (let x = 5; x < 45; x++) if (W.dropArea(w5, x, y) && !W.at(w5, x, y, W.h(w5, x, y)) && !(w5.house && w5.house.cells[`${x},${y}`])) edges.push([x, y]);
+  const flat = []; for (let y = 5; y < 45; y++) for (let x = 5; x < 45; x++) if (!W.dropArea(w5, x, y) && !W.at(w5, x, y, W.h(w5, x, y))) flat.push([x, y]);
+  check('段差のないマスには石垣を積めない', !!W.buildStone(s5, ...flat[0]));
+  const use = edges.slice(0, 24); for (const [x, y] of use) W.put(s5, x, y, W.h(w5, x, y), 'bed', 'hire');
+  const S0 = E.summarize(s5), rA = E.advance(s5).report;
+  for (const [x, y] of use) W.buildStone(s5, x, y);
+  const S1 = E.summarize(s5), rB = E.advance(s5).report;
+  check(`ふちまで耕した段差が石垣で留まる（${S0.bareRisers}→${S1.bareRisers}m²）`, S1.bareRisers < S0.bareRisers);
+  check(`流れ出る雨が減る（${rA.A.runoff.toFixed(1)}→${rB.A.runoff.toFixed(1)}m³）`, rB.A.runoff < rA.A.runoff);
+  check(`石垣のそばの畑がある（${Math.round(S1.wallBedShare * 100)}%）`, S1.wallBedShare > 0);
+  const liz = (S) => E.relations({ ...s5, world: s5.world }).nodes.find(n => n.id === 'lizards').v;
+  check('石垣はトカゲの住みかになる', liz() > 0);
+}
+// 余った木は薪として売れる
+{
+  const s6 = E.newGame({ seed: 12 }); s6.world.wood = 5;
+  const r6 = E.advance(s6);
+  check(`余った木を売る（5→${r6.state.world.wood.toFixed(1)}m³、${r6.report.money.woodSale.toFixed(1)}万円）`, r6.report.money.woodSale > 0 && r6.state.world.wood < 5);
+}
 console.log(ok.map(x => '  ✓ ' + x).join('\n')); if (ng.length) { console.log(ng.map(x => '  ✗ ' + x).join('\n')); process.exit(1); }

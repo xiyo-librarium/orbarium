@@ -221,16 +221,18 @@ export function createView(canvas, world, opt = {}) {
       const sLit = sl > 0 && occ ? litAt(mx, my, top - Math.min(ht, 3) * 0.5) : sl > 0 ? 1 : 0;
       // 内側の1段の段差は草の土手、敷地の切り口と高い崖・掘った所は土
       const bank = meta.lip && open[ei] && meta.drop && meta.drop[ei] === 1;
-      const fill = lightCol(bank ? meta.bank : meta.side, sl, sLit, bank ? 0.9 : 0.94, true);
+      const stone = meta.stone && open[ei] && meta.drop && meta.drop[ei] >= 1 && meta.drop[ei] < 99;   // 石垣を積んだ段差の面
+      const fill = lightCol(stone ? '#ABA598' : bank ? meta.bank : meta.side, sl, sLit, stone ? 0.96 : bank ? 0.9 : 0.94, true);
       // 草のふち：厚みも少しゆらす
       const lip = open[ei] && meta.lip ? [...ed.map(([px, py, pz]) => P(px, py, pz)), ...ed.slice().reverse().map(([px, py, pz]) => P(px, py, pz - 0.1 - (wob(px + 0.13, py - 0.07) + 0.5) * 0.12))] : null;
       const lipFill = lightCol(color, (Math.max(0, sl) + lam) / 2, (sLit + lit) / 2, 0.93, true);
-      sides.push({ pts, fill, face: ei === 0 ? 3 : ei === 1 ? 0 : ei === 2 ? 1 : 2, lip, lipFill });
+      sides.push({ pts, fill, face: ei === 0 ? 3 : ei === 1 ? 0 : ei === 2 ? 1 : 2, lip, lipFill, stone: stone ? [P(C[ia][0], C[ia][1], top - meta.drop[ei]), P(C[ib][0], C[ib][1], top - meta.drop[ei]), P(C[ib][0], C[ib][1], top - 0.08), P(C[ia][0], C[ia][1], top - 0.08)] : null });
     }
     const depth = P(x + 0.5, y + 0.5, z)[2] + z * 0.001 + ht * 0.0005;
     list.push({ depth, draw: (cx, pc) => {
       for (const sd of sides) {
         poly(cx, sd.pts, pc ? pc(sd.face) : sd.fill, 1);
+        if (!pc && sd.stone) stoneDecor(x * 31 + y * 17 + sd.face)(cx, sd.stone);
         if (!pc && sd.lip) poly(cx, sd.lip, sd.lipFill, 1);
       }
       poly(cx, topPoly, pc ? pc(4) : topFill, 1);
@@ -284,6 +286,7 @@ export function createView(canvas, world, opt = {}) {
         meta.drop = [[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => { const nx = x + dx, ny = y + dy; return nx < x0 || nx > x1 || ny < y0 || ny > y1 ? 99 : g - h(world, nx, ny); });
         meta.bank = '#' + hex3(col).map(c => Math.round(c * 0.86).toString(16).padStart(2, '0')).join('');
         meta.corners = corners(x, y);
+        meta.stone = !!(world.stone && world.stone[`${x},${y}`]);
         terrainBox(list, x, y, floorLv, g - floorLv, col, meta, open);
       }
     }
@@ -413,17 +416,32 @@ export function createView(canvas, world, opt = {}) {
       [[0.3, 0.3], [0.7, 0.3], [0.3, 0.7], [0.7, 0.7]].forEach(([px, py], i) => sphere(list, x + px, y + py, z + 0.55 + hash(x, y, 60 + i) * 0.12, 0.3, '#3C7445', meta, D + i * 1e-5));
       return;
     }
-    if (d.kind === 'heap') {   // 堆肥小屋の1区画：板の囲いに堆肥、四隅の柱、トタン屋根（雨よけの半屋外）
+    if (d.kind === 'heap') {   // 堆肥小屋の1区画：板の囲いに堆肥、柱、トタン屋根（雨よけの半屋外）。となりも区画なら、屋根と仕切りをつなげて1棟に
       const parts = [], mk = (bb) => { parts[parts.length - 1].bb = bb; };
       const B = (u0, v0, u1, v1, z0, ht, col, m2 = {}) => { rbox(parts, x + u0, y + v0, x + u1, y + v1, z0, ht, col, { ...meta, ...m2 }, a); mk([x + u0, x + u1, y + v0, y + v1, z0, z0 + ht]); };
+      const isBay = (xx, yy) => { const o = world.blocks[`${xx},${yy},${z}`]; return o && BLOCKS[o.t].kind === 'heap'; };
+      const nW = isBay(x - 1, y), nE = isBay(x + 1, y), nN = isBay(x, y - 1), nS = isBay(x, y + 1);
       blob(parts, x + 0.5, y + 0.5, z, 0.75, 0.3, 0);
-      for (const [u, w2] of [[0.03, 0.03], [0.89, 0.03], [0.03, 0.89], [0.89, 0.89]]) B(u, w2, u + 0.08, w2 + 0.08, z, 2.2, '#7A5A3A');
-      const wh = 0.72, wd = '#A88457';
-      B(0.13, 0.1, 0.87, 0.16, z, wh, wd, { sideDecor: slats }); B(0.13, 0.84, 0.87, 0.9, z, wh, wd, { sideDecor: slats });
-      B(0.1, 0.1, 0.16, 0.9, z, wh, wd, { sideDecor: slats }); B(0.84, 0.1, 0.9, 0.9, z, wh, wd, { sideDecor: slats });
-      B(0.16, 0.16, 0.84, 0.84, z, 0.5, '#5E4834', { decor: compostTop(x, y) });
+      // 柱：区画のまとまりの外の角と、外の辺に2mごと。同じ柱は1度だけ（左上の区画が描く）
+      for (const [px, py] of [[x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]]) {
+        const around = [[px - 1, py - 1], [px, py - 1], [px - 1, py], [px, py]].filter(([cx2, cy2]) => isBay(cx2, cy2));
+        const n = around.length, owner = around[0];
+        if (owner[0] !== x || owner[1] !== y) continue;
+        if (!(n === 1 || n === 3 || (n === 2 && (px + py) % 2 === 0))) continue;
+        const ix = Math.max(x, Math.min(x + 1, px)), iy = Math.max(y, Math.min(y + 1, py));
+        const ux = n === 1 ? (px === x ? 0.03 : 0.89) : px - x - 0.04, uy = n === 1 ? (py === y ? 0.03 : 0.89) : py - y - 0.04;
+        B(ux, uy, ux + 0.08, uy + 0.08, z, 2.2, '#7A5A3A');
+      }
+      // 囲い：外の辺は板の壁、となりとの境は仕切り（左・上の区画が1枚だけ）
+      const wh = 0.72, wd = '#A88457', sl = { sideDecor: slats };
+      if (!nN) B(0.13, 0.1, 0.87, 0.16, z, wh, wd, sl);
+      if (!nS) B(0.13, 0.84, 0.87, 0.9, z, wh, wd, sl); else B(0.13, 0.97, 0.87, 1.03, z, wh, wd, sl);
+      if (!nW) B(0.1, 0.1, 0.16, 0.9, z, wh, wd, sl);
+      if (!nE) B(0.84, 0.1, 0.9, 0.9, z, wh, wd, sl); else B(0.97, 0.13, 1.03, 0.87, z, wh, wd, sl);
+      B(nW ? 0.03 : 0.16, nN ? 0.03 : 0.16, nE ? 0.97 : 0.84, nS ? 0.97 : 0.84, z, 0.5, '#5E4834', { decor: compostTop(x, y) });
       sphere(parts, x + 0.5, y + 0.5, z + 0.5, 0.3, '#6B5238', meta, 0, a, 0.6); mk([x + 0.2, x + 0.8, y + 0.2, y + 0.8, z + 0.5, z + 0.7]);
-      B(-0.05, -0.05, 1.05, 1.05, z + 2.2, 0.1, '#8E979C', { decor: roofDecor('tin', x, y) });
+      // 屋根：となりがあれば境まで（すき間なくつながる）、外の辺だけ少し張り出す
+      B(nW ? 0 : -0.06, nN ? 0 : -0.06, nE ? 1 : 1.06, nS ? 1 : 1.06, z + 2.2, 0.1, '#8E979C', { decor: roofDecor('tin', x, y) });
       pushCompound(list, parts, onGround + 0.01, meta);
       return;
     }

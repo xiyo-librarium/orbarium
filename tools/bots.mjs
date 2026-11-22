@@ -89,7 +89,7 @@ const STRATS = {
       if (K('heap') && count(s, 'heap') < 2) single(s, 'heap', 'hire', [hm.x0 - 4, hm.y1 + 8]);
       for (const k in s.world.blocks) {
         const b = s.world.blocks[k]; if (b.t !== 'bed') continue; const [x, y, z] = k.split(',').map(Number);
-        if (K('terrace') && !b.s && s.cash > 5 && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => { const n = W.h(s.world, x + dx, y + dy); return n > -99 && n < z; })) W.toggleMark(s, x, y, z, 's');
+        if (K('terrace') && !(s.world.stone || {})[`${x},${y}`] && s.cash > 5 && W.dropArea(s.world, x, y)) W.buildStone(s, x, y);
         if (K('mulch') && !b.m && s.cash > 5) W.toggleMark(s, x, y, z, 'm');
       }
       if (K('toilet') && !s.world.mods.compostToilet && s.cash > 40) remodel(s, d => { const i = d.furn.findIndex(f => f.t === 'toilet'); if (i >= 0) W.draftSwapFurn(d, i, 'ctoilet'); });
