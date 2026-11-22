@@ -1,7 +1,7 @@
 import * as E from './engine.js';
 import { NOTES, LESSON, eventText, ATLAS, PROLOGUE, INVITE, LANDS } from './content.js';
 import { createGlobe, flyTo, loadLand } from './globe.js';
-import { createView } from './iso.js';
+import { createView, sunVector, dirName } from './iso.js';
 
 const KEY = 'orbarium-v4';
 const app = document.getElementById('app');
@@ -228,6 +228,16 @@ function renderMap() {
 function paintPlot(ctx, w, pad, c, dpr, labels) {
   const max = Math.max(...w.H), H = (x, y) => E.W.h(w, x, y);
   for (let y = 0; y < 50; y++) for (let x = 0; x < 50; x++) { ctx.fillStyle = levelColor(H(x, y), max, w.H0[y * 50 + x] > H(x, y)); ctx.fillRect(pad + x * c, pad + y * c, c + 0.5, c + 0.5); }
+  // 斜面の日当たり：その土地・その季節の10時の日差しに向いた斜面を明るく、背を向けた斜面を暗く
+  const site = E.SITES[G.s?.site || 'tokyo'], S = sunVector(site.lat, (G.s?.q ?? 1) * 3 + 2, 10).dir;
+  const Hc = (x, y) => H(Math.max(0, Math.min(49, x)), Math.max(0, Math.min(49, y)));
+  for (let y = 0; y < 50; y++) for (let x = 0; x < 50; x++) {
+    let gx = 0, gy = 0; for (let k = -2; k <= 2; k++) { gx += Hc(x + 2, y + k) - Hc(x - 2, y + k); gy += Hc(x + k, y + 2) - Hc(x + k, y - 2); }
+    gx /= 20; gy /= 20; const nl = Math.hypot(gx, gy, 1), lam = (-gx * S[0] - gy * S[1] + S[2]) / nl, d = lam - S[2];
+    if (Math.abs(d) < 0.01) continue;
+    ctx.fillStyle = d > 0 ? `rgba(255,236,190,${Math.min(0.35, d * 1.4)})` : `rgba(40,50,90,${Math.min(0.3, -d * 1.2)})`;
+    ctx.fillRect(pad + x * c, pad + y * c, c + 0.5, c + 0.5);
+  }
   const lines = (idx) => {
     ctx.beginPath();
     for (let y = 0; y < 50; y++) for (let x = 0; x < 50; x++) {
@@ -336,14 +346,19 @@ function openBuild(cx, cy, o = {}) {
   const ov = document.createElement('div'); ov.className = 'iso3d';
   ov.innerHTML = `<div class="iso-in" role="dialog" aria-modal="true" aria-label="拡大して作る">
     <div class="iso-stage"><canvas id="isoc"></canvas><canvas id="isomini" class="iso-mini" aria-label="全体の地図。枠がいま見ている場所。押すとそこへ移動"></canvas>
-      ${ro ? '' : `<div class="iso-views" role="group" aria-label="見え方"><button data-view="up" class="on" title="屋根までできあがった姿">できあがり</button><button data-view="cut" title="手前の壁だけ下げて、中と奥の壁を見る">中を見る</button><button data-view="down" title="壁を全部低くして、床と家具を見る">壁を下げる</button><button data-view="top" title="真上から（北が上、等高線つき）">真上から</button></div>`}
+      <div class="iso-views" role="group" aria-label="見え方">${ro ? '' : `<button data-view="up" class="on" title="屋根までできあがった姿">できあがり</button><button data-view="cut" title="手前の壁だけ下げて、中と奥の壁を見る">中を見る</button><button data-view="down" title="壁を全部低くして、床と家具を見る">壁を下げる</button><button data-view="top" title="真上から（北が上、等高線つき）">真上から</button>`}<button data-sun="1" class="sun"></button></div>
       <div class="iso-nav"><button class="btn" data-nav="rl" aria-label="左に回す">↺</button><button class="btn" data-nav="rr" aria-label="右に回す">↻</button><button class="btn" data-nav="zi" aria-label="拡大">＋</button><button class="btn" data-nav="zo" aria-label="縮小">−</button>
       <button class="btn" data-nav="u" aria-label="奥へ">↑</button><button class="btn" data-nav="d" aria-label="手前へ">↓</button><button class="btn" data-nav="l" aria-label="左へ">←</button><button class="btn" data-nav="r" aria-label="右へ">→</button></div>
       <div class="iso-tip" id="isotip"></div></div>
     <aside class="iso-side" id="isoside"></aside></div>`;
   document.body.appendChild(ov);
   const st = { cat: null, view: 'up', tool: null, a: null, msg: '', drag: null, sel: -1, spot: [cx, cy] };
-  const v = createView(document.getElementById('isoc'), world, { cx, cy, R: 8 }); G.view = v; G.build = st;
+  const site = E.SITES[ro ? 'tokyo' : G.s.site], month = ro ? 5 : G.s.q * 3 + 2;
+  const v = createView(document.getElementById('isoc'), world, { cx, cy, R: 8, lat: site.lat, month }); G.view = v; G.build = st;
+  const sunBtn = ov.querySelector('[data-sun]');
+  const sunLabel = () => { if (!sunBtn) return; const sv = v.sun; sunBtn.textContent = `☀ ${v.hour}時 · ${dirName(sv.az)}から${Math.round(sv.elev)}°`; sunBtn.title = `${month}月の${v.hour}時の日差し。押すと時刻が変わる（8・10・12・14・16時）`; };
+  if (sunBtn) sunBtn.onclick = () => { const hs = [8, 10, 12, 14, 16]; v.setSun(null, null, hs[(hs.indexOf(v.hour) + 1) % hs.length]); sunLabel(); v.draw(); };
+  sunLabel();
   const mini = document.getElementById('isomini'), tip = document.getElementById('isotip'), cv = document.getElementById('isoc');
   const houseDirty = () => st.cat === 'house' && JSON.stringify(st.draft) !== JSON.stringify(st.base);
   const setView = (vw) => {
