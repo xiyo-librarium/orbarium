@@ -11,23 +11,14 @@ function home(s) {
   const xs = cs.map(c => c[0]), ys = cs.map(c => c[1]);
   return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys), z: hs.z };
 }
-/* 床を南へ rows 列ぶん広げる */
-function expand(s, rows, mode, wallT) {
-  const hm = home(s); let n = 0;
-  for (let r = 1; r <= rows; r++) for (let x = hm.x0; x <= hm.x1; x++) if (!W.addFloor(s, x, hm.y1 + r, mode, wallT)) n++;
-  return n;
+/* 設計して建てる：床を南へ rows 列ぶん広げ、素材を替える */
+function remodel(s, f) {
+  const d = W.cloneHouse(s.world.house); f(d);
+  return W.buildHouse(s, d);
 }
-/* 外壁を張り替える（鋼板→断熱）。窓と扉は残す */
-function rewall(s, t, mode, max = 99) {
-  const hs = s.world.house; let n = 0;
-  for (const o of W.houseOuterEdges(hs, false)) {
-    if (n >= max) break;
-    const wl = hs.walls[o.e]; if (!wl || wl.next || W.PANELS[wl.t].win || W.PANELS[wl.t].door || wl.t === t) continue;
-    if (W.PANELS[t].u >= W.PANELS[wl.t].u) continue;
-    if (!W.setWall(s, o.e, t, mode)) n++;
-  }
-  // 南側に窓を足す
-  return n;
+function expand(s, rows, mats = {}) {
+  const hm = home(s);
+  return remodel(s, d => { W.draftAddRect(s.world, d, hm.x0, hm.y1 + 1, hm.x1, hm.y1 + rows); Object.assign(d, mats); });
 }
 function tanks(s, k, mode) {
   const hm = home(s), w = s.world; let placed = 0;
@@ -36,7 +27,7 @@ function tanks(s, k, mode) {
   for (let y = hm.y0; y <= hm.y1; y++) { ring.push([hm.x0 - 1, y]); ring.push([hm.x1 + 1, y]); }
   for (const [x, y] of ring) {
     if (placed >= k) break;
-    const z = W.h(w, x, y); if (W.at(w, x, y, z) || z >= hm.z + 3) continue;
+    const z = W.h(w, x, y); if (W.at(w, x, y, z) || z >= hm.z + 3 || s.world.house.cells[`${x},${y}`]) continue;
     if (!W.put(s, x, y, z, 'tank', mode)) placed++;
   }
 }
@@ -60,10 +51,8 @@ function single(s, t, mode, near) {
   }
   return false;
 }
-function roofPv(s, k, mode) {
-  const hs = s.world.house; hs.pv = hs.pv || {};
-  for (const c in hs.cells) { if (Object.keys(hs.pv).length >= k) break; if (hs.pv[c]) continue; const p = W.blockPrice('pv', mode); if (p > s.cash) break; s.cash -= p; hs.pv[c] = 1; s.world.spent.far += 5.5; }
-}
+function roofPv(s, k) { const hs = s.world.house; if (hs.pv >= k) return; remodel(s, d => { d.pv = Math.min(k, Object.keys(d.cells).length); }); }
+function battery(s) { if (s.world.house.batt) return; remodel(s, d => { d.batt = 1; }); }
 const count = (s, t) => Object.values(s.world.blocks).filter(b => b.t === t).length;
 function setBuild(s) {
   const busy = W.pendingDays(s.world) > 0.5, wk = s.persons[0].week;
@@ -76,10 +65,11 @@ const STRATS = {
   money: {
     week: ['work', 'work', 'work', 'work', 'work', 'farm', 'rest'],
     plan(s) {
-      if (!s.flags.started) { s.flags.started = 1; expand(s, 2, 'hire', 'ins'); rewall(s, 'ins', 'hire'); tanks(s, 3, 'hire'); beds(s, [8, 6], 'hire'); }
+      if (!s.flags.started) { s.flags.started = 1; expand(s, 2); tanks(s, 3, 'hire'); beds(s, [8, 6], 'hire'); }
       const hm = home(s);
-      if (s.known.includes('offgrid') && Object.keys(s.world.house.pv || {}).length < 4 && s.cash > 80) roofPv(s, 4, 'hire');
-      if (s.known.includes('offgrid') && !s.world.house.batt && s.cash > 40) { s.cash -= W.blockPrice('batt', 'hire'); s.world.house.batt = 1; s.world.spent.far += 15; }
+      if (s.known.includes('insulation') && s.world.house.roof === 'tin' && s.cash > 60) remodel(s, d => { d.roof = 'tinins'; d.wall = 'ins'; });
+      if (s.known.includes('offgrid') && s.cash > 80) roofPv(s, 4);
+      if (s.known.includes('offgrid') && s.cash > 40) battery(s);
       if (s.known.includes('heap') && !count(s, 'heap')) single(s, 'heap', 'hire');
       if (!count(s, 'pump') && s.cash > 30) single(s, 'pump', 'hire', [hm.x1 + 2, hm.y1 + 3]);
     }
@@ -90,27 +80,24 @@ const STRATS = {
       const cold = s.site === 'taos', K = (t) => s.known.includes(t), hs = s.world.house;
       if (!s.flags.started) {
         s.flags.started = 1;
-        const wt = cold ? 'ins' : 'wall';
-        expand(s, cold ? 1 : 2, 'hire', wt); if (cold) { W.setFloorType(s, 'slab', 'hire'); rewall(s, 'ins', 'hire'); }
+        expand(s, cold ? 1 : 2, cold ? { floor: 'slab' } : {});
         tanks(s, 4, 'hire'); beds(s, [12, 10], 'hire');
       }
-      setBuild(s);
       const hm = home(s);
-      if (cold && K('insulation') && hs.roof !== 'tinins' && s.cash > 40) W.setRoof(s, 'tinins', 'hire');
-      if (cold && K('insulation') && s.cash > 30) rewall(s, 'thick', 'hire', 4);
-      if (!cold && hs.walls && Object.values(hs.walls).some(w => w.t === 'steel') && s.cash > 25) rewall(s, 'wall', 'hire', 3);
+      if (K('insulation') && s.world.house.roof === 'tin' && s.cash > 40) remodel(s, d => { d.roof = 'tinins'; });
+      if (cold && K('insulation') && s.world.house.wall !== 'thick' && s.cash > 80) remodel(s, d => { d.wall = 'thick'; for (const e in d.open) if (d.open[e] === 'window') d.open[e] = 'window2'; });
       if (K('heap') && count(s, 'heap') < 2) single(s, 'heap', 'hire', [hm.x0 - 4, hm.y1 + 8]);
       for (const k in s.world.blocks) {
         const b = s.world.blocks[k]; if (b.t !== 'bed') continue; const [x, y, z] = k.split(',').map(Number);
         if (K('terrace') && !b.s && s.cash > 5 && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => { const n = W.h(s.world, x + dx, y + dy); return n > -99 && n < z; })) W.toggleMark(s, x, y, z, 's');
         if (K('mulch') && !b.m && s.cash > 5) W.toggleMark(s, x, y, z, 'm');
       }
-      if (K('toilet') && !s.world.mods.compostToilet && s.cash > 40) { s.cash -= 30; s.world.mods.compostToilet = true; }
-      if (K('saving') && !s.world.mods.saving && s.cash > 20) { s.cash -= 8; s.world.mods.saving = true; }
+      if (K('toilet') && !s.world.mods.compostToilet && s.cash > 40) remodel(s, d => { d.eq.compostToilet = true; });
+      if (K('saving') && !s.world.mods.saving && s.cash > 20) remodel(s, d => { d.eq.saving = true; });
       if (K('grey') && !count(s, 'media_sand') && s.cash > 25) { const fx = hm.x1 + 2, fy = hm.y1 + 2; W.prefabPit(s, [fx, fy], [fx + 1, fy + 1], 'media_sand', 'hire', 1, 'plant_reed'); }
       if (K('catch') && count(s, 'pillar') < 4 && s.cash > 30) { const f = flatSpot(s, 4, 3); if (f) { W.prefabShed(s, [f[0], f[1]], [f[0] + 3, f[1] + 2], 'roof_tin', 'hire'); for (let i = 0; i < 3; i++) W.put(s, f[0] + i, f[1] + 3, W.h(s.world, f[0] + i, f[1] + 3), 'tank', 'hire'); } }
-      if (K('offgrid') && Object.keys(hs.pv || {}).length < 6 && s.cash > 50) roofPv(s, 6, 'hire');
-      if (K('offgrid') && !hs.batt && s.cash > 30) { s.cash -= W.blockPrice('batt', 'hire'); hs.batt = 1; s.world.spent.far += 15; }
+      if (K('offgrid') && s.cash > 50) roofPv(s, 6);
+      if (K('offgrid') && s.cash > 30) battery(s);
       if (K('hedge') && count(s, 'tree') < 10) for (let i = 0; i < 3; i++) single(s, 'tree', 'hire', [hm.x0 - 3, hm.y0 - 3]);
       if (K('hedge') && count(s, 'hedge') < 12) for (let i = 0; i < 4; i++) single(s, 'hedge', 'hire', [hm.x1 + 3, hm.y0 - 3]);
       if (K('chicken') && !count(s, 'coop') && s.cash > 20) single(s, 'coop', 'hire', [hm.x0 - 3, hm.y1]);
@@ -122,7 +109,7 @@ const STRATS = {
     week: null,
     plan(s, r) {
       const hm = home(s);
-      if (r() < 0.5) W.addFloor(s, hm.x0 + Math.floor(r() * 8) - 1, hm.y0 + Math.floor(r() * 6) - 2, r() < 0.5 ? 'hire' : 'hire', ['wall', 'ins'][Math.floor(r() * 2)]);
+      if (r() < 0.3) remodel(s, d => { const x = hm.x0 + Math.floor(r() * 8) - 2, y = hm.y0 + Math.floor(r() * 8) - 2; W.draftAddRect(s.world, d, x, y, x + 1, y + 1); d.floor = r() < 0.5 ? 'wood' : 'slab'; });
       const types = Object.keys(W.BLOCKS).filter(t => !W.BLOCKS[t].prefabOnly && (!W.BLOCKS[t].learn || s.known.includes(W.BLOCKS[t].learn)));
       for (let i = 0; i < 4; i++) { const t = types[Math.floor(r() * types.length)], x = Math.floor(r() * 50), y = Math.floor(r() * 50); W.put(s, x, y, W.h(s.world, x, y), t, r() < 0.5 ? 'hire' : 'hire'); }
       if (r() < 0.2) { const ws = ['work', 'farm', 'build', 'rest']; s.persons[0].week = s.persons[0].week.map((_, i) => i === 6 ? 'rest' : ws[Math.floor(r() * 4)]); }
@@ -163,7 +150,7 @@ const results = {};
 for (const n of Object.keys(STRATS)) { results[n] = []; for (let sd = 1; sd <= SEEDS; sd++) results[n].push(play(n, sd)); }
 for (const n of ['tokyo', 'life']) { results['taos:' + n] = []; for (let sd = 1; sd <= SEEDS; sd++) results['taos:' + n].push(play(n, sd, 'taos')); }
 const M = (n, k) => results[n].reduce((a, x) => a + (typeof k === 'function' ? k(x) : x[k]), 0) / results[n].length;
-console.log(`\n== ${YEARS}年 × ${SEEDS}シード（コンテナから広げる家）==`);
+console.log(`\n== ${YEARS}年 × ${SEEDS}シード（設計して建てる家）==`);
 console.log('作戦          所持金末  最低  赤字T  静かT 最長  担い手  家m² UA   水   養分  エネ  お金  学んだ');
 for (const n of Object.keys(results)) console.log(`${n.padEnd(12)} ${M(n, 'cash').toFixed(0).padStart(7)} ${M(n, 'minCash').toFixed(0).padStart(5)} ${M(n, 'broke').toFixed(1).padStart(5)} ${M(n, 'quiet').toFixed(1).padStart(6)} ${M(n, 'maxRun').toFixed(1).padStart(4)} ${M(n, 'good').toFixed(1).padStart(6)} ${M(n, 'house').toFixed(0).padStart(4)} ${M(n, 'ua').toFixed(0).padStart(4)} ${[0, 1, 2, 3].map(i => (M(n, x => x.cyc[i]) * 100).toFixed(0).padStart(4) + '%').join(' ')} ${M(n, 'known').toFixed(1).padStart(5)}`);
 const evc = {}; for (const rs of Object.values(results)) for (const r of rs) for (const t of r.turns) for (const e of t.ev) evc[e] = (evc[e] || 0) + 1 / rs.length / Object.keys(results).length;
@@ -173,7 +160,7 @@ const checks = [
   ['生き物優先は東京型より担い手が多い', M('life', 'good') > M('tokyo', 'good') + 3],
   ['生き物優先はお金優先より担い手が多い', M('life', 'good') > M('money', 'good')],
   ['生き物優先は破産しない', M('life', 'broke') < 1],
-  ['生き物優先は家を広げる（コンテナ12m²より大きい）', M('life', 'house') > 12],
+  ['生き物優先は家を広げる（最初の12m²より大きい）', M('life', 'house') > 12],
   ['寒いタオスでは断熱で熱の逃げやすさが下がる', M('taos:life', 'ua') < M('taos:tokyo', 'ua')],
   ['お金の輪は消えない（生き物優先でも地域内100%にならない）', M('life', x => x.cyc[3]) < 0.95],
   ['静かな季節が続きすぎない（最長<5）', M('life', 'maxRun') < 5],

@@ -245,10 +245,9 @@ export function newGame(opt = {}) {
   const site = opt.site || 'med', seed = opt.seed ?? 1;
   const s = makeGame(site, seed, opt);
   if (site !== 'tokyo' && !opt.empty) {
-    // 最初の家：中古のコンテナ（20ft）。斜面の上のほうの平らな段に、等高線に沿って長く置いてある
-    const w = s.world, sp = W.findContainerSpot(w);
-    if (sp) W.placeContainer(w, sp.x0, sp.y0, sp.rot, { z: sp.z, door: sp.door, win: sp.win });
-    s.cash -= opt.containerCost ?? 60;
+    // 最初の家：前の持ち主が建てた小さな板壁の家（4×3m、高さ3m）。斜面の上のほうの平らな段に、等高線に沿って長く
+    const w = s.world, sp = W.findHouseSpot(w);
+    if (sp) W.starterHouse(w, sp);
   }
   return s;
 }
