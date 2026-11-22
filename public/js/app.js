@@ -160,7 +160,7 @@ function game() {
   stop();
   app.innerHTML = `<div class="game">
     <header class="bar" id="bar"></header>
-    <section class="left"><div class="mapwrap" id="mapwrap"></div><div class="tools" id="tools" role="toolbar" aria-label="置くもの"></div><div class="inspect" id="inspect"></div></section>
+    <section class="left"><div class="mapzone"><div class="mapwrap" id="mapwrap"></div><div class="inspect" id="inspect" aria-live="polite"></div></div><div class="tools" id="tools" role="toolbar" aria-label="置くもの"></div></section>
     <section class="right"><nav class="tabs" id="tabs"></nav><div class="panel" id="panel"></div>
       <div class="closebar"><button class="btn primary" id="close"></button></div></section></div>`;
   document.getElementById('close').onclick = closeLaptop;
@@ -271,7 +271,7 @@ function flowsSVG(s) {
 function renderMap() {
   const s = G.s, C = contours(s.site);
   const ghost = G.ghost ? itemSVG(G.ghost, { ok: G.ghost.ok }) : '';
-  const hint = hintText();
+  const hint = G.sel || G.ghost ? '' : hintText();
   document.getElementById('mapwrap').innerHTML = `<svg id="map" viewBox="-2.5 -2.5 55 55" role="application" aria-label="敷地の地図。50m四方、1マス1m">
     <defs>
       <pattern id="g1" width="1" height="1" patternUnits="userSpaceOnUse"><path d="M1 0H0V1" fill="none" stroke="rgba(31,42,46,.07)" stroke-width=".04"/></pattern>
@@ -383,6 +383,7 @@ function renderTools() {
 function renderInspect() {
   const el = document.getElementById('inspect'); const s = G.s, T = E.siteTerrain(s.site), S = E.summarize(s);
   if (G.ghost) {
+    el.classList.remove('idle');
     const g = G.ghost, r = T.rect(g);
     const lines = [`${g.w}×${g.h}m · 標高 ${r.elev.toFixed(1)}m · 傾き ${r.slope.toFixed(0)}°`];
     if (g.type === 'house') lines.push(`基礎の深さ ${g.depth.toFixed(1)}m が要る（${E.SITES[s.site].frostDepth ? '凍る深さと斜面' : '斜面が急なほど深い'}）`);
@@ -395,9 +396,11 @@ function renderInspect() {
   const it = s.items.find(x => x.id === G.sel);
   if (!it) {
     const care = E.careNeed(s);
+    el.classList.add('idle');
     el.innerHTML = `<div><h3>敷地</h3>置いたもの ${s.items.length}つ · 手入れ 週${care.total.toFixed(1)}日 / 畑に出る日 週${E.hands(s)}日</div><div class="small">地図のものを押すと、くわしく見たり工夫を足したりできます</div>`;
     return;
   }
+  el.classList.remove('idle');
   const r = T.rect(it), d = E.ITEMS[it.type];
   const info = [`${it.w}×${it.h}m · 標高 ${r.elev.toFixed(1)}m · 傾き ${r.slope.toFixed(0)}° · ${s.year - Math.floor((s.turn - it.built) / 4)}年から`];
   const acts = [];
@@ -425,9 +428,10 @@ function renderInspect() {
   if (it.type === 'tank' && S.gArea) { const dd = r.elev - S.gElev; info.push(dd >= 1.5 ? `畑より${dd.toFixed(1)}m高い：重力で給水` : `畑より高くない：ポンプで給水`); }
   if (d.life) info.push(`寿命 ${d.life}年`);
   acts.push(`<button class="btn ghost" data-act="remove">撤去（お金は戻らない）</button>`);
-  el.innerHTML = `<div><h3>${d.name}</h3>${info.map(esc).join('<br>')}</div><div class="acts">${acts.join('')}</div>`;
+  el.innerHTML = `<button class="x" data-act="close" aria-label="閉じる">×</button><div><h3>${d.name}</h3>${info.map(esc).join('<br>')}</div><div class="acts">${acts.join('')}</div>`;
   el.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
     const a = b.dataset.act; let r2;
+    if (a === 'close') { G.sel = null; renderMap(); renderInspect(); return; }
     if (a === 'remove') { if (!confirmBox(`${d.name}を撤去しますか？`)) return; G.s = E.removeItem(G.s, it.id); G.sel = null; }
     else if (a === 'deep') { r2 = E.modify(G.s, it.id, { depth: Math.round((it.depth + 0.3) * 10) / 10 }); }
     else if (a.startsWith('mod:')) { r2 = E.modify(G.s, it.id, { mods: { [a.slice(4)]: true } }); }

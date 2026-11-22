@@ -23,6 +23,7 @@
   - `js/app.js` 画面
 - `tools/bots.mjs` 自動テストプレイ（作戦ごとのボットで点検）: `node tools/bots.mjs 10 20`
 - `tools/ui_test.py` ブラウザで一周遊ぶテスト（Playwright）
+- `tools/cutoff_test.py` 9つの画面サイズでボタンの見切れ・文字のはみ出しを点検
 
 ## 仮の値
 天気は平年値に年ごとのゆらぎとエルニーニョ／ラニーニャを確率で重ねたもの。停電・断水の回数、地形（友人の土地）は仮。
