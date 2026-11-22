@@ -329,3 +329,7 @@ h1, h2, h3 { margin: 0; }
 .loading-real .box { background: var(--card); padding: 18px 22px; border-radius: 14px; display: flex; flex-direction: column; gap: 6px; max-width: 360px; box-shadow: 0 8px 30px rgba(0,0,0,.2); }
 .travel .mailcard.trip { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); width: min(460px, calc(100% - 32px)); box-shadow: 0 6px 24px rgba(0,0,0,.12); z-index: 2; animation: tripin .6s ease both; }
 @keyframes tripin { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+/* データの出典 */
+dl.src { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; font-size: 13px; line-height: 1.5; margin: 8px 0 0; }
+dl.src dt { font-weight: 600; color: var(--ink, #1F2A2E); }
+dl.src dd { margin: 0; color: #4A544F; overflow-wrap: anywhere; }

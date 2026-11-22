@@ -3,6 +3,7 @@
 import sys, os, subprocess, time, json
 from playwright.sync_api import sync_playwright
 sys.path.insert(0, os.path.dirname(__file__))
+import math
 import mock_real
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else '/tmp/orb_shots'
@@ -52,11 +53,21 @@ def run(viewport, tag):
         if page.locator('#moveplot').count(): problems.append(f'{tag}: 無料の土地なのに場所を変えられる')
         page.screenshot(path=f'{OUT}/{tag}_3_game.png'); overflow(page, tag + ' game')
         if page.locator('.tools [data-cat]').count(): problems.append(f'{tag}: 地図に家・畑・その他のボタンが残っている')
-        rinfo = page.evaluate("()=>{const {G,E}=window.__orb;const S=E.SITES[G.s.site];return {real:!!G.s.real,base:G.s.world.base,t0:S.tmean[0],rain0:S.rain[0],lat:S.lat,house:!!G.s.world.house}}")
+        rinfo = page.evaluate("()=>{const {G,E}=window.__orb;const S=E.SITES[G.s.site],w=G.s.world,v=w.veg||[];const cnt={};v.forEach(c=>cnt[c]=(cnt[c]||0)+1);return {real:!!G.s.real,base:w.base,t0:S.tmean[0],rain0:S.rain[0],lat:S.lat,lon:S.lon,house:!!w.house,pick:G.s.real&&G.s.real.pick,veg:cnt,src:G.s.real&&G.s.real.src}}")
         if tag == 'phone':
             if rinfo['real']: problems.append(f'{tag}: 通信を止めたのに実データ扱いになっている')
         else:
-            if not rinfo['real'] or abs(rinfo['t0'] - 18.6) > 0.05 or not (1930 <= rinfo['base'] <= 1950) or not (85 <= rinfo['rain0'] <= 100): problems.append(f'{tag}: 実データが当てはまっていない {rinfo}')
+            exp = mock_real.elev(rinfo['lat'], rinfo['lon']) - 6.25 - 6 if rinfo['real'] else 0
+            if not rinfo['real'] or abs(rinfo['t0'] - 18.6) > 0.05 or abs(rinfo['base'] - exp) > 8 or not (85 <= rinfo['rain0'] <= 100): problems.append(f'{tag}: 実データが当てはまっていない {rinfo}')
+            # 区画：集落（半径70m）・道（東100m）・家からはなれた、空いた50m四方になっているか
+            pk = rinfo['pick'] or {}
+            e, n = mock_real.en(rinfo['lat'], rinfo['lon'])
+            near_house = any(abs(e - he) < 25 + 12 + 5 and abs(n - hn) < 25 + 12 + 4 for he, hn in mock_real.HOUSES)
+            if not pk.get('clear') or pk.get('moved', 0) < 95 or math.hypot(e, n) < 70 + 25 or abs(e - 100) < 25 or near_house or 'WorldCover' not in pk.get('checked', []) or 'OpenStreetMap' not in pk.get('checked', []):
+                problems.append(f'{tag}: 空いた区画を選べていない pick={pk} e={e:.0f} n={n:.0f}')
+            if not rinfo['veg'] or sum(rinfo['veg'].values()) != 2500 or rinfo['veg'].get('50', 0) > 0: problems.append(f'{tag}: 植生がおかしい {rinfo["veg"]}')
+            if not (rinfo['src'] or {}).get('lc') or not (rinfo['src'] or {}).get('osm'): problems.append(f'{tag}: 出典が入っていない')
+            print(tag, 'pick', pk, 'veg', rinfo['veg'])
         if not rinfo['house']: problems.append(f'{tag}: 実際の斜面に最初の家が置けていない')
         if page.locator('.where a').count() != 1: problems.append(f'{tag}: 場所のリンクがない')
         hs = page.evaluate("()=>{const h=window.__orb.G.s.world.house;return h?{z:h.z,cells:Object.keys(h.cells)}:null}")

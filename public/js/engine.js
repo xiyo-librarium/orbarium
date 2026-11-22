@@ -43,7 +43,7 @@ export const SITES = {
        気温は市街の平年値から約2℃下げてある。小さな沢の東側の斜面で、東（右）が上り */
     /* 実在の場所：サン・クリストバル地区のエル・パティオ（農村部の集落）。標高と気候は、遊ぶときにブラウザが実データを取ってくる。
        取れなかったときだけ、下の数字と作り物の地形を使う */
-    name: 'メデジン', sub: 'サン・クリストバル地区エル・パティオの山腹・北緯6度', lat: 6.27269, lon: -75.66148, elev: 1795,
+    name: 'メデジン', sub: 'サン・クリストバル地区の山腹・北緯6度', lat: 6.27269, lon: -75.66148, elev: 1795,
     tmean: [20.8, 21.1, 21.2, 20.8, 21.0, 21.0, 21.1, 21.1, 20.9, 20.3, 20.2, 20.5],
     tmin: [15.7, 15.9, 16.2, 16.1, 16.1, 15.8, 15.6, 15.8, 15.8, 15.6, 15.7, 15.8],
     tmax: [26.0, 26.3, 26.1, 25.6, 25.9, 26.2, 26.6, 26.4, 26.0, 25.0, 24.8, 25.3],
@@ -73,6 +73,8 @@ export const SITES = {
     terrain: 'taos', plotPrice: 100
   }
 };
+/* 決まった地点（区画はこのまわりの空き地から選ぶ）。applyReal で lat/lon は選んだ区画の中心になる */
+for (const k in SITES) { SITES[k].lat0 = SITES[k].lat; SITES[k].lon0 = SITES[k].lon; }
 
 /* ---------- 地形（50m四方・1mメッシュ） ---------- */
 export const PLOT = 50;
@@ -248,6 +250,8 @@ export function newGame(opt = {}) {
   if (opt.real) applyReal(site, opt.real); else if (SITES[site].real) { /* 実データは前のまま */ } 
   const s = makeGame(site, seed, opt);
   if (opt.real) s.real = opt.real;
+  // 植生：実データ（ESA WorldCover）があればそれ、なければ草地
+  s.world.veg = opt.real && Array.isArray(opt.real.lc) && opt.real.lc.length === W.N * W.N ? opt.real.lc.slice() : new Array(W.N * W.N).fill(30);
   if (site !== 'tokyo' && !opt.empty) {
     // 最初の家：前の持ち主が建てた小さな板壁の家（4×3m、高さ3m）。斜面の上のほうの平らな段に、等高線に沿って長く
     const w = s.world, sp = W.findHouseSpot(w);
@@ -706,7 +710,7 @@ export function relations(s) {
     { id: 'frogs', name: 'カエルとトンボ', v: clamp(S.pondArea / 15 + (S.filter ? S.filter.m.life : 0)), good: true, why: S.pondArea || S.filter ? 'ため池やバイオフィルターの水辺に生き物が集まる' : '水辺がない' },
     { id: 'lizards', name: 'トカゲと苔', v: clamp(S.wallLen / 60), good: true, why: '石垣のすき間が住みかになる' },
     { id: 'neighbors', name: '近所の人', v: clamp(localYen / 40), good: true, why: localYen > 0.5 ? `この1年、近所とのやりとり ${Math.round(localYen)}万円（野菜を売る・工事を頼む・材料を買う）` : 'まだ付き合いは薄い' },
-    { id: 'friend', name: '友人', v: s.site === 'med' ? 0.5 : 0.2, good: true, why: s.site === 'med' ? '土地を貸してくれた' : 'メデジンから時々メールが来る' },
+    { id: 'friend', name: 'ルシア', v: s.site === 'med' ? 0.5 : 0.2, good: true, why: s.site === 'med' ? '祖父母の土地を貸してくれた' : '世界のどこかから時々メールが来る' },
     { id: 'river', name: '下流の川', v: clamp((sewer * 0.6 + runoff * 0.15) / 40), good: false, why: `下水 ${sewer.toFixed(0)}m³・畑から流れた雨 ${runoff.toFixed(0)}m³` },
     { id: 'ground', name: '地下の水', v: clamp(recharge / 150), good: true, why: `畑から地下へ浸みた水 ${recharge.toFixed(0)}m³` },
     { id: 'money', name: 'お金', v: clamp(1 - (ws + ps + fs) / 3), good: null, why: '買って済ませている割合' }

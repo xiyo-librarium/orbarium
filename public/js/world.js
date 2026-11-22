@@ -107,9 +107,16 @@ export function blockPrice(t, mode) { const d = BLOCKS[t]; return mode === 'self
 /* お金がどこへ行くか：近所の人を頼めば地域に、工場の材料は遠くへ */
 function spend(w, local, far) { w.spent = w.spent || { local: 0, far: 0 }; w.spent.local += local; w.spent.far += far; }
 /* 置く。s は状態（cash, turn）。mode: 'self' | 'hire' */
+/* 植生（ESA WorldCover の分類）。1マスごと。木と低木は、その上に何かを作ると切りひらいて草地になる */
+export const VEG_NAME = { 0: '草地', 10: '林（木が茂る）', 20: '低木のやぶ', 30: '草地', 40: '畑のあと', 50: '踏み固めた地面', 60: '土がむき出し', 70: '雪', 80: '水たまり', 90: '湿地', 95: 'マングローブ', 100: 'こけ' };
+export function clearVeg(w, x, y, r = 0) {
+  if (!w.veg) return;
+  for (let yy = y - r; yy <= y + r; yy++) for (let xx = x - r; xx <= x + r; xx++) if (xx >= 0 && yy >= 0 && xx < N && yy < N && [10, 20, 90, 95].includes(w.veg[idx(xx, yy)])) w.veg[idx(xx, yy)] = 30;
+}
 export function put(s, x, y, z, t, mode, extra = {}) {
   const w = s.world, d = BLOCKS[t];
   const why = canPut(w, x, y, z, t); if (why) return why;
+  clearVeg(w, x, y);
   let price = blockPrice(t, mode);
   const earthNeed = d.earth || 0;
   let buyEarth = 0;
@@ -698,7 +705,7 @@ export function buildHouse(s, d) {
   if (est.total > s.cash + 1e-9) return `お金が足りない（${Math.round(est.total)}万円かかる）`;
   s.cash -= est.total;
   w.spent = w.spent || { local: 0, far: 0 }; w.spent.local += est.local; w.spent.far += est.far;
-  for (const k in d.cells) { const [x, y] = k.split(',').map(Number); w.H[idx(x, y)] = d.z; }
+  for (const k in d.cells) { const [x, y] = k.split(',').map(Number); w.H[idx(x, y)] = d.z; clearVeg(w, x, y, 2); }
   w.earth = Math.max(0, w.earth + est.dig - est.fil);
   w.house = cloneHouse(d);
   w.mods.compostToilet = houseHas(d, 'ctoilet'); w.mods.saving = houseHas(d, 'shower2'); if (d.eq.depth) w.mods.depth = d.eq.depth;
@@ -712,7 +719,8 @@ export function findHouseSpot(w, L = 4, S = 3, margin = 6) {
     for (let y0 = margin; y0 + ny <= N - margin; y0++) for (let x0 = margin; x0 + nx <= N - margin; x0++) {
       // 実在の急な斜面では平らな所がないこともあるので、2段までの差なら削って盛ってならした所を探す
       const lv = []; let ok = true;
-      for (let y = y0; y < y0 + ny && ok; y++) for (let x = x0; x < x0 + nx; x++) { const g = h(w, x, y); if (at(w, x, y, g)) { ok = false; break; } lv.push(g); }
+      let woody = 0;
+      for (let y = y0; y < y0 + ny && ok; y++) for (let x = x0; x < x0 + nx; x++) { const g = h(w, x, y); if (at(w, x, y, g)) { ok = false; break; } lv.push(g); const vg = w.veg ? w.veg[idx(x, y)] : 30; if (vg === 80 || vg === 50) { ok = false; break; } if (vg === 10 || vg === 20) woody++; }
       if (!ok) continue;
       lv.sort((a, b) => a - b); const z = lv[Math.floor(lv.length / 2)], spread = lv[lv.length - 1] - lv[0], earth = lv.reduce((a, g) => a + Math.abs(g - z), 0);
       if (spread > 2) continue;
@@ -726,7 +734,7 @@ export function findHouseSpot(w, L = 4, S = 3, margin = 6) {
       if (doorSide.flat < 0.5) continue;
       const low = avg(side[longS[0]]) <= avg(side[longS[1]]) ? longS[0] : longS[1], high = low === longS[0] ? longS[1] : longS[0];
       const walk = side[high].filter(v => v === z).length / side[high].length;
-      const score = z * 0.5 + walk * 1.5 + doorSide.flat - earth * 0.8 + (x0 - y0) * 0.01;
+      const score = z * 0.5 + walk * 1.5 + doorSide.flat - earth * 0.8 - woody * 0.4 + (x0 - y0) * 0.01;
       if (!best || score > best.score) best = { x0, y0, nx, ny, z, door: doorSide.k, win: low, score, earth };
     }
   }
@@ -734,7 +742,7 @@ export function findHouseSpot(w, L = 4, S = 3, margin = 6) {
 }
 export function starterHouse(w, sp) {
   const d = newHouse(sp.z);
-  for (let y = sp.y0; y < sp.y0 + sp.ny; y++) for (let x = sp.x0; x < sp.x0 + sp.nx; x++) { d.cells[ck(x, y)] = 1; w.H[idx(x, y)] = sp.z; }
+  for (let y = sp.y0; y < sp.y0 + sp.ny; y++) for (let x = sp.x0; x < sp.x0 + sp.nx; x++) { d.cells[ck(x, y)] = 1; w.H[idx(x, y)] = sp.z; clearVeg(w, x, y, 2); }
   const along = (side) => houseOuterEdges(d).filter(o => o.dir === side);
   const ds = along(sp.door); d.open[ds[Math.floor(ds.length / 2)].e] = 'door';
   const ws = along(sp.win); if (ws.length >= 3) { d.open[ws[0].e] = 'window'; d.open[ws[ws.length - 1].e] = 'window'; } else if (ws.length) d.open[ws[0].e] = 'window';

@@ -1,10 +1,10 @@
 import * as E from './engine.js';
 import { NOTES, LESSON, eventText, ATLAS, INVITE, LANDS } from './content.js';
 import { createGlobe, flyTo, loadLand } from './globe.js';
-import { createView, sunVector, dirName } from './iso.js';
+import { createView, sunVector, dirName, vegObjects } from './iso.js';
 import { loadRealPlot, mapsUrl } from './realsite.js';
 
-const KEY = 'orbarium-v4';
+const KEY = 'orbarium-v5';   // v5：人の家のない区画を選び直し、植生をのせた
 const app = document.getElementById('app');
 const G = { s: null, tool: null, ghost: null, sel: null, tab: 'web', drag: null, report: null, studied: -1, atlasRead: loadAtlasRead() };
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -19,6 +19,7 @@ function restore() {
     const v = localStorage.getItem(KEY); const s = v ? E.load(v) : null;
     // 家具ができる前のセーブには、最初の家具を置いておく
     const hs = s?.world?.house; if (hs && !hs.furn) { hs.furn = []; E.W.autoFurnish(hs); }
+    if (s?.world && !s.world.veg) s.world.veg = new Array(2500).fill(30);
     return s;
   } catch { return null; }
 }
@@ -32,7 +33,7 @@ async function title() {
   app.innerHTML = `<main class="title"><canvas id="globe" aria-hidden="true"></canvas>
     <div class="title-card"><h1>Orbarium</h1><p>Choose a land. Close the loop.</p>
     <div class="row"><button class="btn primary" id="new">はじめから</button>${saved ? `<button class="btn" id="cont">つづきから（${saved.year}年）</button>` : ''}<button class="btn ghost" id="atlas">地球儀で学ぶ</button></div>
-    <p class="small">地形と気候は実在の場所のデータ（標高：AWS Terrain Tiles／気候：Open-Meteo）</p></div></main>`;
+    <p class="small">地形・気候・植生は実在の場所のデータ（標高：AWS Terrain Tiles／気候：Open-Meteo／植生：© ESA WorldCover／建物と道：© OpenStreetMap contributors）</p></div></main>`;
   await loadLand();
   const g = createGlobe(document.getElementById('globe'), { lon: 140, lat: 20 });
   let run = true; const spin = () => { if (!run) return; g.lon -= 0.08; g.draw(); requestAnimationFrame(spin); }; spin();
@@ -88,10 +89,10 @@ function chooseLand() {
 /* 実在の土地のデータを取りに行く（地球儀の移動中に裏で進める）。取れなければ null */
 function realPromise(key, lat, lon) {
   const S = E.SITES[key]; if (!S || key === 'tokyo') return Promise.resolve(null);
-  return loadRealPlot(lat ?? S.lat, lon ?? S.lon).then(r => { E.applyReal(key, r); return r; }).catch(e => { console.warn('実データを取れなかった', e); return null; });
+  return loadRealPlot(lat ?? S.lat0 ?? S.lat, lon ?? S.lon0 ?? S.lon).then(r => { E.applyReal(key, r); return r; }).catch(e => { console.warn('実データを取れなかった', e); return null; });
 }
 async function waitReal(p, name) {
-  let shown = null; const t = setTimeout(() => { shown = document.createElement('div'); shown.className = 'loading-real'; shown.innerHTML = `<div class="box"><b>${esc(name)}の土地の、実際の標高と気候を取ってきています…</b><span class="small">標高：AWS Terrain Tiles ／ 気候：Open-Meteo（ERA5）</span></div>`; document.body.appendChild(shown); }, 300);
+  let shown = null; const t = setTimeout(() => { shown = document.createElement('div'); shown.className = 'loading-real'; shown.innerHTML = `<div class="box"><b>${esc(name)}の土地の、実際の標高・気候・植生を取ってきて、人の家にかからない区画を探しています…</b><span class="small">標高：AWS Terrain Tiles ／ 気候：Open-Meteo（ERA5）</span></div>`; document.body.appendChild(shown); }, 300);
   try { return await p; } finally { clearTimeout(t); shown?.remove(); }
 }
 async function startGame() {
@@ -133,12 +134,20 @@ function renderBar() {
 }
 function menu() {
   modal(`<h2>メニュー</h2><div style="display:flex;flex-direction:column;gap:8px">
-    ${G.s.flags['done_' + G.s.site] != null ? '<button class="btn primary" data-m="next">次の土地を選ぶ</button>' : ''}<button class="btn" data-m="atlas">地球儀で学ぶ（図鑑）</button><button class="btn" data-m="title">タイトルへ（自動で保存）</button><button class="btn ghost" data-m="close">閉じる</button></div>`, (m, close) => {
+    ${G.s.flags['done_' + G.s.site] != null ? '<button class="btn primary" data-m="next">次の土地を選ぶ</button>' : ''}<button class="btn" data-m="atlas">地球儀で学ぶ（図鑑）</button><button class="btn" data-m="src">この土地のデータの出典</button><button class="btn" data-m="title">タイトルへ（自動で保存）</button><button class="btn ghost" data-m="close">閉じる</button></div>`, (m, close) => {
+    if (m === 'src') { close(); sources(); }
     if (m === 'atlas') { close(); atlas(() => game()); }
     if (m === 'next') { close(); chooseLand(); }
     if (m === 'title') { close(); title(); }
     if (m === 'close') close();
   });
+}
+/* この土地のデータの出典（植生・建物のデータは表示の義務がある） */
+function sources() {
+  const s = G.s, r = s.real, src = r?.src || {}, pk = r?.pick;
+  const rows = r ? [['標高', src.dem], ['気候', src.climate], ['植生', src.lc || '取れなかったので、全部を草地にしています'], ['建物と道', src.osm || '取れなかった']] : [['地形と気候', '実データを取れなかったので、仮の地形と気候です']];
+  const where = r ? `<p class="small">区画の中心：${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}${pk && pk.checked?.length ? `。人の家や道にかからない50m四方を、${esc(pk.checked.join('・'))}で探して選びました${pk.moved ? `（もとの地点から${esc(pk.dir)}へ約${pk.moved}m${pk.clear ? '' : '。完全に空いた所は見つからず、いちばん建物の少ない所'}）` : ''}。` : ''}</p>` : '';
+  modal(`<h2>この土地のデータの出典</h2>${where}<dl class="src">${rows.map(([k, v2]) => `<dt>${esc(k)}</dt><dd>${esc(v2 || '')}</dd>`).join('')}</dl><div style="margin-top:12px"><button class="btn" data-m="close">閉じる</button></div>`, (m, close) => { if (m === 'close') close(); });
 }
 function modal(html, on) {
   const d = document.createElement('div'); d.className = 'modal'; d.innerHTML = `<div class="box" role="dialog" aria-modal="true">${html}</div>`;
@@ -178,6 +187,19 @@ function paintPlot(ctx, w, pad, c, dpr, labels) {
     if (Math.abs(d) < 0.01) continue;
     ctx.fillStyle = d > 0 ? `rgba(255,236,190,${Math.min(0.35, d * 1.4)})` : `rgba(40,50,90,${Math.min(0.3, -d * 1.2)})`;
     ctx.fillRect(pad + x * c, pad + y * c, c + 0.5, c + 0.5);
+  }
+  // 植生：衛星から見た被覆（林・やぶ・畑のあと・土）を色で重ね、木と茂みは丸く
+  if (w.veg) {
+    const VT = { 30: 'rgba(150,188,104,.16)', 10: 'rgba(52,96,44,.42)', 95: 'rgba(52,96,44,.42)', 20: 'rgba(128,146,64,.32)', 40: 'rgba(206,192,120,.35)', 50: 'rgba(190,165,128,.5)', 60: 'rgba(196,166,122,.5)', 80: 'rgba(80,130,190,.5)', 90: 'rgba(70,140,130,.35)' };
+    const inHouse = (x, y) => w.house && w.house.cells[`${x},${y}`];
+    for (let y = 0; y < 50; y++) for (let x = 0; x < 50; x++) { const f = VT[w.veg[y * 50 + x]]; if (!f || inHouse(x, y)) continue; ctx.fillStyle = f; ctx.fillRect(pad + x * c, pad + y * c, c + 0.5, c + 0.5); }
+    for (const t of vegObjects(w)) {
+      if (inHouse(t.cx, t.cy) || topBlock(w, t.cx, t.cy)) continue;
+      const R = (t.kind === 'shrub' ? t.r : t.r * 0.9) * c, px = pad + t.x * c, py = pad + t.y * c;
+      ctx.fillStyle = t.kind === 'shrub' ? 'rgba(84,120,52,.75)' : t.kind === 'pine' ? 'rgba(46,82,48,.8)' : t.kind === 'euca' ? 'rgba(104,136,92,.78)' : 'rgba(58,104,50,.78)';
+      ctx.beginPath(); ctx.arc(px, py, R, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,230,.16)'; ctx.beginPath(); ctx.arc(px - R * 0.3, py - R * 0.3, R * 0.5, 0, 7); ctx.fill();
+    }
   }
   const lines = (idx) => {
     ctx.beginPath();
@@ -237,7 +259,7 @@ function draw2D(wrap, w, o) {
   ctx.fillStyle = '#E3E5DC'; ctx.fillRect(0, 0, cv.width, cv.height);
   paintPlot(ctx, w, pad, c, dpr, true);
   ctx.strokeStyle = '#1F2A2E'; ctx.setLineDash([6 * dpr, 4 * dpr]); ctx.lineWidth = 1.5 * dpr; ctx.strokeRect(pad, pad, c * 50, c * 50); ctx.setLineDash([]);
-  ctx.fillStyle = '#4A544F'; ctx.font = `${11 * dpr}px "Noto Sans JP", sans-serif`; ctx.fillText(o.caption || `↑北　1マス=1m・1段=高さ1m${G.s?.real ? '・実際の標高（AWS Terrain Tiles）' : ''}`, pad, pad - 5 * dpr);
+  ctx.fillStyle = '#4A544F'; ctx.font = `${11 * dpr}px "Noto Sans JP", sans-serif`; ctx.fillText(o.caption || `↑北　1マス=1m・1段=高さ1m${G.s?.real ? `・実際の標高（AWS Terrain Tiles）${G.s.real.lc ? '・植生 © ESA WorldCover' : ''}` : ''}`, pad, pad - 5 * dpr);
   if (o.overlay) o.overlay(ctx, pad, c, dpr);
   const cell = (e) => { const b = cv.getBoundingClientRect(); const x = Math.floor(((e.clientX - b.left) * dpr - pad) / c), y = Math.floor(((e.clientY - b.top) * dpr - pad) / c); return x >= 0 && y >= 0 && x < 50 && y < 50 ? [x, y] : null; };
   if (o.onCell) cv.onclick = (e) => { const p = cell(e); if (p) o.onCell(p[0], p[1]); };
@@ -245,7 +267,7 @@ function draw2D(wrap, w, o) {
 }
 function hintText() {
   const s = G.s, S = E.summarize(s);
-  if (s.turn === 0 && s.site === 'med') return `${s.real ? 'ここはメデジン西部、サン・クリストバル地区の実在の山腹。等高線は実際の標高、気温と雨は2014〜2023年の実際の気象から。' : '実際の標高と気候を取れなかったので、仮の地形で始めています（通信を確かめて、はじめからやり直すと取り直します）。'}オレンジ色が、前の持ち主が建てた小さな板壁の家（12m²、高さ3m。トイレ・シャワー・ベッド・テーブルつき）。地図を押すとその場所を拡大して、何を作るか選べます。`;
+  if (s.turn === 0 && s.site === 'med') return `${s.real ? `ここはメデジン西部、サン・クリストバル地区の実在の山腹。等高線は実際の標高、${s.world.veg && s.real.lc ? '木と草地は衛星から見た実際の植生、' : ''}気温と雨は2014〜2023年の実際の気象から。${s.real.pick?.checked?.length ? `区画は、人の家や道にかからない50m四方を選んでいます（${s.real.pick.checked.join('・')}で確認）。` : ''}` : '実際の標高と気候を取れなかったので、仮の地形で始めています（通信を確かめて、はじめからやり直すと取り直します）。'}オレンジ色が、ルシアの祖父母が建てた小さな板壁の家（12m²、高さ3m。トイレ・シャワー・ベッド・テーブルつき）。地図を押すとその場所を拡大して、何を作るか選べます。`;
   return '';
 }
 function renderTools() {
@@ -255,7 +277,7 @@ function renderInspect() {
   const el = document.getElementById('inspect'); if (!el) return;
   const s = G.s, w = s.world, S = E.summarize(s);
   const lines = [];
-  if (G.hoverCell) { const [x, y] = G.hoverCell, tb = topBlock(w, x, y); lines.push(`(${x}, ${y}) · 標高 ${E.W.h(w, x, y) + w.base}m${w.H0[y * 50 + x] !== E.W.h(w, x, y) ? `（もとは${w.H0[y * 50 + x] + w.base}m）` : ''}${tb ? ' · ' + E.W.BLOCKS[tb.b.t].name : ''}`); }
+  if (G.hoverCell) { const [x, y] = G.hoverCell, tb = topBlock(w, x, y); lines.push(`(${x}, ${y}) · 標高 ${E.W.h(w, x, y) + w.base}m${w.H0[y * 50 + x] !== E.W.h(w, x, y) ? `（もとは${w.H0[y * 50 + x] + w.base}m）` : ''}${tb ? ' · ' + E.W.BLOCKS[tb.b.t].name : w.veg && !(w.house && w.house.cells[`${x},${y}`]) ? ' · ' + E.W.VEG_NAME[w.veg[y * 50 + x]] : ''}`); }
   const diag = S.diag.slice(0, 3).map(d => `<div class="${d.lv === 'warn' ? 'ng' : 'small'}">${d.lv === 'warn' ? '⚠ ' : ''}${esc(d.text)}</div>`).join('');
   if (!lines.length && !diag) { el.classList.add('idle'); el.innerHTML = ''; return; }
   el.classList.remove('idle');
