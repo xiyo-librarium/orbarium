@@ -1,0 +1,641 @@
+/* Orbarium エンジン（純関数＋状態）。ブラウザでもnodeでも動く。
+   1ターン＝3か月。中では1日ずつ回す。数字の根拠と「仮」の印は NOTES にまとめる。 */
+
+/* ---------- 乱数（種つき） ---------- */
+export function rng(seed) {
+  let a = seed >>> 0;
+  const f = () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  f.normal = () => { let u = 0, v = 0; while (!u) u = f(); while (!v) v = f(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  f.poisson = (lam) => { const L = Math.exp(-lam); let k = 0, p = 1; do { k++; p *= f(); } while (p > L); return k - 1; };
+  f.int = (a0, b0) => a0 + Math.floor(f() * (b0 - a0 + 1));
+  f.state = () => a;
+  return f;
+}
+
+/* ---------- 暦 ---------- */
+export const DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const MID = [15, 46, 74, 105, 135, 166, 196, 227, 258, 288, 319, 349];
+
+/* ---------- 土地 ---------- */
+export const SITES = {
+  tokyo: {
+    name: '東京', lat: 35.7, lon: 139.75, elev: 20,
+    tmean: [5.4, 6.1, 9.4, 14.3, 18.8, 21.9, 25.7, 26.9, 23.3, 18.0, 12.5, 7.7],
+    tmin: [1.2, 2.1, 5.0, 9.8, 14.6, 18.5, 22.4, 23.5, 20.3, 14.8, 8.8, 3.8],
+    tmax: [9.8, 10.9, 14.2, 19.4, 23.6, 26.1, 29.9, 31.3, 27.5, 22.0, 16.7, 12.0],
+    rain: [60, 56, 117, 125, 138, 168, 154, 168, 210, 198, 93, 58],
+    rainDays: [5, 6, 10, 10, 11, 12, 11, 8, 11, 10, 7, 5],
+    sunHours: [6.3, 5.9, 5.5, 5.9, 6.0, 4.3, 5.0, 6.1, 4.3, 4.3, 4.8, 5.8]
+  },
+  med: {
+    name: 'メデジン', sub: '常春の谷・北緯6度・標高約1,500m', lat: 6.25, lon: -75.57, elev: 1495,
+    tmean: [22.8, 23.1, 23.2, 22.8, 23.0, 23.0, 23.1, 23.1, 22.9, 22.3, 22.2, 22.5],
+    tmin: [17.7, 17.9, 18.2, 18.1, 18.1, 17.8, 17.6, 17.8, 17.8, 17.6, 17.7, 17.8],
+    tmax: [28.0, 28.3, 28.1, 27.6, 27.9, 28.2, 28.6, 28.4, 28.0, 27.0, 26.8, 27.3],
+    rain: [65, 80, 125, 160, 200, 160, 120, 150, 180, 210, 145, 95],
+    rainDays: [12, 13, 17, 22, 23, 19, 17, 19, 22, 24, 21, 15],
+    sunHours: [5.5, 5.5, 5.0, 4.0, 4.5, 5.5, 6.5, 6.0, 5.0, 4.5, 4.5, 5.0],
+    quarters: ['1〜3月・乾いた季節', '4〜6月・雨の季節', '7〜9月・小さな乾季', '10〜12月・雨の季節'],
+    /* 仮の値：停電・断水は年あたりの回数。エルニーニョの年は断水が増える */
+    outage: { power: 1.6, water: 1.2, ninoWater: 2.5 },
+    enso: { nino: 0.2, nina: 0.2, ninoRain: 0.7, ninaRain: 1.3 },
+    soilOM: 2.2, quake: 0.02,
+    terrain: 'med'
+  }
+};
+
+/* ---------- 地形（50m四方・1mメッシュ） ---------- */
+export const PLOT = 50;
+export function terrain(key) {
+  const n = PLOT + 1, z = new Float32Array(n * n);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    let e;
+    if (key === 'med') {
+      // 西（左）に向かって下る斜面。北東から南西へ浅い沢筋がある
+      const d = (x - 0.55 * y - 6);
+      e = 1488 + 0.24 * x + 0.9 * Math.sin(y / 8) + 0.004 * (y - 25) * (y - 25)
+        - 1.6 * Math.exp(-(d * d) / 40);
+    } else e = 20;
+    z[y * n + x] = e;
+  }
+  const at = (x, y) => {
+    x = Math.max(0, Math.min(PLOT, x)); y = Math.max(0, Math.min(PLOT, y));
+    const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.min(PLOT, x0 + 1), y1 = Math.min(PLOT, y0 + 1);
+    const fx = x - x0, fy = y - y0;
+    const g = (i, j) => z[j * n + i];
+    return g(x0, y0) * (1 - fx) * (1 - fy) + g(x1, y0) * fx * (1 - fy) + g(x0, y1) * (1 - fx) * fy + g(x1, y1) * fx * fy;
+  };
+  const slopeDeg = (x, y) => {
+    const dx = (at(x + 1, y) - at(x - 1, y)) / 2, dy = (at(x, y + 1) - at(x, y - 1)) / 2;
+    return Math.atan(Math.hypot(dx, dy)) * 180 / Math.PI;
+  };
+  const rect = (r) => {
+    let s = 0, e = 0, m = 0, lo = Infinity, hi = -Infinity;
+    for (let y = r.y; y <= r.y + r.h; y++) for (let x = r.x; x <= r.x + r.w; x++) {
+      const v = at(x, y); e += v; s += slopeDeg(x, y); m++; lo = Math.min(lo, v); hi = Math.max(hi, v);
+    }
+    return { elev: e / m, slope: s / m, drop: hi - lo };
+  };
+  return { n, z, at, slopeDeg, rect };
+}
+
+/* ---------- 値段と寿命（万円・年） ---------- */
+export const MARKET = { water: 0.1, bottled: 0.5, power: 0.004, sellPower: 0.001, buyFood: 0.05, sellFood: 0.03 };
+/* water: 1m³=1000円、bottled: 断水時の買い水 1m³=5000円、power: 1kWh=40円、food: 1kg=500円 */
+export const WAGE = 1.2;          // 外貨の仕事（東京の会社のリモート） 手取り日給 万円
+export const LIVING = 15;         // 食・水・電気以外の暮らし 1人3か月 万円
+export const FOOD_NEED = 500;     // 1人1年 kg
+
+/* 置けるもの。size は既定の大きさ（m）。learn が null なら最初から知っている */
+export const ITEMS = {
+  house: { name: '家', cost: (o) => o.w * o.h * 10, life: 60, size: [4, 4], sizes: [[4, 4], [5, 4], [6, 5], [8, 6]], learn: null, color: '#FBFAF5' },
+  tank: { name: '雨水タンク', cost: () => 8, life: 25, size: [2, 2], learn: null, cap: 3 },
+  garden: { name: '畑', cost: (o) => o.w * o.h * 0.1, life: 0, size: [10, 8], resizable: true, learn: null },
+  heap: { name: '堆肥場', cost: () => 5, life: 15, size: [2, 2], learn: 'heap' },
+  grey: { name: '排水の植物セル', cost: () => 25, life: 20, size: [3, 2], learn: 'grey' },
+  pv: { name: '太陽光パネル', cost: () => 11, life: 25, size: [2, 1], learn: 'offgrid', kw: 0.4 },
+  batt: { name: '蓄電池', cost: () => 15, life: 12, size: [1, 1], learn: 'offgrid', kwh: 5 },
+  tree: { name: '果樹', cost: () => 0.5, life: 0, size: [1, 1], learn: 'hedge' },
+  hedge: { name: '生け垣', cost: (o) => (o.w + o.h) * 0.2, life: 0, size: [6, 1], resizable: true, learn: 'hedge' },
+  chicken: { name: 'ニワトリ小屋', cost: () => 10, life: 15, size: [3, 2], learn: 'chicken' },
+  pond: { name: 'ため池', cost: (o) => o.w * o.h * 1.2, life: 0, size: [4, 3], resizable: true, learn: 'pond' }
+};
+/* 家と畑につけられる工夫 */
+export const MODS = {
+  compostToilet: { name: 'コンポストトイレ', on: 'house', cost: 30, learn: 'toilet' },
+  saving: { name: '節水の器具', on: 'house', cost: 8, learn: 'saving' },
+  mulch: { name: 'マルチ（地面を覆う）', on: 'garden', costPerM2: 0.01, learn: 'mulch' },
+  terrace: { name: '石垣の段々畑', on: 'garden', costPerM2: 0.15, learn: 'terrace' }
+};
+export const FOUNDATION = { step: 0.3, min: 0.3, max: 3.0, costPerStep: 0.05 };   // 家の値段に対する割合
+
+/* 斜面と土地から、家に必要な基礎の深さ */
+export function requiredDepth(slope) {
+  return Math.min(3.0, Math.max(0.3, Math.ceil((0.3 + slope / 12 * 0.3) / 0.3) * 0.3));
+}
+
+/* ---------- 気候 ---------- */
+function extraterrestrial(latDeg, J) {
+  const phi = latDeg * Math.PI / 180;
+  const dr = 1 + 0.033 * Math.cos(2 * Math.PI * J / 365);
+  const delta = 0.409 * Math.sin(2 * Math.PI * J / 365 - 1.39);
+  const ws = Math.acos(Math.max(-1, Math.min(1, -Math.tan(phi) * Math.tan(delta))));
+  const Ra = (24 * 60 / Math.PI) * 0.0820 * dr * (ws * Math.sin(phi) * Math.sin(delta) + Math.cos(phi) * Math.cos(delta) * Math.sin(ws));
+  return { Ra, N: 24 / Math.PI * ws };
+}
+export function normals(key) {
+  const s = SITES[key];
+  return s.tmean.map((t, m) => {
+    const { Ra, N } = extraterrestrial(s.lat, MID[m]);
+    const psh = Ra * (0.25 + 0.5 * s.sunHours[m] / N) / 3.6;
+    const et0 = Math.max(0, 0.0023 * (t + 17.8) * Math.sqrt(Math.max(0, s.tmax[m] - s.tmin[m])) * Ra * 0.408);
+    return { t, tmin: s.tmin[m], tmax: s.tmax[m], rain: s.rain[m], rainDays: s.rainDays[m], psh, et0 };
+  });
+}
+
+/* 1年分の天気をつくる（月ごとに雨量をゆらし、雨の日を散らす） */
+export function weatherYear(key, r, phase) {
+  const s = SITES[key], N = normals(key), out = [];
+  const en = s.enso || { ninoRain: 1, ninaRain: 1 };
+  const yearMul = phase === 'nino' ? en.ninoRain : phase === 'nina' ? en.ninaRain : 1;
+  const tAdd = phase === 'nino' ? 0.5 : phase === 'nina' ? -0.3 : 0;
+  for (let m = 0; m < 12; m++) {
+    const c = N[m], dm = DAYS[m];
+    const mul = yearMul * Math.exp(0.32 * r.normal() - 0.05);
+    const total = c.rain * mul;
+    const days = Math.max(1, Math.min(dm, Math.round(c.rainDays * Math.sqrt(mul) + r.normal())));
+    const wet = new Array(dm).fill(0);
+    let k = 0; while (k < days) { const d = Math.floor(r() * dm); if (!wet[d]) { wet[d] = 1; k++; } }
+    const w = wet.map(x => x ? -Math.log(1 - r() * 0.999) : 0), ws = w.reduce((a, b) => a + b, 0) || 1;
+    const tAn = tAdd + 0.4 * r.normal();
+    for (let d = 0; d < dm; d++) {
+      const rain = total * w[d] / ws;
+      out.push({ m, d, rain, t: c.t + tAn, et0: c.et0 * (rain > 1 ? 0.7 : 1.08) * (1 + 0.04 * tAn), psh: c.psh * (rain > 5 ? 0.55 : rain > 0 ? 0.85 : 1.12) });
+    }
+  }
+  return out;
+}
+export function ensoPhase(key, r) {
+  const e = SITES[key].enso; if (!e) return 'neutral';
+  const x = r(); return x < e.nino ? 'nino' : x < e.nino + e.nina ? 'nina' : 'neutral';
+}
+/* この土地の「めったにない大雨」の目安（日雨量の上位1%）と、30日雨量の平年値 */
+const extremeCache = {};
+export function extremes(key) {
+  if (extremeCache[key]) return extremeCache[key];
+  const r = rng(12345), all = [], m30 = [];
+  for (let y = 0; y < 60; y++) {
+    const w = weatherYear(key, r, ensoPhase(key, r));
+    for (let i = 0; i < w.length; i++) { if (w[i].rain > 0.5) all.push(w[i].rain); }
+    let acc = 0; for (let i = 0; i < w.length; i++) { acc += w[i].rain; if (i >= 30) acc -= w[i - 30].rain; if (i >= 30) m30.push(acc); }
+  }
+  all.sort((a, b) => a - b); m30.sort((a, b) => a - b);
+  return (extremeCache[key] = { p99: all[Math.floor(all.length * 0.99)], wet30: m30[Math.floor(m30.length * 0.9)] });
+}
+
+/* ---------- 家族の週 ---------- */
+export const WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
+export function weekCount(p) {
+  return { work: p.week.filter(x => x === 'work').length, farm: p.week.filter(x => x === 'farm').length, rest: p.week.filter(x => x === 'rest').length };
+}
+
+/* ---------- ゲーム状態 ---------- */
+export function newGame(opt = {}) {
+  const site = opt.site || 'med', seed = opt.seed ?? 1;
+  return {
+    v: 1, site, seed, year: opt.year || 2027, q: 0, turn: 0,
+    cash: opt.cash ?? 300,
+    persons: opt.persons || [{ name: 'あなた', week: ['work', 'work', 'work', 'work', 'work', 'farm', 'rest'] }],
+    items: [],             // {id,type,x,y,w,h,depth?,mods:{}, built:turn}
+    nextId: 1,
+    known: ['house', 'tank', 'garden'],
+    learned: [],           // 学んだ順の記録 {id, turn, how}
+    pending: [],
+    tank: 0, batt: 0, soil: null,
+    om: SITES[site].soilOM || 2.0,
+    food: 60, phase: null, rngState: seed * 7919 + 17,
+    log: [], inbox: [],
+    totals: { yearStart: null },
+    flags: {}
+  };
+}
+export function clone(s) { return JSON.parse(JSON.stringify(s)); }
+
+let _terrainCache = {};
+export function siteTerrain(key) { return _terrainCache[key] || (_terrainCache[key] = terrain(SITES[key].terrain || key)); }
+
+/* 置いたものの集計 */
+export function summarize(s) {
+  const T = siteTerrain(s.site);
+  const it = s.items;
+  const house = it.find(x => x.type === 'house');
+  const gardens = it.filter(x => x.type === 'garden');
+  const gArea = gardens.reduce((a, g) => a + g.w * g.h, 0);
+  const terraceArea = gardens.filter(g => g.mods?.terrace).reduce((a, g) => a + g.w * g.h, 0);
+  const mulchArea = gardens.filter(g => g.mods?.mulch).reduce((a, g) => a + g.w * g.h, 0);
+  const tanks = it.filter(x => x.type === 'tank');
+  const tankCap = tanks.length * ITEMS.tank.cap * 1000;
+  let gElev = 0, gSlope = 0;
+  for (const g of gardens) { const r = T.rect(g); gElev += r.elev * g.w * g.h; gSlope += r.slope * g.w * g.h; }
+  gElev = gArea ? gElev / gArea : 0; gSlope = gArea ? gSlope / gArea : 0;
+  const tElev = tanks.length ? tanks.reduce((a, t) => a + T.rect(t).elev, 0) / tanks.length : 0;
+  const hRect = house ? T.rect(house) : null;
+  return {
+    house, floor: house ? house.w * house.h : 0, roof: house ? house.w * house.h * 1.2 : 0,
+    compostToilet: !!house?.mods?.compostToilet, saving: !!house?.mods?.saving,
+    depth: house?.depth || 0, need: hRect ? requiredDepth(hRect.slope) : 0, houseSlope: hRect ? hRect.slope : 0,
+    gArea, terraceArea, mulchArea, gElev, gSlope, tankCap, tElev,
+    gravity: tanks.length && gArea ? tElev - gElev : null,
+    heap: it.filter(x => x.type === 'heap').length,
+    grey: it.filter(x => x.type === 'grey').length > 0,
+    pvKw: it.filter(x => x.type === 'pv').length * ITEMS.pv.kw,
+    battKwh: it.filter(x => x.type === 'batt').length * ITEMS.batt.kwh,
+    trees: it.filter(x => x.type === 'tree').length,
+    coops: it.filter(x => x.type === 'chicken').length,
+    pondCap: it.filter(x => x.type === 'pond').reduce((a, p) => a + p.w * p.h * 1000, 0),
+    pondArea: it.filter(x => x.type === 'pond').reduce((a, p) => a + p.w * p.h, 0),
+    hedgeLen: it.filter(x => x.type === 'hedge').reduce((a, h) => a + Math.max(h.w, h.h), 0),
+    wallLen: gardens.filter(g => g.mods?.terrace).reduce((a, g) => a + g.w * Math.max(1, Math.round(T.rect(g).drop / 1.2)), 0)
+  };
+}
+
+/* 置く・工夫する費用 */
+export function itemCost(x) {
+  const def = ITEMS[x.type];
+  let c = def.cost(x);
+  if (x.type === 'house') {
+    c += c * FOUNDATION.costPerStep * Math.round((x.depth || 0.3) / FOUNDATION.step);
+    if (x.mods?.compostToilet) c += MODS.compostToilet.cost;
+    if (x.mods?.saving) c += MODS.saving.cost;
+  }
+  if (x.type === 'garden') {
+    const a = x.w * x.h;
+    if (x.mods?.mulch) c += a * MODS.mulch.costPerM2;
+    if (x.mods?.terrace) c += a * MODS.terrace.costPerM2;
+  }
+  return c;
+}
+
+/* 手入れに要る日数／週（世帯合計） */
+export function careNeed(s) {
+  const S = summarize(s);
+  return {
+    garden: S.gArea / 400 + S.mulchArea / 1600,
+    fixed: (S.compostToilet ? 0.3 : 0) + S.heap * 0.15 + (S.grey ? 0.1 : 0) + S.trees * 0.01 + S.hedgeLen * 0.005 + S.coops * 0.25 + (S.pondArea ? 0.05 : 0),
+    get total() { return this.garden + this.fixed; }
+  };
+}
+export function hands(s) {
+  return s.persons.reduce((a, p) => a + weekCount(p).farm, 0);
+}
+
+/* 窒素のめぐり（kg/年） */
+export function nutrients(s) {
+  const S = summarize(s), n = s.persons.length;
+  const src = [
+    ['コンポストトイレ', S.compostToilet ? 4.0 * n : 0],
+    ['堆肥場', Math.min(S.heap, 2) * 1.0 * n],
+    ['排水の植物セル', S.grey ? 0.4 * n : 0],
+    ['ニワトリのふん', S.coops * 1.5]
+  ];
+  const supply = src.reduce((a, x) => a + x[1], 0), need = S.gArea * 0.01;
+  return { src, supply, need, nf: need > 0 ? Math.min(1, supply / need) : 0 };
+}
+
+/* ---------- 1ターン（3か月）を進める ---------- */
+export function advance(state) {
+  const s = clone(state);
+  const r = rng(s.rngState);
+  const site = SITES[s.site], S = summarize(s), n = s.persons.length;
+  if (!s.phase || s.q === 0) { s.phase = ensoPhase(s.site, r); s.flags.weatherYear = null; }
+  // 1年分の天気をターンの頭で決め、四半期ぶんを使う
+  if (!s.flags.weatherYear || s.q === 0) s.flags.weatherYear = weatherYear(s.site, r, s.phase);
+  const W = s.flags.weatherYear;
+  const m0 = s.q * 3, days = W.filter(d => d.m >= m0 && d.m < m0 + 3);
+  const ex = extremes(s.site);
+
+  const care = careNeed(s), hand = hands(s);
+  const careF = care.total > 0 ? Math.max(0, Math.min(1, (hand - care.fixed) / Math.max(1e-9, care.garden))) : 1;
+  const nu = nutrients(s);
+  const nf = nu.nf;
+  const omF = Math.max(0.7, Math.min(1.25, 0.8 + 0.1 * (s.om - 2)));
+
+  // 水の使い方（L/日）
+  const pc = S.saving ? { clean: 65, toilet: 20 } : { clean: 130, toilet: 35 };
+  const clean = pc.clean * n, toiletUse = S.compostToilet ? 0 : pc.toilet * n;
+  const grey = S.grey ? 0.9 * clean : 0;
+  const reserve = Math.min(S.tankCap, 20 * (clean + toiletUse));
+
+  // 畑の土の水（mm）
+  const cap = Math.max(60, Math.min(170, 80 + 18 * (s.om - 2)));
+  if (s.soil == null) s.soil = cap * 0.6;
+  let runoffC = Math.max(0.08, Math.min(0.6, 0.1 + S.gSlope / 60));
+  if (S.gArea) {
+    const tr = S.terraceArea / S.gArea, mu = S.mulchArea / S.gArea;
+    runoffC = runoffC * (1 - tr) + 0.04 * tr;
+    runoffC *= (1 - 0.3 * mu);
+  }
+  const evapF = S.gArea ? 1 - 0.15 * S.mulchArea / S.gArea : 1;
+
+  const A = {
+    rain: 0, harvest: 0, overflow: 0, tankUse: 0, city: 0, bottled: 0, waterCutDays: 0, waterCutShort: 0,
+    greyUse: 0, greyOut: 0, sewer: 0, irr: 0, irrTank: 0, irrGrey: 0, irrCity: 0, pumpKwh: 0,
+    et: 0, aet: 0, growth: 0, growDays: 0, runoff: 0, recharge: 0, soilMin: cap, tankMin: Infinity, tankEmptyDays: 0,
+    pondIn: 0, irrPond: 0, pondMin: Infinity,
+    load: 0, pv: 0, grid: 0, sold: 0, outDays: 0, outShort: 0, maxRain: 0, wet30Max: 0, dryStressDays: 0
+  };
+  // 出来事の発生（停電・断水）
+  const qFrac = days.length / 365;
+  const pOut = r.poisson((site.outage?.power || 0) * qFrac);
+  const wRate = s.phase === 'nino' ? (site.outage?.ninoWater || 0) : (site.outage?.water || 0);
+  const wOut = r.poisson(wRate * qFrac);
+  const outPow = new Set(), outWat = new Set();
+  for (let i = 0; i < pOut; i++) { const st = r.int(0, days.length - 1), len = r.int(1, 2); for (let k = 0; k < len; k++) outPow.add(st + k); }
+  for (let i = 0; i < wOut; i++) { const st = r.int(0, days.length - 1), len = r.int(1, 4); for (let k = 0; k < len; k++) outWat.add(st + k); }
+
+  const capT = S.tankCap;
+  let pond = Math.min(s.pond || 0, S.pondCap);
+  let tank = Math.min(s.tank, capT), batt = Math.min(s.batt, S.battKwh * 1000) / 1000;
+  const pumpHead = S.gravity == null ? 0 : (S.gravity >= 1.5 ? 0 : 1.5 - S.gravity + 5);
+  let acc30 = []; let sum30 = 0; let landslideRisk = 0, bigRainDay = null;
+
+  days.forEach((d, i) => {
+    A.rain += d.rain; A.maxRain = Math.max(A.maxRain, d.rain);
+    acc30.push(d.rain); sum30 += d.rain; if (acc30.length > 30) sum30 -= acc30.shift();
+    A.wet30Max = Math.max(A.wet30Max, sum30);
+    if (d.rain >= ex.p99) { const risk = Math.min(1, (d.rain / ex.p99 - 0.9) * (sum30 > ex.wet30 ? 1.6 : 0.8)); if (risk > landslideRisk) { landslideRisk = risk; bigRainDay = i; } }
+    // 屋根の雨
+    const h = d.rain * S.roof * 0.85; A.harvest += h;
+    if (capT > 0) { tank += h; if (tank > capT) { A.overflow += tank - capT; tank = capT; } } else A.overflow += h;
+    // 家の水
+    const cut = outWat.has(i); if (cut) A.waterCutDays++;
+    let tNeed = toiletUse, g = grey;
+    if (g > 0) { const a = Math.min(g, tNeed); g -= a; tNeed -= a; A.greyUse += a; }
+    const need = clean + tNeed;
+    const fromTank = Math.min(tank, need); tank -= fromTank; A.tankUse += fromTank;
+    const rest = need - fromTank;
+    if (cut) { A.bottled += rest * 0.25; A.waterCutShort += rest; }    // 断水中は節約して1/4だけ買い水
+    else A.city += rest;
+    A.sewer += S.compostToilet ? (S.grey ? 0 : 0.9 * clean) : (S.grey ? toiletUse : 0.9 * clean + toiletUse);
+    // 畑
+    if (S.gArea > 0) {
+      const inf = d.rain * (1 - runoffC);
+      let ro = d.rain * runoffC * S.gArea;   // L
+      if (S.pondCap) { const take = Math.min(ro, S.pondCap - pond); pond += take; ro -= take; A.pondIn += take; }
+      A.runoff += ro / 1000;
+      s.soil += inf;
+      const etc = d.et0 * 0.85 * evapF;
+      // 乾いてきたら水やり
+      if (s.soil < cap * 0.5) {
+        let want = (cap * 0.7 - s.soil) * S.gArea;   // L
+        const a = Math.min(g, want); g -= a; want -= a; A.irrGrey += a;
+        const fp = Math.min(pond, want); pond -= fp; want -= fp; A.irrPond += fp; s.soil += fp / S.gArea;
+        let fromT = 0;
+        if (capT > 0) { fromT = Math.min(Math.max(0, tank - reserve), want); tank -= fromT; want -= fromT; A.irrTank += fromT; A.pumpKwh += fromT / 1000 * 9.81 * pumpHead / 3600 / 0.5; }
+        s.soil += (a + fromT) / S.gArea;
+        A.irr += a + fromT;
+      }
+      const stress = Math.max(0, Math.min(1, s.soil / (cap * 0.45)));
+      const aet = Math.min(s.soil, etc * stress);
+      s.soil -= aet; A.et += etc; A.aet += aet;
+      if (stress < 0.6) A.dryStressDays++;
+      if (s.soil > cap) { A.recharge += (s.soil - cap) * S.gArea / 1000; s.soil = cap; }
+      A.soilMin = Math.min(A.soilMin, s.soil);
+      A.growth += etc > 0 ? aet / etc : 1; A.growDays++;
+    }
+    if (S.pondCap) { pond = Math.min(S.pondCap, pond + d.rain * S.pondArea); pond = Math.max(0, pond - d.et0 * 1.05 * S.pondArea); A.pondMin = Math.min(A.pondMin, pond); }
+    A.greyOut += g;
+    A.tankMin = Math.min(A.tankMin, tank);
+    if (capT > 0 && tank < 1) A.tankEmptyDays++;
+    // 電気
+    const load = 2 + 1.0 * n + 0.6 * n + (A.pumpKwh > 0 ? 0 : 0);
+    const pv = S.pvKw * d.psh * 0.75;
+    const dayL = load * 0.4, night = load * 0.6;
+    const direct = Math.min(pv, dayL), sur = pv - direct;
+    const room = S.battKwh - batt;
+    const ch = Math.min(sur, room / 0.9); batt += ch * 0.9;
+    const spill = sur - ch;
+    const fromB = Math.min(batt, night); batt -= fromB;
+    let short = (dayL - direct) + (night - fromB);
+    if (outPow.has(i)) { A.outDays++; A.outShort += short; short = 0; }
+    else { A.grid += short; A.sold += spill; }
+    A.load += load; A.pv += pv;
+  });
+  A.load += A.pumpKwh; A.grid += A.pumpKwh;
+  if (A.tankMin === Infinity) A.tankMin = 0;
+
+  // 収穫（3か月分）
+  let pest = false;
+  const pestP = S.gArea ? Math.max(0.05, 0.28 - 0.03 * S.trees - 0.012 * S.hedgeLen) : 0;
+  if (S.gArea && r() < pestP) pest = true;
+  const growF = A.growDays ? A.growth / A.growDays : 0;
+  const pestF = pest ? (s.flags.pestHand ? 0.92 : 0.8) : 1;
+  const baseYield = 2.0 * (1 + 0.75 * nf);
+  const harvest = S.gArea * baseYield * (days.length / 365) * growF * careF * omF * pestF;
+  const treeFood = s.items.filter(x => x.type === 'tree').reduce((a, x) => a + (s.turn - x.built >= 8 ? 12 : 2), 0) * (days.length / 365);   // 果樹は植えて2年たつと実る
+  const eat = FOOD_NEED * n * days.length / 365;
+  let fox = false;
+  if (S.coops && r() < Math.max(0.03, 0.14 - 0.006 * S.hedgeLen)) fox = true;
+  const eggs = S.coops * 50 * (days.length / 365) * (fox ? 0.6 : 1) * Math.min(1, careF + 0.3);
+  s.food += harvest + treeFood + eggs - eat;
+  let foodBought = 0, foodShared = 0, foodSold = 0;
+  if (s.food < 0) { foodBought = -s.food; s.food = 0; }
+  const keep = FOOD_NEED * n * 0.25;
+  if (s.food > keep) {
+    const extra = s.food - keep;
+    if (s.flags.surplus === 'sell') foodSold = extra; else foodShared = extra;
+    s.food = keep;
+  }
+
+  // 土の有機物（％）
+  const inputKg = (S.heap ? Math.min(S.heap, 2) * 60 * n : 0) * qFrac * 4 / 4
+    + (S.compostToilet ? 30 * n * qFrac : 0)
+    + S.mulchArea * 1.5 * qFrac
+    + 0.3 * harvest + S.trees * 3 * qFrac + S.coops * 40 * qFrac;
+  if (S.gArea > 0) {
+    const gain = 0.3 * inputKg / S.gArea / 2.6;
+    const decay = 0.035 * s.om * qFrac;
+    const erosion = (A.runoff * 1000 / S.gArea) * 0.0004;
+    s.om = Math.max(0.8, Math.min(8, s.om + gain - decay - erosion));
+  }
+
+  // お金
+  const wk = s.persons.map(weekCount);
+  const workDays = wk.reduce((a, x) => a + x.work, 0);
+  const weeks = days.length / 7 * (48 / 52);
+  const income = workDays * WAGE * weeks;
+  const jobCost = wk.filter(x => x.work > 0).length * 1.0;
+  const living = LIVING * n;
+  const cWater = A.city / 1000 * MARKET.water + A.bottled / 1000 * MARKET.bottled;
+  const cPower = A.grid * MARKET.power + A.outShort * 0.03;   // 停電で使えなかった分は外食や氷で 1kWhあたり300円
+  const sell = A.sold * MARKET.sellPower + foodSold * MARKET.sellFood;
+  const cFood = foodBought * MARKET.buyFood;
+  const houseCost = S.house ? ITEMS.house.cost(S.house) : 0;
+  const maint = houseCost * 0.01 * qFrac;
+  // 寿命の来た設備
+  let replace = 0; const replaced = [];
+  for (const x of s.items) {
+    const life = ITEMS[x.type].life; if (!life) continue;
+    const age = (s.turn - (x.built ?? 0)) / 4;
+    if (age > 0 && Math.floor(age) !== Math.floor(age - 0.25) && Math.floor(age) % life === 0) { replace += ITEMS[x.type].cost(x); replaced.push(ITEMS[x.type].name); }
+  }
+  // 出来事：土砂崩れ
+  const events = [];
+  let repair = 0;
+  if (landslideRisk > 0 && S.house) {
+    const short = Math.max(0, S.need - S.depth);
+    const protect = Math.min(0.6, S.terraceArea / 400 * 0.4 + (S.trees + S.hedgeLen / 3) * 0.02);
+    const hit = r() < landslideRisk * (short > 0 ? 1 : 0.15) * (1 - protect);
+    if (hit) {
+      repair = short > 0 ? Math.round(houseCost * (0.08 + 0.12 * short / 0.3)) : Math.round(houseCost * 0.03);
+      events.push({ kind: 'landslide', day: bigRainDay, sev: short > 0 ? 2 : 1, repair, short });
+    } else if (short > 0) events.push({ kind: 'crack', day: bigRainDay, sev: 1, short });
+  }
+  const outflow = { income, sell, jobCost, living, water: cWater, power: cPower, food: cFood, maint, replace, repair };
+  const net = income + sell - jobCost - living - cWater - cPower - cFood - maint - replace - repair;
+  s.cash += net;
+
+  if (A.outDays) events.push({ kind: 'blackout', days: A.outDays, covered: A.outShort < 0.5, short: A.outShort });
+  if (A.waterCutDays) events.push({ kind: 'watercut', days: A.waterCutDays, bottled: A.bottled / 1000, covered: A.waterCutShort < 1 });
+  if (A.tankEmptyDays > 10) events.push({ kind: 'tankempty', days: A.tankEmptyDays });
+  if (A.dryStressDays > 25) events.push({ kind: 'dry', days: A.dryStressDays });
+  if (A.runoff > 0 && S.gArea && A.runoff * 1000 / S.gArea > 110) events.push({ kind: 'erosion', mm: A.runoff * 1000 / S.gArea });
+  if (pest) events.push({ kind: 'pest' });
+  if (fox) events.push({ kind: 'fox' });
+  if (S.gArea && nf < 0.5 && harvest > 0) events.push({ kind: 'lowN', nf });
+  if (foodShared > 30) events.push({ kind: 'shared', kg: foodShared });
+  if (replaced.length) events.push({ kind: 'replace', names: replaced, cost: replace });
+  if (hand < care.total - 0.05 && S.gArea) events.push({ kind: 'overwork', need: care.total, have: hand });
+
+  const rep = {
+    year: s.year, q: s.q, phase: s.phase, label: site.quarters ? site.quarters[s.q] : `${s.q * 3 + 1}〜${s.q * 3 + 3}月`,
+    days: days.length, A, harvest, treeFood, eggs, foodBought, foodShared, foodSold, eat, careF, nf, growF, omF, money: outflow, net,
+    om: s.om, soil: s.soil, cap, runoffC, events, tankEnd: tank, battEnd: batt,
+    waterSelf: (A.tankUse + A.greyUse) / Math.max(1, A.tankUse + A.greyUse + A.city + A.waterCutShort),
+    powerSelf: A.load ? 1 - (A.grid + A.outShort) / A.load : 0,
+    foodSelf: eat ? Math.min(1, (harvest + treeFood + eggs) / eat) : 0
+  };
+  s.tank = tank; s.batt = batt * 1000; s.pond = pond;
+  s.flags.sharedTotal = (s.flags.sharedTotal || 0) + foodShared;
+  s.flags.dryCount = (s.flags.dryCount || 0) + (rep.events.some(e => e.kind === 'tankempty' || e.kind === 'erosion') ? 1 : 0);
+  s.log.push(compact(rep));
+  // きっかけ（学び）：気づきは溜めておき、1ターンに1つだけ教わる
+  s.pending = s.pending || [];
+  for (const l of triggers(s, rep)) if (!s.pending.some(p => p.id === l.id)) s.pending.push(l);
+  if (s.turn === 0 && !s.known.includes('heap') && !s.pending.some(p => p.id === 'heap')) s.pending.unshift({ id: 'heap', why: 'intro' });
+  rep.learn = s.pending.length ? [s.pending.shift()] : [];
+  // 次のターンへ
+  s.turn++; s.q++; if (s.q >= 4) { s.q = 0; s.year++; }
+  s.rngState = r.state();
+  return { state: s, report: rep };
+}
+function compact(rep) {
+  return { y: rep.year, q: rep.q, net: rep.net, ws: rep.waterSelf, ps: rep.powerSelf, fs: rep.foodSelf, om: rep.om, harvest: rep.harvest, ev: rep.events.map(e => e.kind), phase: rep.phase, money: rep.money, A: { rain: rep.A.rain, city: rep.A.city, harvest: rep.A.harvest, grid: rep.A.grid, sewer: rep.A.sewer, runoff: rep.A.runoff, recharge: rep.A.recharge, bottled: rep.A.bottled }, foodBought: rep.foodBought, foodShared: rep.foodShared };
+}
+
+/* ---------- 学びのきっかけ ---------- */
+export const TECH = ['heap', 'toilet', 'grey', 'mulch', 'terrace', 'offgrid', 'deep', 'hedge', 'saving', 'chicken', 'pond'];
+function triggers(s, rep) {
+  const out = [], has = (id) => s.known.includes(id);
+  const ev = (k) => rep.events.find(e => e.kind === k);
+  if (!has('heap') && ev('lowN')) out.push({ id: 'heap', why: 'lowN' });
+  if (!has('toilet') && has('heap') && s.turn >= 4) out.push({ id: 'toilet', why: 'sewer' });
+  if (!has('grey') && (ev('tankempty') || ev('watercut'))) out.push({ id: 'grey', why: ev('tankempty') ? 'tankempty' : 'watercut' });
+  if (!has('saving') && ev('watercut')) out.push({ id: 'saving', why: 'watercut' });
+  if (!has('mulch') && ev('dry')) out.push({ id: 'mulch', why: 'dry' });
+  if (!has('terrace') && (ev('erosion') || (ev('dry') && has('mulch')))) out.push({ id: 'terrace', why: ev('erosion') ? 'erosion' : 'dry' });
+  if (!has('offgrid') && ev('blackout')) out.push({ id: 'offgrid', why: 'blackout' });
+  if (!has('deep') && (ev('crack') || ev('landslide'))) out.push({ id: 'deep', why: ev('landslide') ? 'landslide' : 'crack' });
+  if (!has('hedge') && (ev('pest') || ev('fox'))) out.push({ id: 'hedge', why: ev('pest') ? 'pest' : 'fox' });
+  if (!has('chicken') && (s.flags.sharedTotal || 0) >= 150) out.push({ id: 'chicken', why: 'gift' });
+  if (!has('pond') && (has('terrace') || has('mulch')) && (s.flags.dryCount || 0) >= 3 && s.turn >= 6) out.push({ id: 'pond', why: 'pond' });
+  return out;
+}
+export function learn(s, id, how) {
+  if (s.known.includes(id)) return s;
+  const t = clone(s);
+  t.known.push(id); t.learned.push({ id, turn: s.turn, how });
+  return t;
+}
+/* 「先読み」：天気の記録や図鑑から学べるもの */
+export function foresight(s) {
+  const site = SITES[s.site], out = [];
+  if (site.outage?.power) out.push({ id: 'offgrid', text: `停電が年に${site.outage.power}回ほどある土地` });
+  if (site.enso) out.push({ id: 'grey', text: 'エルニーニョの年は雨が3割減り、断水が増える' });
+  const N = normals(s.site); const dryQ = N.slice(6, 9).reduce((a, c) => a + c.rain - c.et0 * 30 * 0.85, 0);
+  if (dryQ < 60) out.push({ id: 'mulch', text: '7〜9月は雨のわりに蒸発が多く、畑が乾きやすい' });
+  out.push({ id: 'deep', text: `この斜面で大雨（日${Math.round(extremes(s.site).p99)}mm以上）が続くと地盤が動く` });
+  return out;
+}
+
+/* ---------- 関係の網 ---------- */
+export function relations(s) {
+  const S = summarize(s), last = s.log.slice(-4);
+  const avg = (f) => last.length ? last.reduce((a, x) => a + f(x), 0) / last.length : 0;
+  const ws = avg(x => x.ws), ps = avg(x => x.ps), fs = avg(x => x.fs);
+  const shared = last.reduce((a, x) => a + (x.foodShared || 0), 0);
+  const runoff = last.reduce((a, x) => a + x.A.runoff, 0), recharge = last.reduce((a, x) => a + x.A.recharge, 0);
+  const sewer = last.reduce((a, x) => a + x.A.sewer, 0) / 1000;
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+  const care = careNeed(s), hand = hands(s);
+  const tend = care.total ? clamp(hand / care.total) : 0;
+  const nodes = [
+    { id: 'rain', name: '雨', v: clamp(ws), good: true, why: `暮らしの水の${Math.round(ws * 100)}%を雨と排水でまかなった` },
+    { id: 'sun', name: '太陽', v: clamp(ps), good: true, why: `電気の${Math.round(ps * 100)}%を太陽から` },
+    { id: 'soil', name: '土', v: clamp((s.om - 1.5) / 4), good: s.om >= (SITES[s.site].soilOM || 2), why: `土の有機物 ${s.om.toFixed(1)}%（はじめ ${SITES[s.site].soilOM}%）` },
+    { id: 'crops', name: '作物', v: clamp(fs) * (S.gArea ? 1 : 0), good: true, why: `食べものの${Math.round(fs * 100)}%を畑から` },
+    { id: 'worms', name: 'ミミズと微生物', v: clamp((S.heap ? 0.35 : 0) + (S.compostToilet ? 0.25 : 0) + (S.mulchArea / Math.max(1, S.gArea)) * 0.4) * tend, good: true, why: '堆肥とマルチが土の中の生き物を養う' },
+    { id: 'insects', name: '虫（受粉と天敵）', v: clamp(S.hedgeLen / 30 + S.trees / 12 + (S.gArea ? 0.1 : 0)), good: true, why: '生け垣と果樹が花と隠れ家になる' },
+    { id: 'birds', name: '鳥', v: clamp(S.trees / 10 + S.hedgeLen / 40), good: true, why: '木が増えると鳥がとまる' },
+    { id: 'hens', name: 'ニワトリ', v: clamp(S.coops * 0.6 * tend), good: true, why: S.coops ? '残り物を食べ、卵とふんを返してくれる' : 'まだいない' },
+    { id: 'frogs', name: 'カエルとトンボ', v: clamp(S.pondArea / 15), good: true, why: S.pondArea ? 'ため池に水の生き物が集まる' : '水辺がない' },
+    { id: 'lizards', name: 'トカゲと苔', v: clamp(S.wallLen / 60), good: true, why: '石垣のすき間が住みかになる' },
+    { id: 'neighbors', name: '近所の人', v: clamp(shared / 300), good: true, why: shared > 0 ? `この1年で野菜を${Math.round(shared)}kg分けた` : 'まだ付き合いは薄い' },
+    { id: 'friend', name: '友人', v: 0.5, good: true, why: '土地を貸してくれた' },
+    { id: 'river', name: '下流の川', v: clamp((sewer * 0.6 + runoff * 0.15) / 40), good: false, why: `下水 ${sewer.toFixed(0)}m³・畑から流れた雨 ${runoff.toFixed(0)}m³` },
+    { id: 'ground', name: '地下の水', v: clamp(recharge / 150), good: true, why: `畑から地下へ浸みた水 ${recharge.toFixed(0)}m³` },
+    { id: 'money', name: 'お金', v: clamp(1 - (ws + ps + fs) / 3), good: null, why: '買って済ませている割合' }
+  ];
+  const score = nodes.filter(x => x.good === true).reduce((a, x) => a + x.v, 0) - nodes.filter(x => x.good === false).reduce((a, x) => a + x.v, 0);
+  return { nodes, score };
+}
+
+/* ---------- 東京の1年（序章） ---------- */
+export function tokyoYear() {
+  const n = 1, workDays = 5;
+  const income = workDays * WAGE * 48;
+  const rent = 8 * 12;
+  const water = (130 + 35) * 365 / 1000;          // m³
+  const power = (2 + 1.6) * 365 + 300;            // kWh（冷暖房ぶんを足す）
+  const food = FOOD_NEED;
+  const cost = {
+    rent, water: water * MARKET.water, power: power * MARKET.power, food: food * MARKET.buyFood,
+    living: LIVING * 4, commute: 10
+  };
+  const spend = Object.values(cost).reduce((a, b) => a + b, 0);
+  return { income, cost, spend, save: income - spend, flows: { water, power, food, sewer: water, garbage: 180 } };
+}
+
+/* ---------- 保存（文字列） ---------- */
+export function save(s) { const t = clone(s); delete t.flags.weatherYear; return JSON.stringify(t); }
+export function load(str) { try { return JSON.parse(str); } catch { return null; } }
+
+/* ---------- 置く・外す ---------- */
+export function canPlace(s, x) {
+  const T = siteTerrain(s.site);
+  if (x.x < 0 || x.y < 0 || x.x + x.w > PLOT || x.y + x.h > PLOT) return { ok: false, why: '敷地の外' };
+  for (const o of s.items) if (o.id !== x.id && x.x < o.x + o.w && o.x < x.x + x.w && x.y < o.y + o.h && o.y < x.y + x.h) return { ok: false, why: `${ITEMS[o.type].name}と重なる` };
+  const rr = T.rect(x);
+  if (rr.slope > 45) return { ok: false, why: '45°より急で置けない' };
+  if (x.type === 'house' && s.items.some(o => o.type === 'house' && o.id !== x.id)) return { ok: false, why: '家はひとつ' };
+  return { ok: true, slope: rr.slope, elev: rr.elev };
+}
+export function place(s, x) {
+  const c = canPlace(s, x); if (!c.ok) return { state: s, error: c.why };
+  const cost = itemCost(x);
+  if (cost > s.cash + 1e-9) return { state: s, error: 'お金が足りない' };
+  const t = clone(s);
+  const it = { ...x, id: t.nextId++, built: t.turn, mods: x.mods || {} };
+  if (it.type === 'house' && !it.depth) it.depth = requiredDepth(c.slope);
+  t.items.push(it); t.cash -= cost;
+  return { state: t, cost, item: it };
+}
+export function removeItem(s, id) {
+  const t = clone(s); t.items = t.items.filter(x => x.id !== id); return t;   // 払ったお金は戻らない
+}
+/* 工夫を後からつける。費用は差分 */
+export function modify(s, id, change) {
+  const t = clone(s), it = t.items.find(x => x.id === id); if (!it) return { state: s, error: 'ない' };
+  const before = itemCost(it);
+  const next = { ...it, mods: { ...it.mods, ...(change.mods || {}) }, depth: change.depth ?? it.depth };
+  let cost = Math.max(0, itemCost(next) - before);
+  if (change.depth != null && change.depth > it.depth) cost *= 2;      // 後から基礎を深くすると2倍
+  if (cost > t.cash + 1e-9) return { state: s, error: 'お金が足りない' };
+  Object.assign(it, next); t.cash -= cost;
+  return { state: t, cost };
+}

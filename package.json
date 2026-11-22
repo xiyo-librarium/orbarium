@@ -1,0 +1,8 @@
+{
+  "name": "orbarium",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tools/bots.mjs"
+  }
+}
