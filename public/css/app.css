@@ -218,3 +218,30 @@ h1, h2, h3 { margin: 0; }
   .shop-draw, .shop-ctrl { overflow: visible; border-right: none; }
   .shop-in footer .btn.primary { flex: 1 1 100%; }
 }
+
+/* 3D（拡大して作る） */
+.mapwrap canvas { display: block; touch-action: manipulation; cursor: pointer; }
+.iso3d { position: fixed; inset: 0; z-index: 35; background: rgba(31,42,46,.55); display: grid; place-items: center; padding: 10px; }
+.iso-in { width: min(1400px, 100%); height: calc(100dvh - 20px); background: var(--card); border-radius: 16px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); overflow: hidden; }
+.iso-stage { position: relative; background: linear-gradient(#EAF1F4, #F4F1EA); min-height: 0; }
+.iso-stage canvas { width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: manipulation; }
+.iso-nav { position: absolute; left: 12px; bottom: 12px; display: grid; grid-template-columns: repeat(4, 44px); gap: 6px; }
+.iso-nav .btn { min-height: 44px; padding: 0; font-size: 18px; background: rgba(251,250,245,.95); }
+.iso-tip { position: absolute; left: 12px; top: 12px; background: rgba(31,42,46,.88); color: var(--card); font-size: 12px; padding: 6px 10px; border-radius: 8px; pointer-events: none; min-height: 0; }
+.iso-tip:empty { display: none; }
+.iso-side { padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; border-left: 1px solid var(--line); font-size: 13px; line-height: 1.6; }
+.iso-side header { display: flex; align-items: center; gap: 10px; }
+.iso-side header h2 { font-size: 17px; }
+.iso-side header .btn { margin-left: auto; min-height: 40px; }
+.iso-cats { display: flex; flex-wrap: wrap; gap: 4px; }
+.iso-side .blocks .opt { display: flex; align-items: center; gap: 6px; }
+.iso-side .opt .sw { width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0,0,0,.25); display: inline-block; }
+.iso-side .opt .pr { font-family: var(--mono); font-size: 11px; color: var(--mute); margin-left: 4px; }
+.iso-side .opt.on .pr { color: #DDE; }
+.iso-msg { background: #FFF6EC; border: 1px solid var(--warn); color: var(--warn-dark); border-radius: 10px; padding: 8px 10px; font-weight: 700; }
+.inspect .ng { color: var(--warn-dark); font-weight: 700; }
+@media (max-width: 860px) {
+  .iso3d { padding: 0; }
+  .iso-in { height: 100dvh; border-radius: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: 55dvh minmax(0, 1fr); }
+  .iso-side { border-left: none; border-top: 1px solid var(--line); }
+}

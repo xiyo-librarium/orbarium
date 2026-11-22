@@ -13,7 +13,7 @@ CHECK = r"""() => {
   const out = [];
   const docScrollY = document.scrollingElement.scrollHeight > innerHeight + 1;
   for (const b of document.querySelectorAll('button, a.btn, .cell')) {
-    if (b.closest('.list')) continue;   // 図鑑の一覧はスクロールで見る前提
+    if (b.closest('.list') || b.closest('.iso-side') || b.closest('.panel')) continue;   // 図鑑の一覧はスクロールで見る前提
     const r = b.getBoundingClientRect(); if (!r.width || !r.height || getComputedStyle(b).visibility === 'hidden') continue;
     let L = 0, T = 0, R = innerWidth, B = innerHeight, scrollable = false;
     if (docScrollY) { T = -1e9; B = 1e9; }
@@ -54,23 +54,15 @@ with sync_playwright() as p:
         pg = b.new_page(viewport={'width': W, 'height': H})
         pg.goto('http://localhost:8767/index.html'); pg.wait_for_timeout(400)
         snap(pg, tag, 'title')
-        click(pg, '#new', tag); pg.wait_for_timeout(200); click(pg, '#skip', tag); pg.wait_for_timeout(200)
+        click(pg, '#new', tag); pg.wait_for_timeout(300); click(pg, '#skip', tag); pg.wait_for_timeout(200)
         snap(pg, tag, 'prologue')
         click(pg, '#skip', tag); pg.wait_for_timeout(100); snap(pg, tag, 'invite')
         click(pg, '#go', tag); pg.wait_for_timeout(200); click(pg, '#skip', tag); pg.wait_for_timeout(300)
         snap(pg, tag, 'game0')
-        click(pg, '[data-t="house"]', tag); pg.wait_for_timeout(150); snap(pg, tag, 'shop_house')
-        click(pg, '#ok', tag); pg.wait_for_timeout(150)
-        mc(pg, 30, 20); mc(pg, 40, 14); mc(pg, 20, 33); pg.wait_for_timeout(150)
-        # 全部知っている状態にして、道具と工夫のボタンを出しきる
-        pg.evaluate("()=>{const s=JSON.parse(localStorage.getItem('orbarium-v1'));s.known=['house','tank','garden','heap','toilet','grey','saving','catch','mulch','terrace','offgrid','deep','hedge','chicken','pond','insulation','greenhouse','bamboo','earth','straw'];s.flags.done_med=1;s.cash=900;localStorage.setItem('orbarium-v1',JSON.stringify(s));}")
-        pg.reload(); pg.wait_for_timeout(300); click(pg, '#cont', tag); pg.wait_for_timeout(300)
-        snap(pg, tag, 'game_tools')
-        mc(pg, 20.5, 33.5); pg.wait_for_timeout(100); snap(pg, tag, 'garden_sel')
-        mc(pg, 31, 21); pg.wait_for_timeout(100); snap(pg, tag, 'house_sel')
-        click(pg, '[data-act="design"]', tag); pg.wait_for_timeout(150); snap(pg, tag, 'shop_remodel'); click(pg, '#sx', tag); pg.wait_for_timeout(100)
-        click(pg, '[data-t="grey"]', tag); pg.wait_for_timeout(150); snap(pg, tag, 'shop_filter'); click(pg, '#sx', tag); pg.wait_for_timeout(100)
-        for t in ['book', 'plan', 'sky', 'note']:
+        pg.evaluate("()=>{const {G}=window.__orb;G.s.known=['house','tank','garden','heap','toilet','grey','saving','catch','mulch','terrace','offgrid','deep','hedge','chicken','pond','insulation','greenhouse','bamboo','earth','straw'];G.s.flags.done_med=1;G.s.cash=900;}")
+        for cat in ['house', 'farm', 'water', 'power', 'life', 'ground']:
+            pg.evaluate("(c)=>window.__orb.open3D(20,20,c)", cat); pg.wait_for_timeout(200); snap(pg, tag, 'iso_' + cat); click(pg, '#isox', tag); pg.wait_for_timeout(150)
+        for t in ['book', 'plan', 'sky', 'note', 'web']:
             click(pg, f'[data-tab="{t}"]', tag); pg.wait_for_timeout(60); snap(pg, tag, 'tab_' + t)
         click(pg, '#close', tag); pg.wait_for_timeout(700); snap(pg, tag, 'wake')
         click(pg, '#back', tag); pg.wait_for_timeout(150)

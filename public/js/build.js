@@ -104,7 +104,7 @@ export function houseDay(m, d, n) {
   const peak = mean + (1 - m.mass.damp) * ((tmax - d.t) + 1.5 * solarW / uaV);
   return { heat, peak, winSolar, roofSolar };
 }
-export const HOT = 31;   // 室温がこれを超える日は「暑すぎる日」
+export const HOT = 32;   // 室温がこれを超える日は「暑すぎる日」
 
 /* ---------- 排水のバイオフィルター（人工湿地） ---------- */
 export const MEDIA = {

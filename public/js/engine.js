@@ -2,7 +2,9 @@
    1ターン＝3か月。中では1日ずつ回す。数字の根拠と「仮」の印は NOTES にまとめる。 */
 
 import * as B from './build.js';
-export { B };
+import * as W from './world.js';
+export { B, W };
+const VOX = W;   // advance() の中では W が天気の名前とぶつかるので別名
 
 /* ---------- 乱数（種つき） ---------- */
 export function rng(seed) {
@@ -33,7 +35,8 @@ export const SITES = {
     tmax: [9.8, 10.9, 14.2, 19.4, 23.6, 26.1, 29.9, 31.3, 27.5, 22.0, 16.7, 12.0],
     rain: [60, 56, 117, 125, 138, 168, 154, 168, 210, 198, 93, 58],
     rainDays: [5, 6, 10, 10, 11, 12, 11, 8, 11, 10, 7, 5],
-    sunHours: [6.3, 5.9, 5.5, 5.9, 6.0, 4.3, 5.0, 6.1, 4.3, 4.3, 4.8, 5.8]
+    sunHours: [6.3, 5.9, 5.5, 5.9, 6.0, 4.3, 5.0, 6.1, 4.3, 4.3, 4.8, 5.8],
+    terrain: 'tokyo'
   },
   med: {
     name: 'メデジン', sub: '常春の谷・北緯6度・標高約1,500m', lat: 6.25, lon: -75.57, elev: 1495,
@@ -78,6 +81,11 @@ export function terrain(key) {
       const d = (x - 0.55 * y - 6);
       e = 1488 + 0.24 * x + 0.9 * Math.sin(y / 8) + 0.004 * (y - 25) * (y - 25)
         - 1.6 * Math.exp(-(d * d) / 40);
+    } else if (key === 'tokyo') {
+      // 台地を小さな川が削った谷。川はいまは暗渠で、ゆるく曲がった道になっている（場所と向きはぼかしてある）
+      const yc = 31 + 5 * Math.sin(x / 9) + 0.06 * x;
+      const d = Math.abs(y - yc);
+      e = 21 + 0.03 * x + 7 * Math.pow(Math.min(1, d / 17), 1.3) + 0.4 * Math.sin(x / 5 + y / 7);
     } else if (key === 'taos') {
       // 南（下）に向かって下るゆるい斜面。日当たりがいい
       e = 2128 + 0.09 * (50 - y) + 0.5 * Math.sin(x / 7) + 0.3 * Math.cos(y / 5);
@@ -234,7 +242,8 @@ export function weekCount(p) {
 export function newGame(opt = {}) {
   const site = opt.site || 'med', seed = opt.seed ?? 1;
   return {
-    v: 1, site, seed, year: opt.year || 2027, q: 0, turn: 0,
+    v: 2, site, seed, year: opt.year || 2027, q: 0, turn: 0,
+    world: W.makeWorld(siteTerrain(site)),
     cash: opt.cash ?? 300,
     persons: opt.persons || [{ name: 'あなた', week: ['work', 'work', 'work', 'work', 'work', 'farm', 'rest'] }],
     items: [],             // {id,type,x,y,w,h,depth?,mods:{}, built:turn}
@@ -256,63 +265,33 @@ let _terrainCache = {};
 export function siteTerrain(key) { return _terrainCache[key] || (_terrainCache[key] = terrain(SITES[key].terrain || key)); }
 
 /* 置いたものの集計 */
+const _anaCache = new WeakMap();
+export function analyzeWorld(s) {
+  const key = s.world; const sig = JSON.stringify([s.world.H, s.world.blocks, s.world.mods]).length + ':' + Object.keys(s.world.blocks).length + ':' + s.world.queue.length + ':' + s.world.H.reduce((a, b, i) => a + b * (i % 7 + 1), 0) + ':' + JSON.stringify(s.world.mods) + ':' + Object.values(s.world.blocks).reduce((a, b) => a + (b.p ? 1 : 0) + (b.s ? 3 : 0) + (b.m ? 5 : 0), 0);
+  const c = _anaCache.get(key); if (c && c.sig === sig && c.n === s.persons.length) return c.a;
+  const a = W.analyze(s.world, SITES[s.site], s.persons.length);
+  _anaCache.set(key, { sig, a, n: s.persons.length }); return a;
+}
 export function summarize(s) {
-  const T = siteTerrain(s.site);
-  const it = s.items.filter(done);
-  const house = it.find(x => x.type === 'house');
-  const gardens = it.filter(x => x.type === 'garden');
-  const gArea = gardens.reduce((a, g) => a + g.w * g.h, 0);
-  const terraceArea = gardens.filter(g => g.mods?.terrace).reduce((a, g) => a + g.w * g.h, 0);
-  const mulchArea = gardens.filter(g => g.mods?.mulch).reduce((a, g) => a + g.w * g.h, 0);
-  const tanks = it.filter(x => x.type === 'tank');
-  const tankCap = tanks.length * ITEMS.tank.cap * 1000;
-  let gElev = 0, gSlope = 0;
-  for (const g of gardens) { const r = T.rect(g); gElev += r.elev * g.w * g.h; gSlope += r.slope * g.w * g.h; }
-  gElev = gArea ? gElev / gArea : 0; gSlope = gArea ? gSlope / gArea : 0;
-  const tElev = tanks.length ? tanks.reduce((a, t) => a + T.rect(t).elev, 0) / tanks.length : 0;
-  const hRect = house ? T.rect(house) : null;
+  const T = siteTerrain(s.site), w = s.world, A = analyzeWorld(s);
+  const HM = A.house ? A.house.m : null;
+  let hRect = null;
+  if (A.house) { const xs = A.house.cells.map(c => c[0]), ys = A.house.cells.map(c => c[1]); hRect = T.rect({ x: Math.min(...xs) - 1, y: Math.min(...ys) - 1, w: Math.max(...xs) - Math.min(...xs) + 2, h: Math.max(...ys) - Math.min(...ys) + 2 }); }
+  const need = hRect ? Math.max(requiredDepth(hRect.slope), frostNeed(s.site)) : 0;
+  const grey = 0.9 * (w.mods.saving ? 65 : 130) * s.persons.length;
+  const bare = Math.max(0, A.risers - A.stoneRisers);
   return {
-    house, floor: house ? B.houseModel(houseSpec(house), SITES[s.site], 1).A : 0, roof: (house ? house.w * house.h * 1.2 : 0) + it.filter(x => x.type === 'gh' || x.type === 'roof').reduce((a, g) => a + g.w * g.h, 0),
-    compostToilet: !!house?.mods?.compostToilet, saving: !!house?.mods?.saving,
-    depth: house?.depth || 0, need: hRect ? Math.max(requiredDepth(hRect.slope), frostNeed(s.site)) : 0, houseSlope: hRect ? hRect.slope : 0,
-    slopeNeed: hRect ? requiredDepth(hRect.slope) : 0, frostNeed: frostNeed(s.site), ins: house?.mods?.ins || 'none',
-    ghArea: it.filter(x => x.type === 'gh').reduce((a, g) => a + g.w * g.h, 0),
-    houseM: house ? B.houseModel(houseSpec(house), SITES[s.site], s.persons.length) : null,
-    filter: (() => { const f = it.find(x => x.type === 'grey'); if (!f) return null; const sp = filterSpec(f); return { spec: sp, m: B.filterModel(sp, 0.9 * (sp && 130) * s.persons.length) }; })(),
-    building: s.items.filter(x => !done(x)),
-    gArea, terraceArea, mulchArea, gElev, gSlope, tankCap, tElev,
-    gravity: tanks.length && gArea ? tElev - gElev : null,
-    heap: it.filter(x => x.type === 'heap').length,
-    grey: it.filter(x => x.type === 'grey').length > 0,
-    pvKw: it.filter(x => x.type === 'pv').length * ITEMS.pv.kw,
-    battKwh: it.filter(x => x.type === 'batt').length * ITEMS.batt.kwh,
-    trees: it.filter(x => x.type === 'tree').length,
-    coops: it.filter(x => x.type === 'chicken').length,
-    pondCap: it.filter(x => x.type === 'pond').reduce((a, p) => a + p.w * p.h * 1000, 0),
-    pondArea: it.filter(x => x.type === 'pond').reduce((a, p) => a + p.w * p.h, 0),
-    hedgeLen: it.filter(x => x.type === 'hedge').reduce((a, h) => a + Math.max(h.w, h.h), 0),
-    wallLen: gardens.filter(g => g.mods?.terrace).reduce((a, g) => a + g.w * Math.max(1, Math.round(T.rect(g).drop / 1.2)), 0)
+    A, house: A.house, houseM: HM, floor: HM ? HM.A : 0, roof: A.roofCatch / 0.85,
+    compostToilet: !!w.mods.compostToilet, saving: !!w.mods.saving,
+    depth: w.mods.depth || need, need, houseSlope: hRect ? hRect.slope : 0, slopeNeed: hRect ? requiredDepth(hRect.slope) : 0, frostNeed: frostNeed(s.site),
+    ghArea: A.ghBeds, gArea: A.gArea, mulchArea: A.mulch, terraceArea: A.risers ? A.gArea * A.stoneRisers / A.risers : A.gArea,
+    bareRisers: bare, risers: A.risers, tankCap: A.tankCap, tankGrav: A.tankGrav, pondGrav: A.pondGrav, pumps: A.pumps,
+    filter: A.filter ? { ...A.filter, m: B.filterModel(A.filter.spec, grey) } : null,
+    heap: A.heap, pvKw: A.pvKw, battKwh: A.battKwh, trees: A.trees, coops: A.coops,
+    pondCap: A.pondCap, pondArea: A.pondArea, pondCatch: A.pondCatch, hedgeLen: A.hedge, wallLen: A.stoneRisers * 2 + A.greenRoof * 0.5,
+    pending: W.pendingDays(w), diag: A.diag
   };
 }
-
-/* 置く・工夫する費用 */
-export function itemCost(x) {
-  const def = ITEMS[x.type];
-  let c = buildCost(x);
-  if (x.type === 'house') {
-    c += def.cost(x) * FOUNDATION.costPerStep * Math.round((x.depth || 0.3) / FOUNDATION.step);
-    if (x.mods?.compostToilet) c += MODS.compostToilet.cost;
-    if (x.mods?.saving) c += MODS.saving.cost;
-  }
-  if (x.type === 'garden') {
-    const a = x.w * x.h;
-    if (x.mods?.mulch) c += a * MODS.mulch.costPerM2;
-    if (x.mods?.terrace) c += a * MODS.terrace.costPerM2;
-  }
-  return c;
-}
-
-/* 手入れに要る日数／週（世帯合計） */
 export function careNeed(s) {
   const S = summarize(s);
   return {
@@ -368,12 +347,9 @@ export function advance(state) {
   // 畑の土の水（mm）
   const cap = Math.max(60, Math.min(170, 80 + 18 * (s.om - 2)));
   if (s.soil == null) s.soil = cap * 0.6;
-  let runoffC = Math.max(0.08, Math.min(0.6, 0.1 + S.gSlope / 60));
-  if (S.gArea) {
-    const tr = S.terraceArea / S.gArea, mu = S.mulchArea / S.gArea;
-    runoffC = runoffC * (1 - tr) + 0.04 * tr;
-    runoffC *= (1 - 0.3 * mu);
-  }
+  // 段々の畑：土留めのない段差から雨と土が流れる
+  let runoffC = S.gArea ? Math.min(0.5, 0.05 + 0.6 * S.bareRisers / S.gArea) : 0.1;
+  if (S.gArea) runoffC *= (1 - 0.3 * S.mulchArea / S.gArea);
   const evapF = S.gArea ? 1 - 0.15 * S.mulchArea / S.gArea : 1;
 
   const A = {
@@ -397,7 +373,8 @@ export function advance(state) {
   const HM = S.houseM;
   const tSwing = (m) => (site.tmax[m] - site.tmin[m]) / 2;
   let tank = Math.min(s.tank, capT), batt = Math.min(s.batt, S.battKwh * 1000) / 1000;
-  const pumpHead = S.gravity == null ? 0 : (S.gravity >= 1.5 ? 0 : 1.5 - S.gravity + 5);
+  const pumpHead = 4;   // ポンプで上げる高さ（m、配管の抵抗を含む目安）
+  const tankShare = S.pumps ? 1 : S.tankGrav, pondShare = S.pumps ? 1 : S.pondGrav;
   let acc30 = []; let sum30 = 0; let landslideRisk = 0, bigRainDay = null;
 
   days.forEach((d, i) => {
@@ -411,13 +388,13 @@ export function advance(state) {
     // 家の水
     const cut = outWat.has(i); if (cut) A.waterCutDays++;
     let tNeed = toiletUse, g = 0, untreated = rawGrey;
-    if (F) {
+    if (F && (F.inGrav || S.pumps)) {
       const capD = (d.t < 10 ? F.m.capCold : F.m.capWarm) * (clogged ? 0.4 : 1);
       g = Math.min(rawGrey, capD); untreated = rawGrey - g; A.treated += g;
-      if (F.spec.out === 'toilet' && F.m.okToilet) { const a = Math.min(g, tNeed); g -= a; tNeed -= a; A.greyUse += a; }
+      if (F.spec.out === 'toilet' && F.m.okToilet && S.pumps) { const a = Math.min(g, tNeed); g -= a; tNeed -= a; A.greyUse += a; }
       if (F.spec.out === 'pond' && S.pondCap) { const a = Math.min(g, S.pondCap - pond); pond += a; g -= a; A.greyPond += a; }
       if (F.spec.out === 'soak' || (F.spec.out === 'pond' && !S.pondCap)) { A.recharge += g / 1000; A.greySoak += g; g = 0; }
-      if (F.spec.out === 'toilet' && !F.m.okToilet) { A.recharge += g / 1000; g = 0; }
+      if (F.spec.out === 'toilet' && (!F.m.okToilet || !S.pumps)) { A.recharge += g / 1000; g = 0; }
     }
     const need = clean + tNeed;
     const fromTank = Math.min(tank, need); tank -= fromTank; A.tankUse += fromTank;
@@ -428,8 +405,7 @@ export function advance(state) {
     // 畑
     if (S.gArea > 0) {
       const inf = d.rain * (1 - runoffC);
-      let ro = d.rain * runoffC * S.gArea;   // L
-      if (S.pondCap) { const take = Math.min(ro, S.pondCap - pond); pond += take; ro -= take; A.pondIn += take; }
+      const ro = d.rain * runoffC * S.gArea;   // L
       A.runoff += ro / 1000;
       s.soil += inf;
       const cold = d.t < 5;
@@ -438,10 +414,10 @@ export function advance(state) {
       // 乾いてきたら水やり
       if (s.soil < cap * 0.5) {
         let want = (cap * 0.7 - s.soil) * S.gArea;   // L
-        const a = F && F.spec.out === 'garden' ? Math.min(g, want) : 0; g -= a; want -= a; A.irrGrey += a; if (a) A.greyUse += a;
-        const fp = Math.min(pond, want); pond -= fp; want -= fp; A.irrPond += fp; s.soil += fp / S.gArea;
+        const a = F && F.spec.out === 'garden' ? Math.min(g, want * (S.pumps ? 1 : F.outGrav)) : 0; g -= a; want -= a; A.irrGrey += a; if (a) A.greyUse += a;
+        const fp = Math.min(pond, want * pondShare); pond -= fp; want -= fp; A.irrPond += fp; s.soil += fp / S.gArea; if (S.pumps && S.pondGrav < 1) A.pumpKwh += fp * (1 - S.pondGrav) / 1000 * 9.81 * pumpHead / 3600 / 0.5;
         let fromT = 0;
-        if (capT > 0) { fromT = Math.min(Math.max(0, tank - reserve), want); tank -= fromT; want -= fromT; A.irrTank += fromT; A.pumpKwh += fromT / 1000 * 9.81 * pumpHead / 3600 / 0.5; }
+        if (capT > 0) { fromT = Math.min(Math.max(0, tank - reserve), want * tankShare); tank -= fromT; want -= fromT; A.irrTank += fromT; if (S.pumps && S.tankGrav < 1) A.pumpKwh += fromT * (1 - S.tankGrav) / 1000 * 9.81 * pumpHead / 3600 / 0.5; }
         s.soil += (a + fromT) / S.gArea;
         A.irr += a + fromT;
       }
@@ -465,7 +441,12 @@ export function advance(state) {
       A.ghGrow += warm ? (w0 > 0 ? 1 - want / w0 : 1) : 0; A.ghDays++;
       A.ghShort += want;
     }
-    if (S.pondCap) { pond = Math.min(S.pondCap, pond + d.rain * S.pondArea); pond = Math.max(0, pond - d.et0 * 1.05 * S.pondArea); A.pondMin = Math.min(A.pondMin, pond); }
+    if (S.pondCap) {
+      // 坂の上から流れてくる雨（地面に浸みなかった分）と、池に直接降る雨
+      const inflow = d.rain * S.pondArea + d.rain * 0.25 * Math.max(0, S.pondCatch - S.pondArea);
+      const take = Math.min(inflow, S.pondCap - pond); pond += take; A.pondIn += take;
+      pond = Math.max(0, pond - d.et0 * 1.05 * S.pondArea); A.pondMin = Math.min(A.pondMin, pond);
+    }
     if (g > 0) { A.recharge += g / 1000; A.greySoak += g; }   // 使い切れなかった処理水は地面に浸みる
     A.greyOut += g;
     A.tankMin = Math.min(A.tankMin, tank);
@@ -507,7 +488,7 @@ export function advance(state) {
   const ghF = A.ghDays ? A.ghGrow / A.ghDays : 0;
   const harvest = S.gArea * baseYield * (days.length / 365) * growF * careF * omF * pestF
     + S.ghArea * baseYield * 1.3 * (days.length / 365) * ghF * careF * omF;
-  const treeFood = s.items.filter(x => x.type === 'tree').reduce((a, x) => a + (s.turn - x.built >= 8 ? 12 : 2), 0) * (days.length / 365);   // 果樹は植えて2年たつと実る
+  const treeFood = VOX.blocksOf(s.world, 'tree').reduce((a, x) => a + (s.turn - (x.b.at ?? 0) >= 8 ? 12 : 2), 0) * (days.length / 365);   // 果樹は植えて2年たつと実る
   const eat = FOOD_NEED * n * days.length / 365;
   let fox = false;
   if (S.coops && r() < Math.max(0.03, 0.14 - 0.006 * S.hedgeLen)) fox = true;
@@ -516,11 +497,7 @@ export function advance(state) {
   let foodBought = 0, foodShared = 0, foodSold = 0;
   if (s.food < 0) { foodBought = -s.food; s.food = 0; }
   const keep = FOOD_NEED * n * 0.25;
-  if (s.food > keep) {
-    const extra = s.food - keep;
-    if (s.flags.surplus === 'sell') foodSold = extra; else foodShared = extra;
-    s.food = keep;
-  }
+  if (s.food > keep) { foodSold = s.food - keep; s.food = keep; }   // 余りは近所の市場で売る
 
   // 土の有機物（％）
   const inputKg = (S.heap ? Math.min(S.heap, 2) * 60 * n : 0) * qFrac * 4 / 4
@@ -545,15 +522,15 @@ export function advance(state) {
   const cPower = A.grid * MARKET.power + A.outShort * 0.03;   // 停電で使えなかった分は外食や氷で 1kWhあたり300円
   const sell = A.sold * MARKET.sellPower + foodSold * MARKET.sellFood;
   const cFood = foodBought * MARKET.buyFood;
-  const houseCost = S.house ? ITEMS.house.cost(S.house) : 0;
+  const houseCost = S.house ? Math.max(30, S.houseM.A * 6) : 0;
   const rent = S.house ? 0 : 4;   // 家ができるまでは仮住まい
   const maint = houseCost * 0.01 * qFrac;
-  // 寿命の来た設備
+  // 寿命の来た設備（ブロックごと）
   let replace = 0; const replaced = [];
-  for (const x of s.items) {
-    const life = ITEMS[x.type].life; if (!life) continue;
-    const age = (s.turn - (x.built ?? 0)) / 4;
-    if (done(x) && age > 0 && Math.floor(age) !== Math.floor(age - 0.25) && Math.floor(age) % life === 0) { replace += ITEMS[x.type].cost(x); replaced.push(ITEMS[x.type].name); }
+  for (const k in s.world.blocks) {
+    const b = s.world.blocks[k], d = VOX.BLOCKS[b.t]; if (!d.life || b.p || typeof d.life !== 'number') continue;
+    const age = (s.turn - (b.at ?? 0)) / 4;
+    if (age > 0 && Math.floor(age) !== Math.floor(age - 0.25) && Math.floor(age) % d.life === 0) { replace += d.cost; if (!replaced.includes(d.name)) replaced.push(d.name); }
   }
   // 出来事：土砂崩れ
   const events = [];
@@ -576,23 +553,14 @@ export function advance(state) {
   if (HM && A.condDays > 30) { const rp = 3; repair += rp; events.push({ kind: 'condensation', days: A.condDays, repair: rp }); }
   if (HM && HM.rotRisk > 0.2 && A.rain > 250 && r() < HM.rotRisk * 0.45) { const rp = Math.max(2, Math.round(houseCost * 0.04)); repair += rp; events.push({ kind: 'rot', repair: rp }); }
   if (clogged) { repair += 2; events.push({ kind: 'clog', repair: 2 }); }
-  if (HM && A.hotDays > 10) events.push({ kind: 'overheat', days: A.hotDays });
-  // 自分で建てているもの：週の「作業」の日で進む
+  // 暑すぎる日：同じ年にはしつこく言わない（ひどいときだけ）
+  if (HM && A.hotDays > 15 && s.flags.hotYear !== s.year) { events.push({ kind: 'overheat', days: A.hotDays }); s.flags.hotYear = s.year; }
+  // 自分で作っているもの：週の「作業」の日で進む
   const buildDays = wk.reduce((a, x) => a + (x.build || 0), 0) * weeks;
-  let pool = buildDays; const finished = [];
-  for (const x of s.items) {
-    if (!x.build || x.build.done >= x.build.need) continue;
-    const use = Math.min(pool, x.build.need - x.build.done); x.build.done += use; pool -= use;
-    if (x.build.done >= x.build.need - 1e-9) { x.build.done = x.build.need; x.built = s.turn + 1; finished.push(ITEMS[x.type].name); }
-  }
-  for (const x of s.items) {
-    if (!x.remodel) continue;
-    const use = Math.min(pool, x.remodel.need - x.remodel.done); x.remodel.done += use; pool -= use;
-    if (x.remodel.done >= x.remodel.need - 1e-9) { x.spec = x.remodel.spec; delete x.remodel; finished.push(ITEMS[x.type].name + 'の改修'); }
-  }
-  if (finished.length) events.push({ kind: 'built', names: finished });
-  const still = s.items.filter(x => !done(x) || x.remodel);
-  if (still.length && buildDays < 0.5) events.push({ kind: 'stalled', names: still.map(x => ITEMS[x.type].name) });
+  const pending0 = VOX.pendingDays(s.world);
+  const pr = VOX.progress(s.world, buildDays);
+  if (pending0 > 0 && pr.left <= 1e-9) events.push({ kind: 'built', names: ['作っていたもの'] });
+  if (pending0 > 0 && buildDays < 0.5) events.push({ kind: 'stalled', names: ['作りかけのもの'] });
   const outflow = { income, sell, jobCost, living, water: cWater, power: cPower, food: cFood, maint, replace, repair, rent };
   const net = income + sell - jobCost - living - cWater - cPower - cFood - maint - replace - repair - rent;
   s.cash += net;
@@ -608,7 +576,7 @@ export function advance(state) {
   if (pest) events.push({ kind: 'pest' });
   if (fox) events.push({ kind: 'fox' });
   if (S.gArea && nf < 0.5 && harvest > 0) events.push({ kind: 'lowN', nf });
-  if (foodShared > 30) events.push({ kind: 'shared', kg: foodShared });
+  if (foodSold > 30) events.push({ kind: 'sold', kg: foodSold, yen: foodSold * MARKET.sellFood });
   if (replaced.length) events.push({ kind: 'replace', names: replaced, cost: replace });
   if (hand < care.total - 0.05 && S.gArea) events.push({ kind: 'overwork', need: care.total, have: hand });
 
@@ -621,6 +589,8 @@ export function advance(state) {
     powerSelf: A.load ? 1 - (A.grid + A.outShort) / A.load : 0,
     foodSelf: eat ? Math.min(1, (harvest + treeFood + eggs) / eat) : 0
   };
+  const sp = s.world.spent || { local: 0, far: 0 }, sp0 = s.flags.spentPrev || { local: 0, far: 0 };
+  rep.spent = { local: sp.local - sp0.local, far: sp.far - sp0.far }; s.flags.spentPrev = { ...sp };
   s.tank = tank; s.batt = batt * 1000; s.pond = pond;
   s.flags.sharedTotal = (s.flags.sharedTotal || 0) + foodShared;
   s.flags.dryCount = (s.flags.dryCount || 0) + (rep.events.some(e => e.kind === 'tankempty' || e.kind === 'erosion') ? 1 : 0);
@@ -639,7 +609,10 @@ export function advance(state) {
   return { state: s, report: rep };
 }
 function compact(rep) {
-  return { y: rep.year, q: rep.q, net: rep.net, ws: rep.waterSelf, ps: rep.powerSelf, fs: rep.foodSelf, om: rep.om, harvest: rep.harvest, ev: rep.events.map(e => e.kind), phase: rep.phase, money: rep.money, A: { rain: rep.A.rain, city: rep.A.city, harvest: rep.A.harvest, grid: rep.A.grid, sewer: rep.A.sewer, runoff: rep.A.runoff, recharge: rep.A.recharge, bottled: rep.A.bottled }, foodBought: rep.foodBought, foodShared: rep.foodShared };
+  const A = rep.A;
+  return { y: rep.year, q: rep.q, net: rep.net, ws: rep.waterSelf, ps: rep.powerSelf, fs: rep.foodSelf, om: rep.om, harvest: rep.harvest, ev: rep.events.map(e => e.kind), phase: rep.phase, money: rep.money,
+    A: { rain: A.rain, city: A.city, harvest: A.harvest, grid: A.grid, sewer: A.sewer, runoff: A.runoff, recharge: A.recharge, bottled: A.bottled, tankUse: A.tankUse, greyUse: A.greyUse, irrTank: A.irrTank, irrGrey: A.irrGrey, irrPond: A.irrPond, load: A.load, pv: A.pv },
+    foodBought: rep.foodBought, foodSold: rep.foodSold, foodShared: rep.foodShared, spent: rep.spent };
 }
 
 /* ---------- 学びのきっかけ ---------- */
@@ -694,6 +667,7 @@ export function relations(s) {
   const avg = (f) => last.length ? last.reduce((a, x) => a + f(x), 0) / last.length : 0;
   const ws = avg(x => x.ws), ps = avg(x => x.ps), fs = avg(x => x.fs);
   const shared = last.reduce((a, x) => a + (x.foodShared || 0), 0);
+  const localYen = last.reduce((a, x) => a + (x.money?.sell || 0) + (x.money?.rent || 0) + (x.spent?.local || 0) + 0.5 * (x.money?.food || 0), 0);
   const runoff = last.reduce((a, x) => a + x.A.runoff, 0), recharge = last.reduce((a, x) => a + x.A.recharge, 0);
   const sewer = last.reduce((a, x) => a + x.A.sewer, 0) / 1000;
   const clamp = (v) => Math.max(0, Math.min(1, v));
@@ -710,7 +684,7 @@ export function relations(s) {
     { id: 'hens', name: 'ニワトリ', v: clamp(S.coops * 0.6 * tend), good: true, why: S.coops ? '残り物を食べ、卵とふんを返してくれる' : 'まだいない' },
     { id: 'frogs', name: 'カエルとトンボ', v: clamp(S.pondArea / 15 + (S.filter ? S.filter.m.life : 0)), good: true, why: S.pondArea || S.filter ? 'ため池やバイオフィルターの水辺に生き物が集まる' : '水辺がない' },
     { id: 'lizards', name: 'トカゲと苔', v: clamp(S.wallLen / 60), good: true, why: '石垣のすき間が住みかになる' },
-    { id: 'neighbors', name: '近所の人', v: clamp(shared / 300), good: true, why: shared > 0 ? `この1年で野菜を${Math.round(shared)}kg分けた` : 'まだ付き合いは薄い' },
+    { id: 'neighbors', name: '近所の人', v: clamp(localYen / 40), good: true, why: localYen > 0.5 ? `この1年、近所とのやりとり ${Math.round(localYen)}万円（野菜を売る・工事を頼む・材料を買う）` : 'まだ付き合いは薄い' },
     { id: 'friend', name: '友人', v: s.site === 'med' ? 0.5 : 0.2, good: true, why: s.site === 'med' ? '土地を貸してくれた' : 'メデジンから時々メールが来る' },
     { id: 'river', name: '下流の川', v: clamp((sewer * 0.6 + runoff * 0.15) / 40), good: false, why: `下水 ${sewer.toFixed(0)}m³・畑から流れた雨 ${runoff.toFixed(0)}m³` },
     { id: 'ground', name: '地下の水', v: clamp(recharge / 150), good: true, why: `畑から地下へ浸みた水 ${recharge.toFixed(0)}m³` },
@@ -755,6 +729,53 @@ export function orbs(s) {
   ].filter(l => l[2] > 0.05).map(([a, b, v, why]) => ({ a, b, v, why }));
   return { money: N.money.v, orbs: list, links };
 }
+/* ---------- 4つの輪：水・養分・エネルギー・お金 ----------
+   どの暮らしにも4つとも流れている。違うのは、輪が敷地と地域の中で閉じる割合。
+   closure = 地域で回った割合（0〜1）、flow = 1年に流れる量 */
+export function cycles(s) {
+  const last = s.log.slice(-4), k = last.length ? 4 / last.length : 0;
+  const sum = (f) => last.reduce((a, x) => a + (f(x) || 0), 0) * k;
+  const R = relations(s), Nn = Object.fromEntries(R.nodes.map(x => [x.id, x]));
+  const part = (ids) => ids.map(id => Nn[id]).filter(x => x && x.v > 0.15).map(x => x.name);
+  const S = summarize(s), n = s.persons.length;
+  // 水（m³）
+  const use = sum(x => x.A.tankUse + x.A.greyUse + x.A.city + x.A.bottled + x.A.irrTank + x.A.irrGrey + x.A.irrPond) / 1000;
+  const loc = sum(x => x.A.tankUse + x.A.greyUse + x.A.irrTank + x.A.irrGrey + x.A.irrPond) / 1000;
+  const sewer = sum(x => x.A.sewer) / 1000, runoff = sum(x => x.A.runoff), rech = sum(x => x.A.recharge);
+  const wSup = use ? loc / use : 0, wRet = rech + sewer + runoff ? rech / (rech + sewer + runoff) : 0;
+  // 養分（窒素 kg）
+  const nu = nutrients(s), Nout = 5.4 * n, back = Math.min(Nout, nu.supply);
+  const fs = last.length ? sum(x => x.fs) / 4 : 0;
+  // エネルギー（kWh）
+  const load = sum(x => x.A.load), grid = sum(x => x.A.grid);
+  const ps = load ? Math.max(0, 1 - grid / load) : 0;
+  // お金（万円）：近所と遠く
+  const m = (f) => sum(x => f(x.money || {}));
+  const inFar = m(x => x.income), inLoc = m(x => x.sell);
+  const outLoc = m(x => (x.rent || 0) + 0.5 * (x.food || 0) + 0.2 * (x.living || 0) + 0.5 * (x.maint || 0) + 0.5 * (x.repair || 0)) + sum(x => x.spent?.local || 0);
+  const outFar = m(x => (x.jobCost || 0) + 0.5 * (x.food || 0) + 0.8 * (x.living || 0) + (x.water || 0) + (x.power || 0) + 0.5 * (x.maint || 0) + (x.replace || 0) + 0.5 * (x.repair || 0)) + sum(x => x.spent?.far || 0);
+  const mTot = inFar + inLoc + outLoc + outFar;
+  return [
+    { id: 'water', name: '水', color: '#2B6CB0', unit: 'm³', flow: use, closure: 0.5 * wSup + 0.5 * wRet,
+      parts: part(['rain', 'ground', 'frogs']), leaks: [['下水へ', sewer, 'm³'], ['畑から流れ出た雨', runoff, 'm³']], note: `使う水の${Math.round(wSup * 100)}%を雨と排水から。出ていく水の${Math.round(wRet * 100)}%を地面に返した` },
+    { id: 'nutrient', name: '養分', color: '#8A6A42', unit: 'kg N', flow: Nout + nu.need, closure: 0.5 * fs + 0.5 * (Nout ? back / Nout : 0),
+      parts: part(['soil', 'worms', 'crops', 'hens', 'insects', 'birds']), leaks: [['下水・ごみへ', Math.max(0, Nout - back), 'kg N']], note: `食べものの${Math.round(fs * 100)}%を畑から。し尿と生ごみの養分の${Math.round(Nout ? back / Nout * 100 : 0)}%を土に返した` },
+    { id: 'energy', name: 'エネルギー', color: '#C08A1E', unit: 'kWh', flow: load, closure: ps,
+      parts: part(['sun']).concat(S.houseM && S.houseM.massLv >= 2 ? ['土の壁（熱を溜める）'] : []), leaks: [['買った電気', grid, 'kWh']], note: `電気の${Math.round(ps * 100)}%を太陽から。設備の更新にはお金が要る` },
+    { id: 'money', name: 'お金', color: '#6B7462', unit: '万円', flow: mTot / 2, closure: mTot ? (inLoc + outLoc) / mTot : 0,
+      parts: (inLoc + outLoc > 1 ? ['近所の人'] : []).concat(inFar > 0 ? ['遠くの会社（外貨）'] : []), leaks: [['遠くへ払った', outFar, '万円'], ['遠くから稼いだ', inFar, '万円']], note: `お金の流れの${Math.round(mTot ? (inLoc + outLoc) / mTot * 100 : 0)}%が近所の中で回った` }
+  ];
+}
+export function tokyoCycles() {
+  const T = tokyoYear();
+  return [
+    { id: 'water', name: '水', color: '#2B6CB0', unit: 'm³', flow: T.flows.water, closure: 0, parts: [], leaks: [['下水へ', T.flows.sewer, 'm³']], note: 'どこかのダムから来て、処理場から海へ。この部屋の中では1滴も回らない' },
+    { id: 'nutrient', name: '養分', color: '#8A6A42', unit: 'kg N', flow: 5.4, closure: 0, parts: [], leaks: [['下水・ごみへ', 5.4, 'kg N']], note: '食べものはどこかの畑から。し尿と生ごみの養分は処理場と清掃工場へ' },
+    { id: 'energy', name: 'エネルギー', color: '#C08A1E', unit: 'kWh', flow: T.flows.power, closure: 0, parts: [], leaks: [['買った電気', T.flows.power, 'kWh']], note: 'どこかの発電所から。熱は空へ逃げる' },
+    { id: 'money', name: 'お金', color: '#6B7462', unit: '万円', flow: T.income, closure: 0.05, parts: ['会社', '大家さん'], leaks: [['遠くへ払った', T.spend, '万円'], ['遠くから稼いだ', T.income, '万円']], note: '会社から給料が入り、家賃・水道・電気・食費として出ていく' }
+  ];
+}
+
 /* 東京：すべてがお金を通している */
 export function tokyoOrbs() {
   const mk = (id, via) => ({ ...ORBS.find(o => o.id === id), direct: 0.02, via });
@@ -781,6 +802,33 @@ export function tokyoYear() {
   };
   const spend = Object.values(cost).reduce((a, b) => a + b, 0);
   return { income, cost, spend, save: income - spend, flows: { water, power, food, sewer: water, garbage: 180 } };
+}
+
+/* 東京の街：段々の谷に建物が詰まっている。あなたの部屋は賃貸の3階 */
+export function tokyoWorld() {
+  const w = W.makeWorld(siteTerrain('tokyo'));
+  const put = (x, y, z, t) => { w.blocks[`${x},${y},${z}`] = { t, at: 0 }; };
+  const road = new Set();
+  // 暗渠の道（谷底に沿って曲がる）と、谷を横切る坂道
+  for (let x = 0; x < 50; x++) { const yc = Math.round(31 + 5 * Math.sin(x / 9) + 0.06 * x); for (const dy of [0, 1]) road.add(`${x},${yc + dy}`); }
+  for (let y = 0; y < 50; y++) for (const x of [22, 23]) road.add(`${x},${y}`);
+  for (const k of road) { const [x, y] = k.split(',').map(Number); if (y >= 0 && y < 50) put(x, y, W.h(w, x, y), 'asphalt'); }
+  // 建物：小さな区画ごとに、地面を平らにして積む
+  const lots = [];
+  for (let by = 2; by < 48; by += 8) for (let bx = 1; bx < 48; bx += 7) lots.push([bx, by]);
+  let mine = null;
+  for (const [bx, by] of lots) {
+    const cells = [];
+    for (let y = by; y < by + 6; y++) for (let x = bx; x < bx + 5; x++) if (x < 50 && y < 50 && !road.has(`${x},${y}`)) cells.push([x, y]);
+    if (cells.length < 20) continue;
+    const z0 = Math.max(...cells.map(([x, y]) => W.h(w, x, y)));
+    const floors = 2 + ((bx * 7 + by * 3) % 4);
+    const isMine = !mine && bx >= 15 && by >= 18 && by <= 26;
+    for (const [x, y] of cells) { w.H[y * 50 + x] = z0; for (let k = 0; k < (isMine ? 4 : floors); k++) put(x, y, z0 + k, isMine && k === 2 && x === bx + 1 && y === by + 1 ? 'myroom' : 'concrete'); }
+    if (isMine) mine = { x: bx + 1, y: by + 1, z: z0 + 2 };
+  }
+  w.mine = mine;
+  return w;
 }
 
 /* ---------- 保存（文字列） ---------- */
