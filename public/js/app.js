@@ -417,8 +417,9 @@ function openBuild(cx, cy, o = {}) {
   cv.addEventListener('pointermove', (e) => {
     const f = v.pickAt(e.clientX, e.clientY);
     tip.textContent = f ? describeFace(f) : '';
-    if (ro) return;
-    if (!st.cat) { cv.style.cursor = isHouseFace(f) ? 'pointer' : 'default'; return; }
+    const hc = f && ['terrain', 'floor', 'block', 'furn'].includes(f.type) ? [f.x, f.y] : null, moved = String(hc) !== String(v.hoverCell);
+    v.hoverCell = hc;
+    if (ro || !st.cat) { if (!ro) cv.style.cursor = isHouseFace(f) ? 'pointer' : 'default'; if (moved) v.draw(); return; }
     cv.style.cursor = 'crosshair';
     if (st.cat !== 'house') { v.ghost = ghostFor(st, f); v.draw(); return; }
     if (st.drag) { const c = cellOf(f); if (c) { st.drag.b = c; v.rect = { ...rectFrom(st.drag.a, c), mode: st.tool === 'remove' ? 'remove' : 'add', ok: okCell }; v.draw(); } return; }
@@ -426,7 +427,7 @@ function openBuild(cx, cy, o = {}) {
     if (st.tool === 'furn') { const c = cellOf(f); if (st.sel >= 0 && c) { const fu = { ...st.draft.furn[st.sel], x: c[0], y: c[1], r: st.selR }; v.furnGhost = { ...fu, ok: !E.W.furnProblem(st.draft, fu, st.sel) }; } else v.furnGhost = null; v.draw(); return; }
     const c = cellOf(f); v.rect = c ? { ...rectFrom(c, c), mode: st.tool === 'remove' ? 'remove' : 'add', ok: okCell } : null; v.draw();
   });
-  cv.addEventListener('pointerleave', () => { if (!st.drag) { v.rect = null; v.ghostEdge = null; v.ghost = null; v.draw(); tip.textContent = ''; } });
+  cv.addEventListener('pointerleave', () => { if (!st.drag) { v.rect = null; v.ghostEdge = null; v.ghost = null; v.hoverCell = null; v.draw(); tip.textContent = ''; } });
   cv.addEventListener('pointerup', (e) => {
     if (ro) return;
     const f = v.pickAt(e.clientX, e.clientY);

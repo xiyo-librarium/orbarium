@@ -26,8 +26,17 @@ function lightCol(hex, lam, lit, ao = 1, side = false) {
   return `rgb(${k(r, 0)},${k(g, 1)},${k(b, 2)})`;
 }
 const hash = (x, y, k = 0) => { let n = (x * 374761393 + y * 668265263 + k * 2147483647) | 0; n = (n ^ (n >>> 13)) * 1274126177; return ((n ^ (n >>> 16)) >>> 0) / 4294967295; };
-function grassColor(lv, maxLv, x, y) {   // 低い所は濃い緑、高い所は明るい草色。マスごとに少しむら
-  const t = maxLv ? lv / maxLv : 0.5, a = [128, 170, 92], b = [176, 196, 118], j = (hash(x, y) - 0.5) * 14;
+/* なめらかなむら（4マスごとの格子をなめらかにつなぐ）。マス目が見えないように */
+function smooth(x, y, k = 0, S = 4) {
+  const gx = x / S, gy = y / S, ix = Math.floor(gx), iy = Math.floor(gy), fx = gx - ix, fy = gy - iy;
+  const u = fx * fx * (3 - 2 * fx), w = fy * fy * (3 - 2 * fy);
+  const a = hash(ix, iy, k), b = hash(ix + 1, iy, k), c = hash(ix, iy + 1, k), d = hash(ix + 1, iy + 1, k);
+  return a + (b - a) * u + (c - a) * w + (a - b - c + d) * u * w;
+}
+/* 縁のゆらぎ：点の位置（0.25m刻み）で決まるので、となりのマスと同じ点は同じ高さになる */
+const wob = (px, py) => hash(Math.round(px * 4) + 7919, Math.round(py * 4) - 104729, 5) - 0.5;
+function grassColor(lv, maxLv, x, y) {   // 低い所は濃い緑、高い所は明るい草色。なめらかなむら
+  const t = maxLv ? lv / maxLv : 0.5, a = [128, 170, 92], b = [176, 196, 118], j = (smooth(x, y, 3) - 0.5) * 18 + (hash(x, y) - 0.5) * 3;
   return `#${a.map((v, i) => Math.max(0, Math.min(255, Math.round(v + (b[i] - v) * t + j))).toString(16).padStart(2, '0')).join('')}`;
 }
 function topColor(lv, lo, hi) {   // 見えている範囲の低い所（緑）→高い所（砂色）
@@ -133,9 +142,72 @@ export function createView(canvas, world, opt = {}) {
       if (!pc && meta?.decor) meta.decor(cx, t, g);
     }, meta });
   }
+  /* 地面の柱：上の面の縁は、下が見えている辺だけ少しゆらがせ、出っぱった角は丸く落とす */
+  function terrainBox(list, x, y, z, ht, color, meta, open) {
+    const g = geom(), P = (px, py, pz) => project(px, py, pz, g), top = z + ht, S = v.sun.dir;
+    const C = [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]];        // 北西・北東・南東・南西の角
+    const E = [[0, 1, 3], [1, 2, 0], [2, 3, 1], [3, 0, 2]];            // 辺（角a→角b、その辺の向き：0北 1東 2南 3西）
+    const conv = C.map((_, i) => open[i] && open[(i + 3) % 4]);         // 角 i は、辺 i-1 と辺 i が両方見えていたら出っぱり
+    const cz = (i) => top + wob(C[i][0], C[i][1]) * 0.05 - (conv[i] ? 0.11 : 0);
+    const edgePts = (ei) => {
+      const [a, b] = E[ei], pts = [];
+      if (!open[ei]) return [[C[a][0], C[a][1], cz(a)], [C[b][0], C[b][1], cz(b)]];
+      for (let i = 0; i <= 4; i++) {
+        const t = i / 4, px = C[a][0] + (C[b][0] - C[a][0]) * t, py = C[a][1] + (C[b][1] - C[a][1]) * t;
+        let zz = i === 0 ? cz(a) : i === 4 ? cz(b) : top + wob(px, py) * 0.07;
+        if (i === 1 && conv[a]) zz -= 0.04; if (i === 3 && conv[b]) zz -= 0.04;
+        pts.push([px, py, zz]);
+      }
+      return pts;
+    };
+    const edges = [0, 1, 2, 3].map(edgePts);
+    const topPoly = edges.flatMap(e => e.slice(0, -1)).map(([px, py, pz]) => P(px, py, pz));
+    // 明るさ（rbox と同じ考え方）
+    const lam = meta.slope[0] * S[0] + meta.slope[1] * S[1] + meta.slope[2] * S[2];
+    // 影の境目をなめらかに：角（となりと共有）で日なたかを調べ、強く変わる向きにグラデーション
+    const Lc = occ ? C.map(([px, py]) => (litAt(px + 0.001, py + 0.001, top + 0.02) + litAt(px - 0.001, py - 0.001, top + 0.02)) / 2) : [1, 1, 1, 1];
+    const lit = (Lc[0] + Lc[1] + Lc[2] + Lc[3]) / 4;
+    let topFill = lightCol(color, lam, lit, meta.ao ?? 1);
+    const ddx = (Lc[1] + Lc[2]) - (Lc[0] + Lc[3]), ddy = (Lc[2] + Lc[3]) - (Lc[0] + Lc[1]);
+    if (Math.abs(ddx) > 0.2 || Math.abs(ddy) > 0.2) {
+      const alongX = Math.abs(ddx) >= Math.abs(ddy);
+      const A = alongX ? P(x, y + 0.5, top) : P(x + 0.5, y, top), B = alongX ? P(x + 1, y + 0.5, top) : P(x + 0.5, y + 1, top);
+      const la = alongX ? (Lc[0] + Lc[3]) / 2 : (Lc[0] + Lc[1]) / 2, lb = alongX ? (Lc[1] + Lc[2]) / 2 : (Lc[2] + Lc[3]) / 2;
+      const gr = ctx.createLinearGradient(A[0], A[1], B[0], B[1]); gr.addColorStop(0, lightCol(color, lam, la, meta.ao ?? 1)); gr.addColorStop(1, lightCol(color, lam, lb, meta.ao ?? 1));
+      topFill = gr;
+    }
+    // 見える側面：辺の向き（北東南西）→ 世界の法線
+    const NRM = [[0, -1], [1, 0], [0, 1], [-1, 0]], a = v.angle * Math.PI / 180, sides = [];
+    for (let ei = 0; ei < 4; ei++) {
+      const [nx, ny] = NRM[ei], rx = nx * Math.cos(a) - ny * Math.sin(a), ry = nx * Math.sin(a) + ny * Math.cos(a);
+      if (rx + ry <= 0.01) continue;
+      const [ia, ib] = E[ei], ed = edges[ei];
+      const pts = [P(C[ia][0], C[ia][1], z), P(C[ib][0], C[ib][1], z), ...ed.slice().reverse().map(([px, py, pz]) => P(px, py, pz))];
+      const sl = nx * S[0] + ny * S[1], mx = x + 0.5 + nx * 0.53, my = y + 0.5 + ny * 0.53;
+      const sLit = sl > 0 && occ ? litAt(mx, my, top - Math.min(ht, 3) * 0.5) : sl > 0 ? 1 : 0;
+      const fill = lightCol(meta.side, sl, sLit, 0.94, true);
+      // 草のふち：厚みも少しゆらす
+      const lip = open[ei] && meta.lip ? [...ed.map(([px, py, pz]) => P(px, py, pz)), ...ed.slice().reverse().map(([px, py, pz]) => P(px, py, pz - 0.1 - (wob(px + 0.13, py - 0.07) + 0.5) * 0.12))] : null;
+      const lipFill = lightCol(color, (Math.max(0, sl) + lam) / 2, (sLit + lit) / 2, 0.93, true);
+      sides.push({ pts, fill, face: ei === 0 ? 3 : ei === 1 ? 0 : ei === 2 ? 1 : 2, lip, lipFill });
+    }
+    const depth = P(x + 0.5, y + 0.5, z)[2] + z * 0.001 + ht * 0.0005;
+    list.push({ depth, draw: (cx, pc) => {
+      for (const sd of sides) {
+        poly(cx, sd.pts, pc ? pc(sd.face) : sd.fill, 1);
+        if (!pc && sd.lip) poly(cx, sd.lip, sd.lipFill, 1);
+      }
+      poly(cx, topPoly, pc ? pc(4) : topFill, 1);
+      if (!pc && meta.decor) meta.decor(cx, C.map((c, i) => P(c[0], c[1], cz(i))), g);
+    }, meta });
+    if (v.hoverCell) {   // カーソルのまわりだけマス目を見せる
+      const d = Math.hypot(v.hoverCell[0] - x, v.hoverCell[1] - y);
+      if (d < 2.6) list.push({ depth: depth + 1e-6, draw: (cx, pc) => { if (pc) return; cx.globalAlpha = Math.max(0, 1 - d / 2.6) * (d < 0.5 ? 0.9 : 0.45); cx.strokeStyle = d < 0.5 ? '#FFFFFF' : 'rgba(255,255,255,.9)'; cx.lineWidth = (d < 0.5 ? 2 : 1) * v.dpr; cx.beginPath(); cx.moveTo(topPoly[0][0], topPoly[0][1]); for (const q of topPoly.slice(1)) cx.lineTo(q[0], q[1]); cx.closePath(); cx.stroke(); cx.globalAlpha = 1; } });
+    }
+  }
   function poly(cx, pts, fill, alpha) {
     cx.globalAlpha = alpha; cx.beginPath(); cx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) cx.lineTo(pts[i][0], pts[i][1]); cx.closePath(); cx.fillStyle = fill; cx.fill();
-    if (alpha === 1 && !fill.startsWith('#0')) { cx.strokeStyle = 'rgba(40,36,28,.10)'; cx.lineWidth = 1; cx.stroke(); }
+    if (alpha === 1) { cx.strokeStyle = fill; cx.lineWidth = 1.1; cx.lineJoin = 'round'; cx.stroke(); }   // 線は見せない（となりの面とのすき間だけ埋める）
     cx.globalAlpha = 1;
   }
   function draw() {
@@ -153,7 +225,13 @@ export function createView(canvas, world, opt = {}) {
       gx /= 20; gy /= 20; const nl = Math.hypot(gx, gy, 1), slope = [-gx / nl, -gy / nl, 1 / nl];
       let ao = 1; for (const [dx, dy] of SIDE) if (H(x + dx, y + dy) > g) ao -= 0.06;
       const col = dug > 0 ? '#9C7B57' : grassColor(g, v.maxLv, x, y);
-      box(list, x, y, floorLv, g - floorLv, col, { type: 'terrain', x, y, z: g - 1, slope, ao, side: dug > 0 ? '#A8835C' : '#C29A6E', lip: dug > 0 ? null : 'rgba(110,150,80,.95)', decor: dug > 0 || v.top ? null : grassDecor(x, y) });
+      const meta = { type: 'terrain', x, y, z: g - 1, slope, ao, side: dug > 0 ? '#A8835C' : '#C29A6E', lip: dug > 0 ? null : 'rgb(118,158,86)', decor: dug > 0 || v.top ? null : grassDecor(x, y) };
+      if (v.top) { box(list, x, y, floorLv, g - floorLv, col, meta); if (v.hoverCell && Math.hypot(v.hoverCell[0] - x, v.hoverCell[1] - y) < 0.5) rbox(list, x + 0.03, y + 0.03, x + 0.97, y + 0.97, g, 0.01, '#FFFFFF', { type: 'ghost' }, 0.35); }
+      else {
+        // 下が見えている辺（となりが低い・描く範囲の外）：0北 1東 2南 3西
+        const open = [[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => { const nx = x + dx, ny = y + dy; return nx < x0 || nx > x1 || ny < y0 || ny > y1 || h(world, nx, ny) < g; });
+        terrainBox(list, x, y, floorLv, g - floorLv, col, meta, open);
+      }
     }
     if (v.top) {   // 真上から：段の境目に等高線、5mごとに太く
       const gg = geom();
