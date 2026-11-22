@@ -421,9 +421,9 @@ export function analyze(w, site, persons = 1) {
     if (my.length) roofCatch += area; else roofLost += area;
     return { n: c.length, area, tanks: my.length };
   });
-  if (roofLost > 0.5) diag.push({ lv: 'warn', text: `屋根${Math.round(roofLost)}m²ぶんの雨がタンクに入っていない（タンクは屋根の軒の隣か下に、屋根より低く置く）` });
+  if (roofLost > 0.5) diag.push({ lv: 'warn', text: `屋根${Math.round(roofLost)}m²ぶんの雨がタンクに入っていない（タンクは屋根の軒から1m以内に。入口が軒より低ければ、家より高い所でもよい）` });
   const unfed = tanks.filter(t => !fedTanks.has(K(t.x, t.y, t.z)));
-  if (unfed.length) diag.push({ lv: 'warn', text: `雨の入らないタンクが${unfed.length}つある（屋根の軒の隣・下へ）` });
+  if (unfed.length) diag.push({ lv: 'warn', text: `雨の入らないタンクが${unfed.length}つある（屋根の軒から1m以内へ）` });
   const fed = tanks.filter(t => fedTanks.has(K(t.x, t.y, t.z)));
   const tankBase = fed.length ? Math.min(...fed.map(t => t.z)) : null;
   // 畑

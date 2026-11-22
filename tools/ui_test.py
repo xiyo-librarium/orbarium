@@ -78,7 +78,7 @@ def run(viewport, tag):
         c0 = list(map(int, hs['cells'][0].split(',')))
         map_click(page, c0[0], c0[1])
         page.screenshot(path=f'{OUT}/{tag}_4_house.png'); overflow(page, tag + ' house')
-        for sel in ['.iso-mini', '.iso-views', '.h-tabs', '[data-act="build"]', '[data-back]']:
+        for sel in ['.iso-mini', '.iso-views', '.h-tabs', '[data-act="build"]', '.cats']:
             if page.locator(sel).count() < 1: problems.append(f'{tag}: {sel} がない')
         if page.locator('[data-mode]').count(): problems.append(f'{tag}: 自分で作る/頼むの切り替えが残っている')
         cells = [list(map(int, k.split(','))) for k in hs['cells']]
@@ -94,7 +94,7 @@ def run(viewport, tag):
         if st['built'] != len(cells) or abs(st['cash'] - cash0) > 1e-6: problems.append(f'{tag}: 設計しただけで家やお金が変わった {st}')
         page.screenshot(path=f'{OUT}/{tag}_5_draft_top.png')
         # 窓：見えている壁を押す
-        page.click('[data-tab3="open"]'); page.click('[data-tool="window"]')
+        page.click('[data-tab3="open"]'); page.click('[data-htool="window"]')
         pt = page.evaluate("""()=>{const {G,E}=window.__orb;const d=G.house.draft;
           for(const o of E.W.houseOuterEdges(d)){if(d.open[o.e])continue;const [t,r]=o.e.split(':');const [ex,ey]=r.split(',').map(Number);
             const p=G.view.screenOf(ex+(t==='h'?0.5:0),ey+(t==='h'?0:0.5),d.z+1);const f=G.view.pickAt(p[0],p[1]);if(f&&f.type==='wall'&&f.e===o.e)return p;}return null}""")
@@ -147,28 +147,38 @@ def run(viewport, tag):
         page.screenshot(path=f'{OUT}/{tag}_6_rotated.png')
         page.click('#isox'); page.wait_for_timeout(300)
         if page.locator('.iso3d').count(): problems.append(f'{tag}: 建てた後に閉じられない')
-        # 家でない所を押す → 何を作るか選ぶ
+        # 家でない所を押す → 作るものの棚（家・畑・水・小屋と設備・地形）
         map_click(page, x0 - 4, y1 + 2)
-        if page.locator('.bcards [data-cat]').count() != 4: problems.append(f'{tag}: 拡大した先で作るものを選べない')
+        if page.locator('.cats [data-cat]').count() != 5: problems.append(f'{tag}: 拡大した先で作るものを選べない')
+        page.click('[data-cat="farm"]'); page.wait_for_timeout(150)
+        if page.locator('.tcard').count() < 2: problems.append(f'{tag}: 畑の道具が出ない')
+        if page.locator('.tcard:has-text("？")').count(): problems.append(f'{tag}: 覚えていない道具が出ている')
         page.screenshot(path=f'{OUT}/{tag}_5d_menu.png')
-        page.click('[data-cat="farm"]'); page.wait_for_timeout(150); page.click('[data-back]'); page.wait_for_timeout(150)
-        if page.locator('.bcards').count() != 1: problems.append(f'{tag}: 選び直せない')
         page.click('#isox'); page.wait_for_timeout(200)
-        # その他：家の東どなりにタンク
+        # 水：家の東どなりにタンク（設計図に置く → 頼む）
         page.evaluate("([x,y])=>window.__orb.open3D(x,y,'water')", [x1 + 1, y0]); page.wait_for_timeout(300)
         page.click('[data-tool="tank"]')
-        # 家のとなりで、画面で見えている地面を探して押す
+        cash1 = page.evaluate("()=>window.__orb.G.s.cash")
         spot = page.evaluate(VIS_ADJ, 'tank')
         if spot: page.mouse.click(spot[0], spot[1]); page.wait_for_timeout(80)
         else: problems.append(f'{tag}: 家のとなりにタンクを置ける見える場所がない')
+        if page.evaluate("()=>window.__orb.G.s.cash") != cash1: problems.append(f'{tag}: 設計図に置いただけでお金が減った')
         page.screenshot(path=f'{OUT}/{tag}_6b_other.png'); overflow(page, tag + ' other')
+        page.click('#isox'); page.wait_for_timeout(150)
+        if page.locator('[data-act="discard"]').count() != 1: problems.append(f'{tag}: 頼んでいない設計があるのに、確かめずに閉じた')
+        page.click('[data-act="keep"]'); page.click('[data-act="build"]'); page.wait_for_timeout(150)
+        if page.evaluate("()=>window.__orb.G.s.cash") >= cash1: problems.append(f'{tag}: 頼んでもお金が減らない')
         page.click('#isox'); page.wait_for_timeout(200)
-        # 畑：家の南、少し離れたところ
+        # 畑：家の南、少し離れたところをなぞる → 頼む
         page.evaluate("([x,y])=>window.__orb.open3D(x,y,'farm')", [x0 + 2, y1 + 8]); page.wait_for_timeout(300)
         page.click('[data-tool="beds"]')
-        iso_click(page, x0 + 0.5, y1 + 6.5, top(page, x0, y1 + 6)); iso_click(page, x0 + 4.5, y1 + 9.5, top(page, x0 + 4, y1 + 9)); page.wait_for_timeout(150)
+        pa = page.evaluate("([x,y,z])=>window.__orb.G.view.screenOf(x,y,z)", [x0 + 0.5, y1 + 6.5, top(page, x0, y1 + 6)])
+        pb = page.evaluate("([x,y,z])=>window.__orb.G.view.screenOf(x,y,z)", [x0 + 4.5, y1 + 9.5, top(page, x0 + 4, y1 + 9)])
+        page.mouse.move(pa[0], pa[1]); page.mouse.down(); page.mouse.move((pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2, steps=4); page.mouse.move(pb[0], pb[1], steps=4); page.mouse.up(); page.wait_for_timeout(150)
         page.screenshot(path=f'{OUT}/{tag}_6c_farm.png')
+        page.click('[data-act="build"]'); page.wait_for_timeout(150)
         page.click('#isox'); page.wait_for_timeout(300)
+        if page.locator('.iso3d').count(): problems.append(f'{tag}: 頼んだあとに閉じられない')
         c = blocks(page)
         if c.get('tank', 0) < 1: problems.append(f'{tag}: タンクが置けない {c}')
         if c.get('bed', 0) < 8: problems.append(f'{tag}: 畑が広がらない {c}')

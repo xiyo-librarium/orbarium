@@ -339,6 +339,13 @@ export function createView(canvas, world, opt = {}) {
       if (x < x0 || x > x1 || y < y0 || y > y1) continue;
       const b = world.blocks[k]; drawBlock(list, x, y, z, b, BLOCKS[b.t], floorLv);
     }
+    // 設計図：この設計で足すものは青く、外すものは赤く、掘る・盛るマスは青い印
+    if (v.baseWorld && v.baseWorld !== world) {
+      const bw = v.baseWorld, inV = (x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+      for (const k in world.blocks) { const b = world.blocks[k], o = bw.blocks[k]; if (o && o.t === b.t) continue; const [x, y, z] = k.split(',').map(Number); if (!inV(x, y)) continue; const d = BLOCKS[b.t]; rbox(list, x + 0.02, y + 0.02, x + 0.98, y + 0.98, z, d.overlay ? 0.17 : d.kind === 'roof' ? 0.38 : 1.03, '#4C7BD9', { type: 'ghost' }, 0.2); }
+      for (const k in bw.blocks) { const o = bw.blocks[k], b = world.blocks[k]; if (b && b.t === o.t) continue; const [x, y, z] = k.split(',').map(Number); if (!inV(x, y)) continue; const d = BLOCKS[o.t]; rbox(list, x + 0.04, y + 0.04, x + 0.96, y + 0.96, z, d.overlay ? 0.15 : d.kind === 'roof' ? 0.35 : 1, '#D9534F', { type: 'ghost' }, 0.38); }
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (world.H[y * N + x] !== bw.H[y * N + x]) rbox(list, x + 0.06, y + 0.06, x + 0.94, y + 0.94, h(world, x, y) + 0.01, 0.02, '#4C7BD9', { type: 'ghost' }, 0.35);
+    }
     const hs = v.house || world.house, base = v.base;
     if (hs) drawHouse(list, hs, base, x0, x1, y0, y1, floorLv);
     if (v.rect) {
