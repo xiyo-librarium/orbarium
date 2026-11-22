@@ -59,13 +59,17 @@ with sync_playwright() as p:
         click(pg, '#skip', tag); pg.wait_for_timeout(100); snap(pg, tag, 'invite')
         click(pg, '#go', tag); pg.wait_for_timeout(200); click(pg, '#skip', tag); pg.wait_for_timeout(300)
         snap(pg, tag, 'game0')
+        click(pg, '[data-t="house"]', tag); pg.wait_for_timeout(150); snap(pg, tag, 'shop_house')
+        click(pg, '#ok', tag); pg.wait_for_timeout(150)
         mc(pg, 30, 20); mc(pg, 40, 14); mc(pg, 20, 33); pg.wait_for_timeout(150)
         # 全部知っている状態にして、道具と工夫のボタンを出しきる
-        pg.evaluate("()=>{const s=JSON.parse(localStorage.getItem('orbarium-v1'));s.known=['house','tank','garden','heap','toilet','grey','saving','catch','mulch','terrace','offgrid','deep','hedge','chicken','pond','insulation','greenhouse'];s.flags.done_med=1;s.cash=900;localStorage.setItem('orbarium-v1',JSON.stringify(s));}")
+        pg.evaluate("()=>{const s=JSON.parse(localStorage.getItem('orbarium-v1'));s.known=['house','tank','garden','heap','toilet','grey','saving','catch','mulch','terrace','offgrid','deep','hedge','chicken','pond','insulation','greenhouse','bamboo','earth','straw'];s.flags.done_med=1;s.cash=900;localStorage.setItem('orbarium-v1',JSON.stringify(s));}")
         pg.reload(); pg.wait_for_timeout(300); click(pg, '#cont', tag); pg.wait_for_timeout(300)
         snap(pg, tag, 'game_tools')
         mc(pg, 20.5, 33.5); pg.wait_for_timeout(100); snap(pg, tag, 'garden_sel')
         mc(pg, 31, 21); pg.wait_for_timeout(100); snap(pg, tag, 'house_sel')
+        click(pg, '[data-act="design"]', tag); pg.wait_for_timeout(150); snap(pg, tag, 'shop_remodel'); click(pg, '#sx', tag); pg.wait_for_timeout(100)
+        click(pg, '[data-t="grey"]', tag); pg.wait_for_timeout(150); snap(pg, tag, 'shop_filter'); click(pg, '#sx', tag); pg.wait_for_timeout(100)
         for t in ['book', 'plan', 'sky', 'note']:
             click(pg, f'[data-tab="{t}"]', tag); pg.wait_for_timeout(60); snap(pg, tag, 'tab_' + t)
         click(pg, '#close', tag); pg.wait_for_timeout(700); snap(pg, tag, 'wake')

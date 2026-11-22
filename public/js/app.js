@@ -1,6 +1,7 @@
 import * as E from './engine.js';
 import { NOTES, LESSON, eventText, ATLAS, PROLOGUE, INVITE, LANDS } from './content.js';
 import { createGlobe, flyTo, loadLand } from './globe.js';
+import { openShop } from './shop.js';
 
 const KEY = 'orbarium-v1';
 const app = document.getElementById('app');
@@ -143,14 +144,14 @@ function chooseLand() {
       const hist = [...(s.flags.history || []), { site: s.site, years: s.turn / 4, rel: E.relations(s).score }];
       travel(from, to, () => {
         G.s = E.newGame({ site: k, seed: Math.floor(Math.random() * 1e6), cash: s.cash - to.plotPrice, persons: s.persons, known: s.known, learned: s.learned, year: s.year, flags: { history: hist } });
-        G.s.q = s.q; G.tab = 'web'; G.sel = null; G.tool = 'house'; persist(); game();
+        G.s.q = s.q; G.tab = 'web'; G.sel = null; G.tool = null; persist(); game();
       });
     }
   });
 }
 function startGame() {
   G.s = E.newGame({ seed: Math.floor(Math.random() * 1e6) });
-  G.tab = 'web'; G.sel = null; G.tool = 'house'; G.report = null;
+  G.tab = 'web'; G.sel = null; G.tool = null; G.report = null;
   persist();
   game();
 }
@@ -227,6 +228,10 @@ function contours(key) {
 }
 const COLORS = { house: '#FBFAF5', tank: '#CFE1F2', garden: '#CFE3C9', heap: '#B08A5B', grey: '#9CCFC4', pv: '#30476B', batt: '#3A3F42', tree: '#4E8F5B', hedge: '#2C5A37', chicken: '#E8C98A', pond: '#7FB0D8', gh: '#EAF2E4', roof: '#D9D4C7' };
 function itemSVG(x, ghost) {
+  if (!ghost && x.build && x.build.done < x.build.need) {
+    const p = x.build.done / x.build.need, sel = G.sel === x.id;
+    return `<g data-id="${x.id}"><rect x="${x.x}" y="${x.y}" width="${x.w}" height="${x.h}" fill="url(#hatch)" stroke="${sel ? '#B8641F' : '#8A6A42'}" stroke-width="${sel ? 0.22 : 0.14}" stroke-dasharray=".5 .3"/><rect x="${x.x}" y="${x.y + x.h - 0.35}" width="${x.w * p}" height=".35" fill="#B8641F"/><text x="${x.x + x.w / 2}" y="${x.y + x.h / 2 + 0.4}" font-size="${Math.min(1.1, Math.max(0.7, x.w / 5))}" text-anchor="middle" fill="#5E4A30" pointer-events="none">工事中 ${Math.round(p * 100)}%</text></g>`;
+  }
   const sel = G.sel === x.id, cls = ghost ? 'ghost' : '';
   const op = ghost ? ' opacity=".75"' : '';
   const stroke = ghost ? (ghost.ok ? '#B8641F' : '#C0392B') : (sel ? '#B8641F' : '#1F2A2E');
@@ -277,6 +282,7 @@ function renderMap() {
       <pattern id="g1" width="1" height="1" patternUnits="userSpaceOnUse"><path d="M1 0H0V1" fill="none" stroke="rgba(31,42,46,.07)" stroke-width=".04"/></pattern>
       <pattern id="g5" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M5 0H0V5" fill="none" stroke="rgba(31,42,46,.16)" stroke-width=".06"/></pattern>
       <pattern id="rows" width="1" height="1" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#DCEBD6"/><rect y=".55" width="1" height=".3" fill="#A9CBA0"/></pattern>
+      <pattern id="hatch" width="1" height="1" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="1" height="1" fill="#F2E8D8"/><line x1="0" y1="0" x2="0" y2="1" stroke="#C9A46A" stroke-width=".25"/></pattern>
       <pattern id="mulch" width="1.2" height="1.2" patternUnits="userSpaceOnUse"><circle cx=".3" cy=".3" r=".12" fill="#B9935A"/><circle cx=".9" cy=".85" r=".1" fill="#B9935A"/></pattern>
     </defs>
     <rect x="-2.5" y="-2.5" width="55" height="55" fill="#EDEFE6"/>
@@ -299,9 +305,13 @@ function renderMap() {
 }
 function hintText() {
   const s = G.s, S = E.summarize(s);
-  if (!S.house) return 'まず［家］を置きます。地図をクリックすると置けます。斜面がゆるい場所ほど基礎が浅くてすみます（Rで向きを変える）。';
-  if (!S.tankCap) return '［雨水タンク］を置きます。畑より高い場所に置くと、ポンプなしで水が届きます。';
-  if (!S.gArea) return '［畑］は押すと10×8mで置けます。押したまま引っぱると広さを決められ、置いたあとも選んで広げられます。400m²で週1日の手入れ。';
+  const anyHouse = s.items.some(x => x.type === 'house');
+  if (!anyHouse && G.tool === 'house') return '設計した家を、地図を押して置きます。斜面がゆるい場所ほど基礎が浅くてすみます（Rで向きを変える）。';
+  if (!anyHouse) return 'まず［家］を押して、家を設計します。骨組み・断熱・窓・屋根を決めると、暑さ寒さと費用がその場でわかります。';
+  const building = s.items.filter(x => x.build && x.build.done < x.build.need);
+  if (building.length && !s.persons.some(p => p.week.includes('build'))) return `${E.ITEMS[building[0].type].name}を自分で作っています。右の［予定］で「作業」の日を入れると進みます。それまでは仮住まい（3か月4万円）。`;
+  if (!s.items.some(x => x.type === 'tank')) return '［雨水タンク］を置きます。畑より高い場所に置くと、ポンプなしで水が届きます。';
+  if (!s.items.some(x => x.type === 'garden')) return '［畑］は押すと10×8mで置けます。押したまま引っぱると広さを決められ、置いたあとも選んで広げられます。400m²で週1日の手入れ。';
   if (s.turn === 0) return '準備ができたら、右下の［ノートPCを閉じる］で3か月進みます。右の［予定］で、週に何日畑に出るかも決められます。';
   return '';
 }
@@ -318,6 +328,8 @@ function ghostAt(px, py, still) {
     else { x = Math.min(x0, x1); y = Math.min(y0, y1); w = Math.max(2, Math.abs(x1 - x0) + 1); h = Math.max(2, Math.abs(y1 - y0) + 1); }
   }
   const g = { type: G.tool, x, y, w, h, mods: {} };
+  if (G.pendingSpec && E.ITEMS[G.tool].design) { g.spec = G.pendingSpec; g.mode = G.pendingMode; }
+  else if (E.ITEMS[G.tool].labor) g.mode = 'hire';
   if (G.tool === 'house') { const T = E.siteTerrain(G.s.site); g.depth = E.depthNeed(G.s.site, T.rect(g).slope); }
   const c = E.canPlace(G.s, g); g.ok = c.ok; g.why = c.why; g.cost = E.itemCost(g);
   if (g.ok && g.cost > G.s.cash) { g.ok = false; g.why = 'お金が足りない'; }
@@ -352,7 +364,9 @@ function onUp(e) {
   if (r.error) { renderInspect(); return; }
   G.s = r.state; persist();
   const placed = r.item;
-  if (g.type === 'house') { G.tool = 'tank'; G.toolSize = null; }
+  if (E.ITEMS[g.type].design) G.pendingSpec = null;
+  if (g.type === 'house') { G.tool = G.s.items.some(x => x.type === 'tank') ? null : 'tank'; G.toolSize = null; }
+  else if (g.type === 'grey') { G.tool = null; G.sel = placed.id; }
   else if (g.type === 'tank' && !E.summarize(G.s).gArea) { G.tool = 'garden'; G.toolSize = null; }
   else if (g.type === 'garden' && G.s.turn === 0 && !G.s.items.some(x => x.type === 'garden' && x.id !== placed.id)) { G.tool = null; G.sel = placed.id; }
   G.ghost = null;
@@ -371,11 +385,19 @@ function renderTools() {
   const houseBuilt = G.s.items.some(x => x.type === 'house');
   document.getElementById('tools').innerHTML = types.map(t => {
     const d = E.ITEMS[t]; const dis = t === 'house' && houseBuilt;
-    return `<button class="tool${G.tool === t ? ' on' : ''}" data-t="${t}" ${dis ? 'disabled' : ''} aria-pressed="${G.tool === t}"><i class="sw" style="background:${COLORS[t]}"></i>${d.name}</button>`;
-  }).join('') + `<button class="tool" id="rot" ${G.tool ? '' : 'disabled'} aria-label="向きを変える（R）">向き↻</button>` +
-    (G.tool === 'house' ? E.ITEMS.house.sizes.map(([w, h]) => `<button class="tool${(G.toolSize || E.ITEMS.house.size).join() === [w, h].join() || (G.toolSize || []).join() === [h, w].join() ? ' on' : ''}" data-size="${w},${h}">${w * h}m²</button>`).join('') : '');
-  document.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { G.tool = G.tool === b.dataset.t ? null : b.dataset.t; G.toolSize = null; G.sel = null; G.ghost = null; renderAll(); });
-  document.querySelectorAll('[data-size]').forEach(b => b.onclick = () => { G.toolSize = b.dataset.size.split(',').map(Number); renderTools(); });
+    return `<button class="tool${G.tool === t ? ' on' : ''}" data-t="${t}" ${dis ? 'disabled' : ''} aria-pressed="${G.tool === t}"><i class="sw" style="background:${COLORS[t]}"></i>${t === 'grey' ? '排水の浄化' : d.name}${d.design ? '<span class="dz">設計</span>' : ''}</button>`;
+  }).join('') + `<button class="tool" id="rot" ${G.tool ? '' : 'disabled'} aria-label="向きを変える（R）">向き↻</button>`;
+  document.querySelectorAll('[data-t]').forEach(b => b.onclick = () => {
+    const t = b.dataset.t;
+    if (E.ITEMS[t].design && G.tool !== t) {
+      openShop({ type: t, s: G.s, onDone: (spec, mode) => {
+        const st = t === 'house' ? E.B.STRUCTS[spec.struct] : null;
+        G.tool = t; G.pendingSpec = spec; G.pendingMode = mode; G.toolSize = st?.fixed ? [...st.fixed] : [spec.w, spec.h]; G.sel = null; G.ghost = null; renderAll();
+      } });
+      return;
+    }
+    G.tool = G.tool === t ? null : t; G.toolSize = null; G.pendingSpec = null; G.sel = null; G.ghost = null; renderAll();
+  });
   document.getElementById('rot').onclick = rotate;
 }
 
@@ -409,9 +431,18 @@ function renderInspect() {
     if (it.depth < 3) acts.push(`<button class="btn" data-act="deep">基礎を0.3m深く（${man(Math.max(0.1, E.ITEMS.house.cost(it) * E.FOUNDATION.costPerStep * 2))}）</button>`);
     for (const k of ['compostToilet', 'saving']) if (G.s.known.includes(E.MODS[k].learn) && !it.mods[k]) acts.push(`<button class="btn" data-act="mod:${k}">${E.MODS[k].name}をつける（${man(E.MODS[k].cost)}）</button>`);
     for (const k of ['compostToilet', 'saving']) if (it.mods[k]) info.push(`${E.MODS[k].name}つき`);
-    const ins = it.mods.ins || 'none'; info.push(`断熱 ${E.INS[ins].name}`);
-    if (G.s.known.includes('insulation')) for (const lv of ['std', 'high']) if ((ins === 'none' && lv) || (ins === 'std' && lv === 'high')) acts.push(`<button class="btn" data-act="ins:${lv}">断熱を${E.INS[lv].name}に（${man(it.w * it.h * (E.MODS.ins.perM2[lv] - (E.MODS.ins.perM2[ins] || 0)))}）</button>`);
+    const sp = E.houseSpec(it), hm = E.B.houseModel(sp, E.SITES[G.s.site], G.s.persons.length);
+    info.push(`${E.B.STRUCTS[sp.struct].name} · 壁の断熱 ${sp.wallMm ? sp.wallMm + 'mm' : 'なし'} · 屋根 ${sp.roofMm ? sp.roofMm + 'mm' : 'なし'} · 熱の逃げやすさ ${hm.UA.toFixed(0)}W/K`);
+    acts.unshift(`<button class="btn primary" data-act="design">設計を見る・改修する</button>`);
   }
+  if (it.type === 'grey') {
+    const sp = E.filterSpec(it), fm = E.B.filterModel(sp, 0.9 * 130 * G.s.persons.length);
+    info.push(`${E.B.MEDIA[sp.media].name} · 植物 ${E.B.PLANTS[sp.plants].name} · 前処理 ${E.B.PRE[sp.pre].name} → ${E.B.OUTS[sp.out].name}`);
+    info.push(`処理できる量 ${Math.round(fm.capWarm)}L/日 · 詰まりやすさ ${Math.round(fm.clogQ * 100)}%/3か月`);
+    acts.unshift(`<button class="btn primary" data-act="design">設計を見る・作り直す</button>`);
+  }
+  if (it.build && it.build.done < it.build.need) info.unshift(`自分で作っている途中：${Math.round(it.build.done / it.build.need * 100)}%（残り作業 ${(it.build.need - it.build.done).toFixed(0)}日）`);
+  if (it.remodel) info.unshift(`改修中：${Math.round(it.remodel.done / it.remodel.need * 100)}%（残り作業 ${(it.remodel.need - it.remodel.done).toFixed(0)}日）`);
   if (it.type === 'garden') {
     const a = it.w * it.h;
     for (const k of ['mulch', 'terrace']) {
@@ -435,7 +466,10 @@ function renderInspect() {
     if (a === 'remove') { if (!confirmBox(`${d.name}を撤去しますか？`)) return; G.s = E.removeItem(G.s, it.id); G.sel = null; }
     else if (a === 'deep') { r2 = E.modify(G.s, it.id, { depth: Math.round((it.depth + 0.3) * 10) / 10 }); }
     else if (a.startsWith('mod:')) { r2 = E.modify(G.s, it.id, { mods: { [a.slice(4)]: true } }); }
-    else if (a.startsWith('ins:')) { r2 = E.modify(G.s, it.id, { mods: { ins: a.slice(4) } }); }
+    else if (a === 'design') {
+      openShop({ type: it.type, item: it, s: G.s, onDone: (spec, mode) => { const r3 = E.remodel(G.s, it.id, spec, mode); if (r3.error) { alertBox(r3.error); return; } G.s = r3.state; persist(); renderAll(); } });
+      return;
+    }
     else if (a.startsWith('size:')) { const [, k, dv] = a.split(':'); r2 = E.modify(G.s, it.id, { [k]: it[k] + Number(dv) }); }
     if (r2) { if (r2.error) { alertBox(r2.error); return; } G.s = r2.state; }
     persist(); renderAll();
@@ -518,7 +552,7 @@ function panelBook() {
   let ledger = '<p class="small">まだ3か月を過ごしていません。</p>';
   if (last) {
     const m = last.money;
-    const items = [['外貨の仕事', m.income], ['野菜・電気を売った', m.sell], ['仕事の経費', -m.jobCost], ['そのほかの暮らし', -m.living], ['食べものを買った', -m.food], ['水を買った', -m.water], ['電気を買った', -m.power], ['家の維持', -m.maint], ['設備の交換', -m.replace], ['修理', -m.repair]].filter(x => Math.abs(x[1]) >= 0.05);
+    const items = [['仮住まい', -(m.rent || 0)], ['外貨の仕事', m.income], ['野菜・電気を売った', m.sell], ['仕事の経費', -m.jobCost], ['そのほかの暮らし', -m.living], ['食べものを買った', -m.food], ['水を買った', -m.water], ['電気を買った', -m.power], ['家の維持', -m.maint], ['設備の交換', -m.replace], ['修理', -m.repair]].filter(x => Math.abs(x[1]) >= 0.05);
     ledger = `<div class="rows">${items.map(([n, v]) => `<span>${n}</span><b class="num${v < 0 ? ' neg' : ''}">${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(1)}万円</b>`).join('')}<span class="tot">差し引き</span><b class="num tot">${last.net >= 0 ? '+' : '−'}${Math.abs(last.net).toFixed(1)}万円</b></div>`;
   }
   return `<div><h2>家計簿</h2><p class="small">円の財布だけでなく、水・電気・食べもの・土の財布で暮らしを見る。</p></div>
@@ -531,12 +565,13 @@ function panelBook() {
 function panelPlan() {
   const s = G.s, care = E.careNeed(s), hand = E.hands(s);
   const work = s.persons.reduce((a, p) => a + E.weekCount(p).work, 0);
-  const lab = { work: '仕事', farm: '畑', rest: '休み' };
-  return `<div><h2>予定 · 週の過ごし方</h2><p class="small">マスを押すと 仕事 → 畑 → 休み と変わる。東京では週5日、会社の仕事だった。</p></div>
+  const lab = { work: '仕事', farm: '畑', build: '作業', rest: '休み' };
+  return `<div><h2>予定 · 週の過ごし方</h2><p class="small">マスを押すと 仕事 → 畑 → 作業 → 休み と変わる。「作業」は自分で建てるものを進める日。東京では週5日、会社の仕事だった。</p></div>
     <div class="week"><span></span>${E.WEEKDAYS.map(d => `<span>${d}</span>`).join('')}
     ${s.persons.map((p, pi) => `<span style="text-align:left">${esc(p.name)}</span>${p.week.map((v, di) => `<button class="cell ${v}" data-cell="${pi},${di}" aria-label="${esc(p.name)} ${E.WEEKDAYS[di]}曜 ${lab[v]}">${lab[v]}</button>`).join('')}`).join('')}</div>
     <h3>畑と手入れ</h3><div class="meter${hand < care.total ? ' over' : ''}"><i style="width:${Math.min(100, care.total ? hand / care.total * 100 : 100)}%"></i></div>
     <div class="rows"><span>手入れに要る日数</span><b class="num">週${care.total.toFixed(1)}日</b><span>畑に出る日</span><b class="num">週${hand}日</b></div>
+    <h3>自分で作っているもの</h3>${(() => { const bd = s.persons.reduce((a, p) => a + E.weekCount(p).build, 0); const list = s.items.filter(x => (x.build && x.build.done < x.build.need) || x.remodel); if (!list.length) return '<p class="small">いまはない。家や浄化設備を「自分で作る」と、ここに並ぶ。</p>'; return list.map(x => { const b = x.remodel || x.build, left = b.need - b.done; return `<div><div class="rows"><span>${esc(E.ITEMS[x.type].name)}${x.remodel ? 'の改修' : ''}</span><b class="num">${Math.round(b.done / b.need * 100)}% · 残り${left.toFixed(0)}日${bd ? ` · 約${Math.ceil(left / (bd * 11))}季節` : ' · 止まっている'}</b></div><div class="meter"><i style="width:${b.done / b.need * 100}%;background:var(--warn)"></i></div></div>`; }).join(''); })()}
     <h3>外貨の仕事（東京の会社のリモート）</h3>
     <div class="rows"><span>週${work}日 × 日給${E.WAGE}万円</span><b class="num">3か月で約${man(work * E.WAGE * 12)}</b><span>そのほかの暮らし</span><b class="num">3か月で${man(E.LIVING * s.persons.length)}</b></div>`;
 }
@@ -573,10 +608,10 @@ function panelNote() {
 function bindPanel(el) {
   el.querySelectorAll('[data-cell]').forEach(b => b.onclick = () => {
     const [pi, di] = b.dataset.cell.split(',').map(Number);
-    const order = ['work', 'farm', 'rest'];
+    const order = ['work', 'farm', 'build', 'rest'];
     const s = E.clone(G.s); const v = s.persons[pi].week[di];
     s.persons[pi].week[di] = order[(order.indexOf(v) + 1) % 3];
-    G.s = s; persist(); renderPanel(); renderInspect();
+    G.s = s; persist(); renderPanel(); renderInspect(); renderMap();
   });
   el.querySelectorAll('[data-study]').forEach(b => b.onclick = () => {
     G.s = E.learn(G.s, b.dataset.study, 'foresight'); G.studied = G.s.turn; persist();
@@ -656,7 +691,7 @@ function endHTML() {
   return `<div class="card good"><b>${esc(site.name)}で、めぐりができた（${years}年）</b><span>東京では、どのめぐりもお金の円の中にあった。いまは ${good.length}の相手と豊かに関わっている：${esc(good.join('、'))}。</span><span class="k">${more ? '学んだことを持って、次の土地へ行ける。ここで続けてもいい。' : '地球儀から好きな土地を選ぶ章は準備中。ここで続けられる。'}</span></div>`;
 }
 const GOAL = 12;
-const MODHINT = { toilet: '家を選ぶと工夫として足せる', saving: '家を選ぶと工夫として足せる', insulation: '家を選ぶと断熱を足せる', deep: '家を選ぶと基礎を深くできる', mulch: '畑を選ぶと工夫として足せる', terrace: '畑を選ぶと工夫として足せる' };
+const MODHINT = { toilet: '家を選ぶと工夫として足せる', saving: '家を選ぶと工夫として足せる', insulation: '家を選び「設計を見る・改修する」で断熱を選べる', bamboo: '家を設計するとき骨組みに選べる', earth: '家を設計するとき骨組みに選べる', straw: '家を設計するとき骨組みに選べる', grey: '［排水の浄化］を押すと設計できる', deep: '家を選ぶと基礎を深くできる', mulch: '畑を選ぶと工夫として足せる', terrace: '畑を選ぶと工夫として足せる' };
 
 /* ================= 図鑑（地球儀で学ぶ） ================= */
 async function atlas(back) {

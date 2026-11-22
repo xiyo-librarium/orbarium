@@ -21,10 +21,23 @@ function spot(s, type, w, h, pref = {}) {
 }
 function put(s, type, w, h, pref, extra = {}) {
   const p = spot(s, type, w, h, pref); if (!p) return s;
+  if (extra.spec) extra = { ...extra, spec: { ...extra.spec, w, h } };
   const r = E.place(s, { type, x: p.x, y: p.y, w, h, ...extra });
   return r.error ? s : r.state;
 }
 const has = (s, t) => s.items.some(x => x.type === t);
+function putHouse(s, spec, mode) {
+  const st = E.B.STRUCTS[spec.struct]; const [w, h] = st.fixed || [spec.w, spec.h];
+  return put(s, 'house', w, h, {}, { spec, mode });
+}
+function setBuildDay(s) {
+  const busy = s.items.some(x => (x.build && x.build.done < x.build.need) || x.remodel);
+  const t = E.clone(s); const wk = t.persons[0].week;
+  const i = wk.indexOf(busy ? 'farm' : 'build');
+  if (busy && !wk.includes('build') && i >= 0) wk[i] = 'build';
+  if (!busy && wk.includes('build')) wk[wk.indexOf('build')] = 'farm';
+  return t;
+}
 const count = (s, t) => s.items.filter(x => x.type === t).length;
 
 const STRATS = {
@@ -37,8 +50,9 @@ const STRATS = {
   money: {
     week: ['work', 'work', 'work', 'work', 'work', 'farm', 'rest'],
     plan(s) {
-      if (!has(s, 'house')) s = put(s, 'house', 5, 4, {});
+      if (!has(s, 'house')) s = putHouse(s, E.B.defaultSpec('container20'), 'hire');
       const h = s.items.find(x => x.type === 'house');
+      if (h && s.known.includes('insulation') && !h.spec.wallMm && s.cash > 80) { const sp = { ...h.spec, wallMm: 100, roofMm: 150, place: 'outside', ins: 'eps' }; const r2 = E.remodel(s, h.id, sp, 'hire'); if (!r2.error) s = r2.state; }
       if (count(s, 'tank') < 2) s = put(s, 'tank', 2, 2, { high: true, near: h });
       if (!has(s, 'garden')) s = put(s, 'garden', 10, 8, { low: true });
       if (s.known.includes('offgrid') && count(s, 'pv') < 6 && s.cash > 80) { s = put(s, 'pv', 2, 1, { near: h }); s = put(s, 'pv', 2, 1, { near: h }); }
@@ -52,15 +66,22 @@ const STRATS = {
   life: {
     week: ['work', 'work', 'farm', 'farm', 'farm', 'farm', 'rest'],
     plan(s) {
-      if (!has(s, 'house')) s = put(s, 'house', 4, 4, {});
+      if (!has(s, 'house')) {
+        const cold = s.site === 'taos';
+        const sp = { ...E.B.defaultSpec(cold && s.known.includes('earth') ? 'tire' : 'wood'), eaves: 'deep' };
+        if (cold && s.known.includes('insulation')) Object.assign(sp, { wallMm: sp.struct === 'tire' ? 0 : 150, roofMm: 200, floorMm: 100, glazing: 'lowe', south: 90, floor: 'slab' });
+        s = putHouse(s, sp, 'self');
+      }
+      s = setBuildDay(s);
       const h = s.items.find(x => x.type === 'house');
+      if (h && s.known.includes('insulation') && s.site === 'taos' && !h.remodel && h.spec && h.spec.roofMm < 200 && s.cash > 40) { const sp = { ...h.spec, roofMm: 200, wallMm: h.spec.struct === 'tire' ? 0 : 150, glazing: 'lowe' }; const r2 = E.remodel(s, h.id, sp, 'self'); if (!r2.error) s = r2.state; }
       if (count(s, 'tank') < 2 && s.cash > 30) s = put(s, 'tank', 2, 2, { high: true, near: h });
       const g = s.items.filter(x => x.type === 'garden');
       if (g.length < 2 && s.cash > 20) s = put(s, 'garden', 14, 10, { low: true });
       if (s.known.includes('heap') && count(s, 'heap') < 2) s = put(s, 'heap', 2, 2, { near: h });
       if (s.known.includes('toilet') && h && !h.mods.compostToilet) s = E.modify(s, h.id, { mods: { compostToilet: true } }).state;
       if (s.known.includes('saving') && h && !h.mods.saving) s = E.modify(s, h.id, { mods: { saving: true } }).state;
-      if (s.known.includes('grey') && !has(s, 'grey')) s = put(s, 'grey', 3, 2, { near: h });
+      if (s.known.includes('grey') && !has(s, 'grey')) s = put(s, 'grey', 2, 2, { near: h }, { spec: E.B.defaultFilter(), mode: 'self' });
       for (const gg of s.items.filter(x => x.type === 'garden')) {
         if (s.known.includes('mulch') && !gg.mods.mulch) s = E.modify(s, gg.id, { mods: { mulch: true } }).state;
         if (s.known.includes('terrace') && !gg.mods.terrace) s = E.modify(s, gg.id, { mods: { terrace: true } }).state;
@@ -94,7 +115,7 @@ const STRATS = {
 
 function play(name, seed, foresight = false, site = 'med') {
   const st = STRATS[name], r = E.rng(seed * 31 + 7);
-  let s = site === 'med' ? E.newGame({ seed }) : E.newGame({ seed, site, cash: 400, known: ['house', 'tank', 'garden', 'heap', 'toilet', 'grey', 'mulch', 'terrace', 'offgrid', 'hedge', 'saving', 'chicken', 'pond', 'catch'] });
+  let s = site === 'med' ? E.newGame({ seed }) : E.newGame({ seed, site, cash: 400, known: ['house', 'tank', 'garden', 'heap', 'toilet', 'grey', 'mulch', 'terrace', 'offgrid', 'hedge', 'saving', 'chicken', 'pond', 'catch', 'bamboo'] });
   if (st.week) s.persons[0].week = st.week.slice();
   if (foresight) for (const f of E.foresight(s)) s = E.learn(s, f.id, 'foresight');
   const turns = [];

@@ -45,7 +45,12 @@ def run(viewport, tag):
         page.screenshot(path=f'{OUT}/{tag}_4_travel.png')
         page.click('#skip'); page.wait_for_timeout(500)
         page.screenshot(path=f'{OUT}/{tag}_5_game_start.png'); overflow(page, tag + ' game')
-        # 家（ツールは最初から家）
+        # 家：工房で設計してから置く
+        page.click('[data-t="house"]'); page.wait_for_timeout(200)
+        page.screenshot(path=f'{OUT}/{tag}_5b_shop_house.png'); overflow(page, tag + ' shop')
+        page.click('[data-k="struct"][data-v="container20"]'); page.wait_for_timeout(100)
+        page.screenshot(path=f'{OUT}/{tag}_5c_shop_container.png')
+        page.click('[data-mode="self"]'); page.click('#ok'); page.wait_for_timeout(200)
         map_click(page, 30, 20); page.wait_for_timeout(200)
         map_click(page, 40, 14); page.wait_for_timeout(200)   # タンク
         map_click(page, 20, 33); page.wait_for_timeout(200)   # 畑：押しただけ → 10×8
@@ -70,7 +75,11 @@ def run(viewport, tag):
         for t in ['web', 'book', 'plan', 'sky', 'note']:
             page.click(f'[data-tab="{t}"]'); page.wait_for_timeout(100)
             page.screenshot(path=f'{OUT}/{tag}_7_tab_{t}.png')
-        page.click('[data-tab="plan"]'); page.click('[data-cell="0,4"]')   # 金曜を畑へ
+        page.click('[data-tab="plan"]'); page.click('[data-cell="0,3"]'); page.click('[data-cell="0,3"]')   # 木曜を作業へ
+        page.screenshot(path=f'{OUT}/{tag}_7b_plan_build.png')
+        st3 = page.evaluate("()=>JSON.parse(localStorage.getItem('orbarium-v1'))")
+        h = [x for x in st3['items'] if x['type'] == 'house']
+        if not h or h[0].get('mode') != 'self' or not h[0].get('build'): problems.append(f'{tag}: 自分で建てる家になっていない {h}')
         for i in range(8):
             page.click('#close'); page.wait_for_timeout(700)
             if i in (0, 3, 7): page.screenshot(path=f'{OUT}/{tag}_8_wake_{i}.png'); overflow(page, f'{tag} wake{i}')
@@ -95,12 +104,17 @@ def run_taos(viewport, tag):
         page.on('console', lambda m: errs.append(m.text) if m.type == 'error' and 'Failed to load resource' not in m.text else None)
         page.goto('http://localhost:8765/index.html'); page.wait_for_timeout(500)
         page.click('#new'); page.wait_for_timeout(300); page.click('#skip'); page.wait_for_timeout(200); page.click('#skip'); page.click('#go'); page.wait_for_timeout(200); page.click('#skip'); page.wait_for_timeout(300)
+        page.click('[data-t="house"]'); page.wait_for_timeout(150); page.click('#ok'); page.wait_for_timeout(150)
         map_click(page, 30, 20); page.wait_for_timeout(100)
         page.evaluate("()=>{const s=JSON.parse(localStorage.getItem('orbarium-v1'));s.flags.done_med=4;s.cash=600;s.known.push('insulation','greenhouse','catch');localStorage.setItem('orbarium-v1',JSON.stringify(s));}")
         page.reload(); page.wait_for_timeout(500); page.click('#cont'); page.wait_for_timeout(300)
         page.click('#menu'); page.click('[data-m="next"]'); page.wait_for_timeout(200)
         page.screenshot(path=f'{OUT}/{tag}_t1_choose.png')
         page.click('[data-m="go:taos"]'); page.wait_for_timeout(600); page.click('#skip'); page.wait_for_timeout(400)
+        page.click('[data-t="house"]'); page.wait_for_timeout(150)
+        page.click('[data-k="wallMm"][data-v="150"]'); page.click('[data-k="roofMm"][data-v="200"]'); page.click('[data-k="glazing"][data-v="lowe"]'); page.wait_for_timeout(100)
+        page.screenshot(path=f'{OUT}/{tag}_t1b_shop_taos.png')
+        page.click('#ok'); page.wait_for_timeout(150)
         map_click(page, 22, 22); page.wait_for_timeout(100)
         map_click(page, 28, 20); page.wait_for_timeout(100)
         map_drag(page, 10, 34, 22, 42); page.wait_for_timeout(100)
