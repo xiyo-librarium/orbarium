@@ -60,8 +60,8 @@ with sync_playwright() as p:
         click(pg, '#go', tag); pg.wait_for_timeout(200); click(pg, '#skip', tag); pg.wait_for_timeout(300)
         snap(pg, tag, 'game0')
         pg.evaluate("()=>{const {G}=window.__orb;G.s.known=['house','tank','garden','heap','toilet','grey','saving','catch','mulch','terrace','offgrid','deep','hedge','chicken','pond','insulation','greenhouse'];G.s.flags.done_med=1;G.s.cash=900;}")
-        for cat in ['house', 'farm', 'other']:
-            pg.evaluate("(c)=>{const h=window.__orb.G.s.world.house;const k=Object.keys(h.cells)[0].split(',').map(Number);window.__orb.open3D(k[0],k[1],c)}", cat); pg.wait_for_timeout(200); snap(pg, tag, 'iso_' + cat); click(pg, '#isox', tag); pg.wait_for_timeout(150)
+        for cat in [None, 'house', 'farm', 'water', 'other']:
+            pg.evaluate("(c)=>{const h=window.__orb.G.s.world.house;const k=Object.keys(h.cells)[0].split(',').map(Number);window.__orb.open3D(k[0],k[1],c)}", cat); pg.wait_for_timeout(200); snap(pg, tag, 'iso_' + str(cat)); click(pg, '#isox', tag); pg.wait_for_timeout(150)
         for t in ['book', 'plan', 'sky', 'note', 'web']:
             click(pg, f'[data-tab="{t}"]', tag); pg.wait_for_timeout(60); snap(pg, tag, 'tab_' + t)
         click(pg, '#close', tag); pg.wait_for_timeout(700); snap(pg, tag, 'wake')

@@ -1,5 +1,5 @@
 /* 斜め上から見下ろす3D（アイソメトリック）。カメラは固定。回転ボタンを押したときだけ短くなめらかに回る */
-import { BLOCKS, N, h, at, WALLS, ROOFS, FLOORS, OPENINGS, HOUSE_H, houseOuterEdges } from './world.js';
+import { BLOCKS, N, h, at, WALLS, ROOFS, FLOORS, OPENINGS, FURN, HOUSE_H, houseOuterEdges, furnCells } from './world.js';
 
 const SIDE = [[1, 0], [0, 1], [-1, 0], [0, -1]];   // +x, +y, -x, -y
 function shade(hex, f) {
@@ -21,7 +21,7 @@ export function createView(canvas, world, opt = {}) {
   const ctx = canvas.getContext('2d');
   const pick = document.createElement('canvas'), pctx = pick.getContext('2d', { willReadFrequently: true });
   // top：真上から見る / wallMode：'up' できあがり・'cut' 手前の壁を下げる・'down' 壁を全部下げる / house：描く家（設計中は下書き）/ base：いま建っている家
-  const v = { world, top: false, wallMode: 'up', house: null, base: null, rect: null, ghostEdge: null, cx: opt.cx ?? 25, cy: opt.cy ?? 25, R: opt.R ?? 8, angle: 0, rot: 0, zoom: 1, hover: null, ghost: null, faces: [], dpr: Math.min(2, window.devicePixelRatio || 1), maxLv: Math.max(...world.H) };
+  const v = { world, top: false, wallMode: 'up', house: null, base: null, rect: null, ghostEdge: null, furnGhost: null, selFurn: -1, cx: opt.cx ?? 25, cy: opt.cy ?? 25, R: opt.R ?? 8, angle: 0, rot: 0, zoom: 1, hover: null, ghost: null, faces: [], dpr: Math.min(2, window.devicePixelRatio || 1), maxLv: Math.max(...world.H) };
   function size() { const r = canvas.getBoundingClientRect(); canvas.width = Math.round(r.width * v.dpr); canvas.height = Math.round(r.height * v.dpr); pick.width = canvas.width; pick.height = canvas.height; }
   function geom() {
     const W = canvas.width, H = canvas.height;
@@ -156,6 +156,11 @@ export function createView(canvas, world, opt = {}) {
       else if (op) { rbox(list, ...rect, z, 0.9, Wm.color, meta, alpha); rbox(list, ...rect, z + 0.9, 1.3, O.color, meta, 0.85); rbox(list, ...rect, z + 2.2, HOUSE_H - 2.2, Wm.color, meta, alpha); }
       else rbox(list, ...rect, z, HOUSE_H, Wm.color, { ...meta, decor: changed ? null : null }, alpha);
     }
+    // 家具（屋根があるときは見えないので描かない）
+    if (v.wallMode !== 'up' || v.top) {
+      (hs.furn || []).forEach((f, i) => { if (i === v.selFurn && v.furnGhost) return; drawFurn(list, f, z, { type: 'furn', i, x: f.x, y: f.y }, i === v.selFurn ? 0.6 : 1); });
+      if (v.furnGhost) drawFurn(list, v.furnGhost, z, { type: 'ghost' }, 0.55, v.furnGhost.ok ? null : '#D9534F');
+    }
     if (v.ghostEdge) {
       const [t, r] = v.ghostEdge.e.split(':'); const [ex, ey] = r.split(',').map(Number), T2 = T + 0.08;
       const rect = t === 'h' ? [ex + 0.05, ey - T2 / 2, ex + 0.95, ey + T2 / 2] : [ex - T2 / 2, ey + 0.05, ex + T2 / 2, ey + 0.95];
@@ -171,6 +176,24 @@ export function createView(canvas, world, opt = {}) {
         rbox(list, ...rect, z + HOUSE_H, 0.12, R.color, { type: 'roof', x: o.x, y: o.y }, 0.95);
       }
       for (let i = 0; i < Math.min(hs.pv || 0, cells.length); i++) { const [x, y] = cells[i]; rbox(list, x + 0.08, y + 0.08, x + 0.92, y + 0.92, z + HOUSE_H + 0.2, 0.06, '#30476B', { type: 'roof', x, y }, 1); }
+    }
+  }
+  function drawFurn(list, f, z, meta, alpha, tint) {
+    const cs = furnCells(f), X0 = Math.min(...cs.map(c => c[0])), X1 = Math.max(...cs.map(c => c[0])) + 1, Y0 = Math.min(...cs.map(c => c[1])), Y1 = Math.max(...cs.map(c => c[1])) + 1;
+    const c = (col) => tint || col, b = z + 0.1, long = (X1 - X0) > (Y1 - Y0);
+    if (f.t === 'toilet') { rbox(list, X0 + 0.3, Y0 + 0.28, X0 + 0.7, Y0 + 0.75, b, 0.42, c('#F2F2EE'), meta, alpha); rbox(list, X0 + 0.28, Y0 + 0.12, X0 + 0.72, Y0 + 0.3, b, 0.8, c('#E6E6E0'), meta, alpha); }
+    else if (f.t === 'ctoilet') { rbox(list, X0 + 0.2, Y0 + 0.2, X0 + 0.8, Y0 + 0.8, b, 0.45, c('#B98B58'), meta, alpha); rbox(list, X0 + 0.3, Y0 + 0.3, X0 + 0.7, Y0 + 0.7, b + 0.45, 0.04, c('#F2F2EE'), meta, alpha); rbox(list, X0 + 0.65, Y0 + 0.65, X0 + 0.85, Y0 + 0.85, b, 0.3, c('#D9C49A'), meta, alpha); }
+    else if (f.t === 'shower' || f.t === 'shower2') { rbox(list, X0 + 0.06, Y0 + 0.06, X0 + 0.94, Y0 + 0.94, b, 0.06, c(FURN[f.t].color), meta, alpha); rbox(list, X0 + 0.08, Y0 + 0.08, X0 + 0.16, Y0 + 0.16, b, 2.0, c('#9AA4A8'), meta, alpha); rbox(list, X0 + 0.08, Y0 + 0.08, X0 + 0.4, Y0 + 0.4, b + 1.95, 0.06, c('#9AA4A8'), meta, alpha); }
+    else if (f.t === 'bed') {
+      rbox(list, X0 + 0.08, Y0 + 0.08, X1 - 0.08, Y1 - 0.08, b, 0.3, c('#8B6B48'), meta, alpha);
+      rbox(list, X0 + 0.12, Y0 + 0.12, X1 - 0.12, Y1 - 0.12, b + 0.3, 0.14, c('#F4F1E8'), meta, alpha);
+      if (long) { rbox(list, X0 + 0.2, Y0 + 0.2, X0 + 0.55, Y1 - 0.2, b + 0.44, 0.08, c('#FFFFFF'), meta, alpha); rbox(list, X0 + 0.9, Y0 + 0.14, X1 - 0.14, Y1 - 0.14, b + 0.44, 0.05, c('#7FA7C9'), meta, alpha); }
+      else { rbox(list, X0 + 0.2, Y0 + 0.2, X1 - 0.2, Y0 + 0.55, b + 0.44, 0.08, c('#FFFFFF'), meta, alpha); rbox(list, X0 + 0.14, Y0 + 0.9, X1 - 0.14, Y1 - 0.14, b + 0.44, 0.05, c('#7FA7C9'), meta, alpha); }
+    } else if (f.t === 'table') {
+      if (long) { rbox(list, X0 + 0.5, Y0 + 0.2, X1 - 0.5, Y1 - 0.2, b, 0.68, c('#9C7148'), meta, alpha); rbox(list, X0 + 0.45, Y0 + 0.15, X1 - 0.45, Y1 - 0.15, b + 0.68, 0.06, c('#B98B58'), meta, alpha);
+        rbox(list, X0 + 0.1, Y0 + 0.3, X0 + 0.42, Y1 - 0.3, b, 0.45, c('#C9A47A'), meta, alpha); rbox(list, X1 - 0.42, Y0 + 0.3, X1 - 0.1, Y1 - 0.3, b, 0.45, c('#C9A47A'), meta, alpha); }
+      else { rbox(list, X0 + 0.2, Y0 + 0.5, X1 - 0.2, Y1 - 0.5, b, 0.68, c('#9C7148'), meta, alpha); rbox(list, X0 + 0.15, Y0 + 0.45, X1 - 0.15, Y1 - 0.45, b + 0.68, 0.06, c('#B98B58'), meta, alpha);
+        rbox(list, X0 + 0.3, Y0 + 0.1, X1 - 0.3, Y0 + 0.42, b, 0.45, c('#C9A47A'), meta, alpha); rbox(list, X0 + 0.3, Y1 - 0.42, X1 - 0.3, Y1 - 0.1, b, 0.45, c('#C9A47A'), meta, alpha); }
     }
   }
   function floorDecor(t) {

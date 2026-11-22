@@ -516,6 +516,51 @@ export const OPENINGS = {
   window2: { name: '二重窓', note: 'ガラスを2枚に。熱が逃げにくく、水滴もつかない。', u: 1.3, g: 0.6, cost: 5.5, warm: 3, color: '#8DBDE6', learn: 'insulation' },
   door: { name: '扉', note: '出入り口。家に1つは要る。', u: 2.0, cost: 3.5, warm: 1, color: '#7A5A3A', door: true }
 };
+/* 家具と水まわり（最初からついている）。トイレとシャワーは同じ場所のまま種類を替えられる */
+export const FURN = {
+  toilet: { name: '水洗トイレ', group: 'toilet', note: '流すたびに水を6Lほど使い、し尿は浄化槽から下水へ。', d: 1, cost: 0, color: '#F2F2EE' },
+  ctoilet: { name: 'コンポストトイレ', group: 'toilet', note: '水を使わない。おがくずをかけて、し尿を堆肥にして畑へ返す。', d: 1, cost: 30, color: '#C9A47A', learn: 'toilet' },
+  shower: { name: 'シャワー', group: 'shower', note: '1回40Lほど。使った水は排水になる。', d: 1, cost: 0, color: '#CFE3EE' },
+  shower2: { name: '節水シャワー', group: 'shower', note: '浴び心地はそのままで、水は半分くらい。', d: 1, cost: 8, color: '#A9D0E6', learn: 'saving' },
+  bed: { name: 'ベッド', group: 'bed', note: '1人用。', d: 2, cost: 0, color: '#F4F1E8' },
+  table: { name: 'テーブルと椅子', group: 'table', note: '食べる・書く・人を呼ぶ。', d: 2, cost: 0, color: '#B98B58' }
+};
+export const furnCells = (f) => FURN[f.t].d === 1 ? [[f.x, f.y]] : f.r ? [[f.x, f.y], [f.x + 1, f.y]] : [[f.x, f.y], [f.x, f.y + 1]];
+/* 扉から入ってすぐのマス（家具を置かない） */
+function doorCells(d) { const out = new Set(); for (const e in d.open) if (d.open[e] === 'door') for (const [x, y] of edgeCells(e)) if (d.cells[ck(x, y)]) out.add(ck(x, y)); return out; }
+export function furnProblem(d, f, skip = -1) {
+  const dc = doorCells(d);
+  for (const [x, y] of furnCells(f)) {
+    if (!d.cells[ck(x, y)]) return '床の外';
+    if (dc.has(ck(x, y))) return '扉の前はあけておく';
+    for (let i = 0; i < d.furn.length; i++) { if (i === skip) continue; if (furnCells(d.furn[i]).some(([a, b]) => a === x && b === y)) return `${FURN[d.furn[i].t].name}と重なる`; }
+  }
+  return null;
+}
+export function draftMoveFurn(d, i, x, y, r) { const f = { ...d.furn[i], x, y, r }; const p = furnProblem(d, f, i); if (p) return p; d.furn[i] = f; return null; }
+export function draftSwapFurn(d, i, t) { if (FURN[t].group !== FURN[d.furn[i].t].group) return '種類がちがう'; d.furn[i].t = t; return null; }
+/* 最初の家具の置き方：水まわりは扉から遠い隅、ベッドは壁ぎわ、テーブルは窓のそば */
+export function autoFurnish(d, items = ['shower', 'toilet', 'bed', 'table']) {
+  const outer = houseOuterEdges(d), dc = doorCells(d);
+  const doorXY = [...dc].map(k => k.split(',').map(Number))[0] || [0, 0];
+  const wallsOf = (x, y) => outer.filter(o => o.x === x && o.y === y);
+  for (const t of items) {
+    let best = null;
+    for (const k in d.cells) for (const r of FURN[t].d === 1 ? [0] : [0, 1]) {
+      const [x, y] = k.split(',').map(Number), f = { t, x, y, r };
+      if (furnProblem(d, f)) continue;
+      const cs = furnCells(f), far = Math.min(...cs.map(([a, b]) => Math.abs(a - doorXY[0]) + Math.abs(b - doorXY[1])));
+      const walls = cs.reduce((a, [p, q]) => a + wallsOf(p, q).length, 0), wins = cs.reduce((a, [p, q]) => a + wallsOf(p, q).filter(o => d.open[o.e] && d.open[o.e] !== 'door').length, 0);
+      const wet = t === 'shower' || t === 'toilet';
+      const near = (g) => d.furn.some(o => FURN[o.t].group === g && furnCells(o).some(([a, b]) => cs.some(([p, q]) => Math.abs(a - p) + Math.abs(b - q) === 1))) ? 1 : 0;
+      const sc = wet ? walls * 2 + far - wins * 3 + near(t === 'toilet' ? 'shower' : 'toilet') * 5 : t === 'bed' ? walls * 1.5 + far * 0.5 - wins - near('toilet') - near('shower') : wins * 3 + walls - far * 0.2;
+      if (!best || sc > best.sc) best = { f, sc };
+    }
+    if (best) d.furn.push(best.f);
+  }
+  return d;
+}
+export const houseHas = (hs, t) => !!hs?.furn?.some(f => f.t === t);
 export const PV_PRICE = 5.5, BATT_PRICE = 15, EAVES_PRICE = 0.6;   // 太陽光1枚・蓄電池1台・庇は外周1mあたり
 const LABOR = 0.4;   // 値段のうち人件費（近所に回るお金）の割合
 const ck = (x, y) => `${x},${y}`;
@@ -534,7 +579,7 @@ export function houseOuterEdges(hs) {
   return out;
 }
 export const cloneHouse = (hs) => JSON.parse(JSON.stringify(hs));
-export function newHouse(z) { return { z, cells: {}, wall: 'board', roof: 'tin', floor: 'wood', open: {}, eaves: false, pv: 0, batt: 0, eq: { compostToilet: false, saving: false, depth: 0 } }; }
+export function newHouse(z) { return { z, cells: {}, wall: 'board', roof: 'tin', floor: 'wood', open: {}, eaves: false, pv: 0, batt: 0, furn: [], eq: { depth: 0 } }; }
 /* 外側でなくなった辺の窓・扉を外す */
 function tidy(d) { const outer = new Set(houseOuterEdges(d).map(o => o.e)); for (const e in d.open) if (!outer.has(e)) delete d.open[e]; }
 function components(d) {
@@ -590,6 +635,7 @@ export function houseProblems(d) {
   if (components(d).length > 1) out.push('家が2つ以上に分かれている（ひとつながりにする）');
   if (!Object.values(d.open).includes('door')) out.push('扉がない（出入りできない）');
   if (d.pv > n) out.push(`太陽光が屋根（${n}m²）に乗りきらない`);
+  d.furn.forEach((f, i) => { const p = furnProblem(d, f, i); if (p) out.push(`${FURN[f.t].name}が${p === '床の外' ? '床の外に出ている（動かすか、床を戻す）' : p}`); });
   return out;
 }
 /* 見積もり：いまの家 cur から設計 d にするための工事と費用（万円） */
@@ -614,8 +660,7 @@ export function estimate(w, cur, d) {
   if (d.eaves && (!cur.eaves || newWalls)) add('庇', cur.eaves ? newWalls : outD.length, 'm', EAVES_PRICE, true);
   add('屋根の太陽光パネル', Math.max(0, d.pv - cur.pv), '枚', PV_PRICE, false);
   add('蓄電池', Math.max(0, d.batt - cur.batt), '台', BATT_PRICE, false);
-  if (d.eq.compostToilet && !cur.eq.compostToilet) add('コンポストトイレ', 1, '', 30, false);
-  if (d.eq.saving && !cur.eq.saving) add('節水の器具', 1, '', 8, false);
+  for (const f of d.furn) if (FURN[f.t].cost && !houseHas(cur, f.t)) add(`${FURN[f.t].name}に替える`, 1, '', FURN[f.t].cost, false);
   if (d.eq.depth > cur.eq.depth) add('基礎を深く', Math.round((d.eq.depth - cur.eq.depth) / 0.3), '段', Math.max(1, cellsD.length * 0.6), true);
   const total = lines.reduce((a, l) => a + l.cost, 0), local = lines.reduce((a, l) => a + l.local, 0);
   return { lines, total, local, far: total - local, dig, fil, newCells: newCells.length, goneCells: goneCells.length };
@@ -630,7 +675,7 @@ export function buildHouse(s, d) {
   for (const k in d.cells) { const [x, y] = k.split(',').map(Number); w.H[idx(x, y)] = d.z; }
   w.earth = Math.max(0, w.earth + est.dig - est.fil);
   w.house = cloneHouse(d);
-  w.mods.compostToilet = d.eq.compostToilet; w.mods.saving = d.eq.saving; if (d.eq.depth) w.mods.depth = d.eq.depth;
+  w.mods.compostToilet = houseHas(d, 'ctoilet'); w.mods.saving = houseHas(d, 'shower2'); if (d.eq.depth) w.mods.depth = d.eq.depth;
   return null;
 }
 /* 最初の小さな家（4×3m）：斜面の上のほうの平らな段に、等高線に沿って長く。扉は外が同じ段の短い辺、窓は低い側の長い辺に2つ */
@@ -664,6 +709,7 @@ export function starterHouse(w, sp) {
   const along = (side) => houseOuterEdges(d).filter(o => o.dir === side);
   const ds = along(sp.door); d.open[ds[Math.floor(ds.length / 2)].e] = 'door';
   const ws = along(sp.win); if (ws.length >= 3) { d.open[ws[0].e] = 'window'; d.open[ws[ws.length - 1].e] = 'window'; } else if (ws.length) d.open[ws[0].e] = 'window';
+  autoFurnish(d);
   w.house = d;
   return d;
 }
