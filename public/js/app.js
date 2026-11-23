@@ -825,8 +825,8 @@ function houseBody(st) {
   }
   if (st.tab === 'mat') body = `
     <h3>壁 <span class="small">家全体の壁を、この素材で張る</span></h3><div class="mcards">${Object.entries(E.W.WALLS).filter(([, M]) => !M.hidden && (!M.home || M.home === G.s.site)).map(([k, M]) => matCard('wall', k, M, d.wall === k, wallMeters(M))).join('')}</div>
-    ${d.wall === 'bahareque' ? `<div class="seg-o"><span class="small">仕上げ</span><button class="opt${(d.finish || 'earth') === 'earth' ? ' on' : ''}" data-finish="earth">土のまま（骨組みと編み目を見せる）</button><button class="opt${d.finish === 'lime' ? ' on' : ''}" data-finish="lime">しっくいと色の腰壁</button></div>` : ''}
-    ${E.W.WALLS[d.wall].accent ? `<div class="seg-o accents"><span class="small">${(d.finish || 'earth') === 'lime' ? '腰壁（ソカロ）と窓枠の色' : '窓枠と扉の色'}</span>${E.W.ACCENTS.map(([c, n], i) => `<button class="sw${(d.accent ?? 0) === i ? ' on' : ''}" data-accent="${i}" style="--c:${c}" aria-label="${n}" title="${n}"></button>`).join('')}</div>` : ''}
+    ${d.wall === 'bahareque' ? `<div class="seg-o"><span class="small">壁の上の仕上げ</span><button class="opt${(d.finish || 'earth') === 'earth' ? ' on' : ''}" data-finish="earth">土のまま</button><button class="opt${d.finish === 'lime' ? ' on' : ''}" data-finish="lime">しっくい</button></div>` : ''}
+    ${E.W.WALLS[d.wall].accent ? `<div class="seg-o accents"><span class="small">腰壁（ソカロ）と窓枠の色</span>${E.W.ACCENTS.map(([c, n], i) => `<button class="sw${(d.accent ?? 0) === i ? ' on' : ''}" data-accent="${i}" style="--c:${c}" aria-label="${n}" title="${n}"></button>`).join('')}</div>` : ''}
     <h3>屋根 <span class="small">雨を集める面にもなる</span></h3><div class="mcards">${Object.entries(E.W.ROOFS).filter(([, M]) => !M.home || M.home === G.s.site).map(([k, M]) => matCard('roof', k, M, d.roof === k)).join('')}</div>
     ${E.W.ROOFS[d.roof].flat ? `<h3>屋根の形</h3><p class="small" style="margin:0">${esc(E.W.ROOFS[d.roof].name)}は平らだけ。軒は出さず、まわりを低い壁（パラペット）で囲んで、木の樋（カナレ）から雨を落とす。雨樋は要らない。</p>` : roofShapeBlock(d)}
     <h3>床</h3><div class="mcards">${Object.entries(E.W.FLOORS).filter(([, M]) => !M.hidden && (!M.home || M.home === G.s.site)).map(([k, M]) => matCard('floor', k, M, d.floor === k)).join('')}</div>

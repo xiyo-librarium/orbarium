@@ -635,7 +635,7 @@ export const WALLS = {
   thick: { name: '厚い断熱の壁', note: '断熱材を2倍に。冬の寒い土地向け。', u: 0.2, cost: 6.0, unit: '1m', warm: 5, store: 1, color: '#F1E2C2', pat: 'board', learn: 'insulation' },
   /* 土地の工法（home の土地では地元の大工さんの仕事で安く、お金も地域に回る。よその土地では材料を遠くから運ぶので高い）
      quake：地震への強さ（1＝びくともしない）、wet：雨への弱さ（軒で守らないと傷む）、mass：熱をためる重さ（家の重さの段に足す）、upkeep：壁1mあたり年の手入れ（万円） */
-  bahareque: { name: '竹と土壁（バハレケ）', home: 'med', note: '木とグアドゥア竹の骨組みに割った竹を編み、掘った土にカブヤの繊維と石灰を混ぜて塗る。骨組みは見せて、ところどころ編み目ものぞかせる。軽くしなって地震に強い。雨に弱いので深い軒で守る。仕上げは土のままか、しっくいと色の腰壁（ソカロ）か。', u: 1.5, cost: 2.0, warm: 2, store: 2, mass: 1, quake: 0.9, wet: 0.8, color: '#F2EEE4', pat: 'bahareque', accent: true },
+  bahareque: { name: '竹と土壁（バハレケ）', home: 'med', note: 'グアドゥア竹の骨組みに割った竹を編み、カブヤの繊維と石灰を混ぜた土を塗る。軽くしなって地震に強い。雨に弱いので深い軒で守る。上は土のままか、しっくいか。下の腰壁（ソカロ）と窓枠は好きな色に。', u: 1.5, cost: 2.0, warm: 2, store: 2, mass: 1, quake: 0.9, wet: 0.8, color: '#F2EEE4', pat: 'bahareque', accent: true },
   brick: { name: '赤れんが（ラドリージョ）', home: 'med', hidden: true, note: '谷の窯で焼いた赤いれんがを、鉄筋コンクリートの枠で固めて積む。メデジンの町の色。重くて熱をためる。雨に強い。', u: 2.0, cost: 3.2, warm: 1, store: 3, mass: 1, quake: 0.65, wet: 0.05, color: '#B4593B', pat: 'brick' },
   tapia: { name: '版築（タピア・ピサダ）', home: 'med', hidden: true, note: '板の型枠に土を入れて突き固め、50cmずつ積み上げる。植民地時代の町の壁。とても重く熱をためるが、地震と雨に弱い。', u: 1.1, cost: 2.6, warm: 2, store: 4, mass: 2, quake: 0.25, wet: 0.65, color: '#D2A675', pat: 'tapia' },
   adobe: { name: '日干しれんが（アドベ）', home: 'taos', note: '土とわらを型に入れて日に干したれんがを積み、泥を塗る。昼の日差しを夜まで溜める。外の泥は毎年塗り直す（手入れの日）。', u: 1.2, cost: 2.4, warm: 2, store: 4, mass: 2, quake: 0.3, wet: 0.55, upkeep: 0.08, color: '#D6AC7C', pat: 'adobe', vigas: true, frame: '#3B8FB2' },

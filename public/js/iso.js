@@ -691,7 +691,7 @@ export function createView(canvas, world, opt = {}) {
       const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number);
       for (const [px, py] of t === 'h' ? [[ex, ey], [ex + 1, ey]] : [[ex, ey], [ex, ey + 1]]) { const k = px + ',' + py, e = vtx.get(k) || { h: 0, v: 0, low: false }; e[t]++; if (!(v.wallMode === 'up' || (v.wallMode === 'cut' && !FRONT.includes(o.dir)))) e.low = true; vtx.set(k, e); }
     }
-    const trim = wallKind(hs) === 'bahareque' ? '#7E5E38' : { board: '#8F6B47', brick: '#8E4630', tapia: WALLS.tapia.color, adobe: WALLS.adobe.color, strawbale: WALLS.strawbale.color }[hs.wall] || '#F3EEE3';
+    const trim = wallKind(hs) === 'bahareque' ? '#C4A079' : { board: '#8F6B47', brick: '#8E4630', tapia: WALLS.tapia.color, adobe: WALLS.adobe.color, strawbale: WALLS.strawbale.color }[hs.wall] || '#F3EEE3';
     for (const [k, e] of vtx) {
       if (!e.h || !e.v) continue; const [px, py] = k.split(',').map(Number); if (px < x0 - 1 || px > x1 + 1 || py < y0 - 1 || py > y1 + 1) continue;
       const P2 = T / 2 + 0.025; rbox(list, px - P2, py - P2, px + P2, py + P2, z, v.top ? HOUSE_H + 0.01 : e.low ? LOW + 0.01 : HOUSE_H, trim, { type: 'trim', nopick: true }, 1);
@@ -1027,31 +1027,25 @@ export function createView(canvas, world, opt = {}) {
     return (cx, p) => {
       const span = z1 - z0, fy = (zz) => (zz - z0) / span, Q = (a0, b0, a1, b1, f) => quadOn(cx, p, a0, b0, a1, b1, f);
       const band = (za, zb, f) => { const a = Math.max(0, fy(za)), b = Math.min(1, fy(zb)); if (b > a) Q(0, a, 1, b, f); };
-      if (kind === 'bahareque') {   // 土のまま：カブヤの繊維と石灰を混ぜた土。木の柱と梁を見せ、ところどころ割り竹の編み目をのぞかせる
+      const zocalo = () => {   // 腰壁（ソカロ）：下の90cmを色で塗り、浮き彫りの枠とひし形の模様。上との境に白い線
+        if (!(z0 < 0.9 && accent)) return;
+        band(0, 0.9, accent);
+        const a = Math.max(0, fy(0.12)), b = Math.min(1, fy(0.78));
+        if (b > a) { Q(0.1, a, 0.9, b, 'rgba(255,255,255,.16)'); Q(0.13, a + (b - a) * 0.08, 0.87, b - (b - a) * 0.08, 'rgba(0,0,0,.10)');
+          const mid = (a + b) / 2, hh = (b - a) * 0.32, c0 = faceAt(p, 0.5, mid - hh), c1 = faceAt(p, 0.62, mid), c2 = faceAt(p, 0.5, mid + hh), c3 = faceAt(p, 0.38, mid);
+          cx.fillStyle = 'rgba(255,255,255,.55)'; cx.beginPath(); cx.moveTo(c0[0], c0[1]); cx.lineTo(c1[0], c1[1]); cx.lineTo(c2[0], c2[1]); cx.lineTo(c3[0], c3[1]); cx.closePath(); cx.fill(); }
+        band(0.88, 0.92, 'rgba(255,255,255,.7)');
+      };
+      if (kind === 'bahareque') {   // 土のまま：カブヤの繊維と石灰を混ぜた土塗りの、やわらかい色むら。下は色の腰壁
         const W = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]);
         for (let i = 0; i < 6; i++) { const [px, py] = faceAt(p, hash(seed, i, 61), hash(seed, i, 62)), rr = W * (0.15 + hash(seed, i, 63) * 0.3), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, i % 3 ? 'rgba(236,214,176,.30)' : 'rgba(112,78,46,.18)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.fillRect(px - rr, py - rr, rr * 2, rr * 2); }
         cx.lineWidth = 0.7 * v.dpr;   // 土にまぜたカブヤの繊維
-        for (let i = 0; i < 34; i++) { const a = hash(seed, i, 64), b = hash(seed, i, 65), ang = hash(seed, i, 66) * 6.28, L = 0.03 + hash(seed, i, 67) * 0.05, A = faceAt(p, a, b), B = faceAt(p, Math.min(1, a + Math.cos(ang) * L), Math.min(1, Math.max(0, b + Math.sin(ang) * L * 1.6))); cx.strokeStyle = i % 2 ? 'rgba(244,228,192,.55)' : 'rgba(96,66,36,.32)'; lineOn(cx, A, B); }
-        if (hash(seed, 1, 60) > 0.55 && z0 <= 1.05 && z1 >= 1.95) {   // 編み目の窓：割った竹を縦横に編んだ下地が見える
-          const a0 = 0.24, a1 = 0.76, b0 = fy(1.1), b1 = fy(1.9), nx = 5, ny = 6;
-          Q(a0 - 0.02, b0 - 0.02 / span, a1 + 0.02, b1 + 0.02 / span, 'rgba(246,232,204,.55)');   // 土の切り口
-          Q(a0, b0, a1, b1, '#8C6B40');
-          for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) { const u0 = a0 + (a1 - a0) * i / nx, u1 = a0 + (a1 - a0) * (i + 1) / nx, w0 = b0 + (b1 - b0) * j / ny, w1 = b0 + (b1 - b0) * (j + 1) / ny, over = (i + j) % 2; Q(u0 + 0.004, w0 + 0.004 / span, u1 - 0.004, w1 - 0.004 / span, over ? '#D8B676' : '#B48F55'); Q(over ? u0 + 0.004 : u0 + 0.004, over ? w1 - 0.02 / span : w0 + 0.004 / span, u1 - 0.004, over ? w1 - 0.004 / span : w0 + 0.018 / span, 'rgba(60,40,18,.28)'); }
-        }
-        const post = (a, b) => { Q(a, 0, b, 1, '#8A6A3E'); Q(a, 0, a + (b - a) * 0.35, 1, 'rgba(255,232,190,.22)'); for (let zz = Math.ceil(z0 / 0.45) * 0.45; zz < z1; zz += 0.45) Q(a, fy(zz), b, Math.min(1, fy(zz) + 0.018 / span), 'rgba(50,32,14,.55)'); };   // 竹の柱と節
-        if ((seed & 1) === 0) post(0, 0.07);
-        band(0, 0.09, '#7E5E38'); band(HOUSE_H - 0.16, HOUSE_H, '#7A5A34'); band(HOUSE_H - 0.16, HOUSE_H - 0.13, 'rgba(255,232,190,.25)');   // 土台と梁
+        for (let i = 0; i < 30; i++) { const a = hash(seed, i, 64), b = hash(seed, i, 65), ang = hash(seed, i, 66) * 6.28, L = 0.03 + hash(seed, i, 67) * 0.05, A = faceAt(p, a, b), B = faceAt(p, Math.min(1, a + Math.cos(ang) * L), Math.min(1, Math.max(0, b + Math.sin(ang) * L * 1.6))); cx.strokeStyle = i % 2 ? 'rgba(244,228,192,.5)' : 'rgba(96,66,36,.28)'; lineOn(cx, A, B); }
+        zocalo();
       } else if (kind === 'bahareque_lime') {   // しっくいの白い壁。ところどころ土色がにじみ、下は色を塗った腰壁（ソカロ）に浮き彫りの模様
         const W = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]);
         for (let i = 0; i < 3; i++) { const [px, py] = faceAt(p, hash(seed, i, 41), Math.min(1, Math.max(0, fy(0.9 + hash(seed, i, 42) * 2)))), rr = W * (0.12 + hash(seed, i, 43) * 0.18), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, 'rgba(176,140,98,.16)'); gr.addColorStop(1, 'rgba(176,140,98,0)'); cx.fillStyle = gr; cx.fillRect(px - rr, py - rr, rr * 2, rr * 2); }
-        if (z0 < 0.9 && accent) {
-          band(0, 0.9, accent);
-          const a = Math.max(0, fy(0.12)), b = Math.min(1, fy(0.78));
-          if (b > a) { Q(0.1, a, 0.9, b, 'rgba(255,255,255,.16)'); Q(0.13, a + (b - a) * 0.08, 0.87, b - (b - a) * 0.08, 'rgba(0,0,0,.10)');   // 浮き彫りの枠
-            const mid = (a + b) / 2, hh = (b - a) * 0.32, c0 = faceAt(p, 0.5, mid - hh), c1 = faceAt(p, 0.62, mid), c2 = faceAt(p, 0.5, mid + hh), c3 = faceAt(p, 0.38, mid);
-            cx.fillStyle = 'rgba(255,255,255,.55)'; cx.beginPath(); cx.moveTo(c0[0], c0[1]); cx.lineTo(c1[0], c1[1]); cx.lineTo(c2[0], c2[1]); cx.lineTo(c3[0], c3[1]); cx.closePath(); cx.fill(); }   // ひし形の模様
-          band(0.88, 0.92, 'rgba(255,255,255,.7)');
-        }
+        zocalo();
       } else if (kind === 'brick') {   // 赤れんが：15cmごとの段、目地は段ごとにずらす。1つずつ焼き色がちがう
         const B = 0.15, n = 4;
         for (let k = Math.floor(z0 / B); k * B < z1; k++) {
