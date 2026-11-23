@@ -39,7 +39,7 @@ const ICON = {
   erase: '<path d="M14.5 4.5l5 5-9 9H6l-3-3z"/><path d="M9.5 18.5H21"/>'
 };
 const TOOLS = [
-  { id: 'house', name: '家', hint: '地面をなぞって床を描く。建物にくっつけると広がる。壁を押すと 壁→窓→扉' },
+  { id: 'house', name: '家', hint: '地面をなぞって床を描く。建物にくっつけると広がる。壁を押すと窓や扉を選べる' },
   { id: 'field', name: '畑', hint: '地面をなぞって畑を作る（段々になる）。畑を押すたびに 裸地→マルチ→覆い' },
   { id: 'tree', name: '木', subs: [['tree', '果樹'], ['hedge', '生け垣']], hint: '押すと植える、なぞると並べる。ある木を押すと詳しく' },
   { id: 'water', name: '水', subs: [['tank', 'タンク'], ['pond', '池'], ['filter', '排水の庭'], ['pump', 'ポンプ']],
@@ -54,7 +54,8 @@ const TOOLS = [
 const SUBLEARN = { tree: { tree: 'hedge', hedge: 'hedge' }, water: { tank: null, pond: 'pond', filter: 'grey', pump: null }, shed: { heap: 'heap', coop: 'chicken' }, terrain: { up: null, down: null, level: null, stone: 'terrace' } };
 const SAVE = 'orbarium-next-1';
 const TOUCH = matchMedia('(pointer: coarse)').matches;
-const HINT_NEAR = TOUCH ? '物を押すと詳しく。作るのは下の道具で。1本指で回す・2本指で寄る' : '物を押すと詳しく。作るのは下の道具で。ドラッグで回す・ホイールで寄る';
+const HINT_NEAR = TOUCH ? '物を押すと詳しく。壁を押すと窓や扉に。1本指で回す・2本指で寄る' : '物を押すと詳しく。壁を押すと窓や扉に。ドラッグで回す・ホイールで寄る';
+const HINT_CUT = TOUCH ? '家具を押すと回す・種類。家具を引きずると動く。壁を押すと窓や扉に' : '家具を押すと回す・種類。家具をドラッグすると動く。壁を押すと窓や扉に';
 
 async function boot() {
   // どの土地で、どこから始めるか
@@ -142,7 +143,8 @@ async function boot() {
   addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); (e.shiftKey ? $('#redo') : $('#undo')).click(); } if (e.key === 'Escape') { if (G.draft) setDraft(null); else { setTool(null); select(null); } } if (e.key === 'Enter' && G.draft) $('#draftYes').click(); });
 
   /* ---------- 壁を下げて中を見る ---------- */
-  $('#cut').onclick = () => { stage.cut = !stage.cut; $('#cut').setAttribute('aria-pressed', String(stage.cut)); stage.rebuild(); toast(stage.cut ? '壁を下げた。家具と水まわりが見える' : '壁を戻した'); };
+  const setCut = (on) => { stage.cut = on; $('#cut').setAttribute('aria-pressed', String(on)); if (!on) selectFurn(null); stage.rebuild(); setHint(); if (PK) renderPick(); toast(on ? (TOUCH ? '壁を下げた。家具は押すと回す・引きずると動く' : '壁を下げた。家具は押すと回す・ドラッグで動く') : '壁を戻した'); };
+  $('#cut').onclick = () => setCut(!stage.cut);
 
   /* ---------- 短いお知らせ・指のそばの予告 ---------- */
   let toastT = 0;
@@ -184,7 +186,7 @@ async function boot() {
     const h = $('#hint');
     if (G.mode === 'map') { h.innerHTML = `寄りたい所を押す · <a href="/">今の版へ</a>`; return; }
     const T = G.tool && TOOLS.find(t => t.id === G.tool);
-    if (!T) { h.textContent = HINT_NEAR; return; }
+    if (!T) { h.textContent = stage.cut ? HINT_CUT : HINT_NEAR; return; }
     h.textContent = (T.hints ? T.hints[G.sub[T.id]] : T.hint) + (traces(T.id) ? (TOUCH ? '（回すのは2本指）' : '（回すのは右ボタン）') : '');
   }
 
@@ -291,7 +293,7 @@ async function boot() {
   function houseDraft(d, base, cuts) {
     const bx = W.roofBox(d), n = Object.keys(d.cells).length;
     return { what: base ? `${base === 'main' ? '母屋' : '建物'}を広げる（床${n}m²に）` : `新しい建物 ${bx.X1 - bx.X0}×${bx.Y1 - bx.Y0}m`, house: { d, hideId: base }, cuts, kind: 'house',
-      note: '壁を押すと 壁→窓→扉、なぞり直すと形が変わる', done: base ? '床を広げた' : '建てた。押すと使い道を選べる',
+      note: '壁を押すと窓や扉を選べる。なぞり直すと形が変わる', done: base ? '床を広げた' : '建てた。押すと使い道を選べる',
       apply: (t) => { for (const [x, y] of cuts) { const err = W.cutTree(t, x, y); if (err) return err; }
         if (d.id && /^b\d+$/.test(d.id)) t.world.nextB = Math.max(t.world.nextB || 0, +d.id.slice(1));
         const err = W.buildBuilding(t, d); if (err) return err; autoGutter(t); return null; } };
@@ -309,14 +311,11 @@ async function boot() {
     if (!D.base) { if (Object.keys(d.cells).length < 4) { toast('床は4m²（2×2m）より広く'); return; } autoOpen(d); }
     setDraft(houseDraft(d, D.base ? W.bid(D.base) : null, cuts));
   }
-  // 下書きの壁を押す：壁→窓→扉
+  // 下書きの壁を押す：その場に選択肢
   function draftWallTap(p) {
     const D = G.draft; if (!D || !D.house) return;
-    if (stage.cut) { toast('壁を下げている間は、窓や扉は変えない'); return; }
-    const e = nearestEdge(D.house.d, p.point, p.normal); if (!e) { toast('外壁を押すと 壁→窓→扉'); return; }
-    const d = W.cloneHouse(D.house.d), cur = d.open[e], next = !cur ? 'window' : cur === 'window' || cur === 'window2' ? 'door' : null;
-    if (next) d.open[e] = next; else delete d.open[e];
-    setDraft(houseDraft(d, D.house.hideId, D.cuts));
+    const e = nearestEdge(D.house.d, p.point, p.normal, stage.cut); if (!e) { toast('外壁を押すと、窓や扉を選べる'); return; }
+    openPick({ draft: true, e });
   }
 
   /* 畑・小屋・池・地形の下書き（なぞった四角の中のマス） */
@@ -383,7 +382,7 @@ async function boot() {
   // 押した点にいちばん近い外壁の辺（50cm 以内）
   // 押した所が外壁か：壁の線の外側（または外を向いた面）で、壁の厚み・腰壁・窓台の出っぱりの中、高さが壁の範囲。
   // 床や家具（壁の内側）、屋根、足もとの石は除く
-  function nearestEdge(b, pt, normal) {
+  function nearestEdge(b, pt, normal, any = false) {
     if (!normal || pt.y < b.z - 0.05 || pt.y > b.z + W.HOUSE_H + 0.05) return null;
     const px = pt.x, py = pt.z; let best = null, bd = 1e9;
     for (const o of W.houseOuterEdges(b)) {
@@ -393,20 +392,166 @@ async function boot() {
       const [ox, oy] = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] }[o.dir];
       const sd = (px - ax) * ox + (py - ay) * oy;   // 壁の線から外へどれだけ
       const facing = normal.x * ox + normal.z * oy >= 0.5, outside = sd >= -0.02 && pt.y > b.z + 0.3;
-      if (Math.abs(sd) > 0.27 || !(facing || outside)) continue;
+      if (Math.abs(sd) > (any ? 0.125 : 0.27) || !(any || facing || outside)) continue;
       if (Math.abs(sd) < bd) { bd = Math.abs(sd); best = o; }
     }
     return best ? best.e : null;
   }
-  // 壁を押す：壁→窓→扉→壁
+  // 壁を押す：その場に［壁｜窓｜二重窓｜扉］。外れたところ（床・屋根）は建物のカード
   function wallTap(p) {
-    const w = s.world, b = W.buildingById(w, p.id); if (!b) return;
-    if (stage.cut) { select(p); toast('壁を下げている間は、窓や扉は変えない（上のボタンで壁を戻す）'); return; }   // 中を見ているときに、床のつもりで壁を押してしまわないように
-    const e = nearestEdge(b, p.point, p.normal); if (!e) { select(p); return; }
-    const best = { e };
-    const cur = b.open[best.e], next = !cur ? 'window' : cur === 'window' || cur === 'window2' ? 'door' : null;
-    act(() => { const d = W.cloneHouse(b); const err = W.draftSetOpening(d, best.e, next); if (err) return err; return W.buildBuilding(s, d); }, next === 'window' ? '窓にした' : next === 'door' ? '扉にした' : '壁にした');
+    const b = W.buildingById(s.world, p.id); if (!b) return;
+    const e = nearestEdge(b, p.point, p.normal, stage.cut);
+    if (!e) { if (stage.cut) { const h = furnHit(p); if (h) { selectFurn(h); return; } } select(p); return; }
+    openPick({ id: p.id, e });
   }
+
+  /* ---------- 壁の選択肢：Tiny Glade や The Sims のように、押した壁のそばに出す。
+     1回押せば決まる（取り消せる）。扉で家具がじゃまなら、家具のほうをよける ---------- */
+  const OPTS = [['', '壁', '熱が逃げにくい。光も風も入らない'], ['window', '窓', W.OPENINGS.window.note], ['window2', '二重窓', W.OPENINGS.window2.note], ['door', '扉', W.OPENINGS.door.note]];
+  const pk = document.createElement('div'); pk.className = 'pick'; pk.hidden = true; document.body.appendChild(pk);
+  const markMat = new THREE.MeshBasicMaterial({ color: 0xF0B84A, transparent: true, opacity: 0.5, depthWrite: false });
+  const wallMark = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), markMat); wallMark.visible = false; wallMark.renderOrder = 6; v.scene.add(wallMark);
+  let PK = null;
+  const pkHouse = () => PK && (PK.draft ? G.draft?.house?.d : W.buildingById(s.world, PK.id));
+  const edgeMid = (b, e) => { const [t, r] = e.split(':'), [ex, ey] = r.split(',').map(Number), along = t === 'h'; return { along, x: along ? ex + 0.5 : ex, y: along ? ey : ey + 0.5 }; };
+  function openPick(o) { select(null); selectFurn(null); PK = o; renderPick(); }
+  function closePick() { PK = null; pk.hidden = true; wallMark.visible = false; v.req(); }
+  function pickOptions(b, e) {
+    const cur = b.open[e] || '';
+    return OPTS.map(([t, name, note]) => {
+      const o = { t, name, note, cur: cur === t };
+      if (t && W.OPENINGS[t].learn && !knows(W.OPENINGS[t].learn)) { o.lock = true; return o; }
+      if (o.cur) return o;
+      const d = W.cloneHouse(b); W.draftSetOpening(d, e, t || null); const st = W.settleFurn(d); o.moved = st.moved;
+      const pr = W.houseProblems(d); if (pr.length) { o.why = pr[0].replace('（出入りできない）', ''); return o; }
+      if (!PK.draft) { const tt = scratch(); const err = W.buildBuilding(tt, d); if (err) o.why = err; else o.cost = s.cash - tt.cash; }
+      return o;
+    });
+  }
+  function renderPick() {
+    const b = pkHouse(); if (!b || !W.houseOuterEdges(b).some(x => x.e === PK.e)) { closePick(); return; }
+    const opts = pickOptions(b, PK.e), cur = opts.find(o => o.cur) || opts[0];
+    const price = (o) => o.cur ? 'いま' : o.lock ? '🔒 まだ' : o.why ? '選べない' : PK.draft ? '' : Math.abs(o.cost) < 0.05 ? '0円' : (o.cost > 0 ? '−' : '+') + yen(Math.abs(o.cost));
+    pk.innerHTML = `<div class="pick-h"><b>この壁</b><span class="sub">${PK.draft ? '下書き' : W.WALLS[b.wall].name}</span><button class="x" data-p="x" aria-label="閉じる">×</button></div>
+      <div class="pick-o">${opts.map(o => `<button data-p="${o.t || 'wall'}" class="${o.cur ? 'on' : ''}" ${o.lock || o.why ? 'disabled' : ''} title="${BK.esc(o.why || o.note)}"><i class="op op-${o.t || 'wall'}"></i><b>${o.name}</b><span>${price(o)}</span></button>`).join('')}</div>
+      <p class="pick-n">${BK.esc(cur.note)}${opts.filter(o => o.why && !o.lock).map(o => `<br><span class="bad">${o.name}：${BK.esc(o.why)}</span>`).join('')}${opts.find(o => o.t === 'door' && !o.cur && o.moved?.length && !o.why) ? `<br>扉にすると、${opts.find(o => o.t === 'door').moved.join('・')}を近くへよける` : ''}</p>
+      ${PK.draft ? '' : '<button class="pick-more" data-p="more">建物ぜんたい（工法・屋根・設備）</button>'}`;
+    pk.hidden = false;
+    const m = edgeMid(b, PK.e), h = stage.cut ? 1.12 : W.HOUSE_H + 0.04;
+    wallMark.scale.set(m.along ? 1.04 : 0.32, h, m.along ? 0.32 : 1.04); wallMark.position.set(m.x, b.z + h / 2, m.y); wallMark.visible = true; v.req();
+    placePick();
+  }
+  function placePick() {
+    if (pk.hidden || !PK) return; const b = pkHouse(); if (!b) return;
+    if (innerWidth <= 640) { pk.style.left = pk.style.top = ''; return; }
+    const m = edgeMid(b, PK.e), a = toScreen(new THREE.Vector3(m.x, b.z + (stage.cut ? 1.1 : W.HOUSE_H), m.y)), w2 = pk.offsetWidth, h2 = pk.offsetHeight;
+    let y = a.y - h2 - 18; if (y < 64) y = a.y + 40; y = Math.min(innerHeight - h2 - 120, Math.max(64, y));
+    pk.style.left = Math.max(10, Math.min(innerWidth - w2 - 10, a.x - w2 / 2)) + 'px'; pk.style.top = y + 'px';
+  }
+  pk.onclick = (ev) => {
+    const bt = ev.target.closest('[data-p]'); if (!bt || bt.disabled || !PK) return;
+    const k = bt.dataset.p;
+    if (k === 'x') { closePick(); return; }
+    if (k === 'more') { const id = PK.id; closePick(); select({ kind: 'building', id }); return; }
+    const t = k === 'wall' ? null : k, name = OPTS.find(o => o[0] === (t || ''))[1];
+    if (PK.draft) {
+      const D = G.draft, d = W.cloneHouse(D.house.d); W.draftSetOpening(d, PK.e, t); const st = W.settleFurn(d);
+      setDraft(houseDraft(d, D.house.hideId, D.cuts)); if (st.moved.length) toast(`${st.moved.join('・')}をよけた`); renderPick(); return;
+    }
+    let moved = [];
+    act(() => { const b = W.buildingById(s.world, PK.id), d = W.cloneHouse(b); const err = W.draftSetOpening(d, PK.e, t); if (err) return err; moved = W.settleFurn(d).moved; return W.buildBuilding(s, d); },
+      (spent) => `${name}にした${moved.length ? `。${moved.join('・')}をよけた` : ''}${Math.abs(spent) > 0.05 ? `（${spent > 0 ? '−' : '+'}${yen(Math.abs(spent))}）` : ''}`);
+    renderPick();
+  };
+
+  /* ---------- 家具：壁を下げているときに、押すと選ぶ（回す・種類）、引きずると動く ---------- */
+  const fbar = document.createElement('div'); fbar.className = 'pick furnbar'; fbar.hidden = true; document.body.appendChild(fbar);
+  const fmarkG = new THREE.Group(); fmarkG.renderOrder = 6; v.scene.add(fmarkG);
+  const fmGeo = new THREE.BoxGeometry(0.94, 0.05, 0.94), fmOk = new THREE.MeshBasicMaterial({ color: 0x7FB069, transparent: true, opacity: 0.4, depthWrite: false }),
+    fmBad = new THREE.MeshBasicMaterial({ color: 0xD0584A, transparent: true, opacity: 0.55, depthWrite: false }), fmSel = new THREE.MeshBasicMaterial({ color: 0xF0B84A, transparent: true, opacity: 0.5, depthWrite: false });
+  function showFoot(cells, z, mat, frame = false) {
+    fmarkG.clear(); const inC = (x, y) => cells.some(c => c[0] === x && c[1] === y);
+    if (!frame) { for (const [x, y] of cells) { const m = new THREE.Mesh(fmGeo, mat); m.scale.y = 9; m.position.set(x + 0.5, z + 0.23, y + 0.5); m.renderOrder = 6; fmarkG.add(m); } }   // 置く先：家具の高さくらいの半透明の箱
+    else for (const [x, y] of cells) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {   // 選んだ家具は、まわりを縁どる
+      if (inC(x + dx, y + dy)) continue; const m = new THREE.Mesh(fmGeo, mat);
+      m.scale.set(dx ? 0.07 : 1.06, 1.6, dy ? 0.07 : 1.06); m.position.set(x + 0.5 + dx * 0.47, z + 0.04, y + 0.5 + dy * 0.47); m.renderOrder = 6; fmarkG.add(m);
+    }
+    v.req();
+  }
+  // 押した点の下の家具（壁を下げているときだけ）
+  function furnHit(p) {
+    if (!stage.cut || !p || p.kind !== 'building') return null;
+    const b = W.buildingById(s.world, p.id); if (!b || p.point.y > b.z + 1.3) return null;
+    const c = cellOf(p.point), i = (b.furn || []).findIndex(f => W.furnCells(f).some(([x, y]) => x === c.x && y === c.y));
+    return i < 0 ? null : { id: p.id, i, cell: c };
+  }
+  let FS = null;   // 選んでいる家具 { id, i }
+  function selectFurn(h) {
+    FS = h ? { id: h.id, i: h.i } : null;
+    if (!FS) { fbar.hidden = true; fmarkG.clear(); v.req(); return; }
+    closePick(); select(null); renderFurn();
+  }
+  function renderFurn() {
+    const b = FS && W.buildingById(s.world, FS.id), f = b?.furn?.[FS.i]; if (!f) { selectFurn(null); return; }
+    const F = W.FURN[f.t], alts = Object.entries(W.FURN).filter(([k, x]) => x.group === F.group && k !== f.t && k !== 'stove');
+    fbar.innerHTML = `<div class="pick-h"><b>${F.name}</b><button class="x" data-f="x" aria-label="閉じる">×</button></div>
+      <div class="pick-o">${F.d > 1 || f.t !== 'shower' ? '<button data-f="rot"><i class="op op-rot"></i><b>回す</b><span>90°</span></button>' : ''}
+      ${[[f.t, F], ...alts].length > 1 ? [[f.t, F], ...alts].map(([k, x]) => `<button data-f="t:${k}" class="${k === f.t ? 'on' : ''}" ${x.learn && !knows(x.learn) ? 'disabled' : ''}><b>${x.name.replace('トイレ', '').replace('シャワー', '') || x.name}</b><span>${k === f.t ? 'いま' : x.learn && !knows(x.learn) ? '🔒 まだ' : x.cost ? '−' + yen(x.cost) : '0円'}</span></button>`).join('') : ''}</div>
+      <p class="pick-n">${BK.esc(F.note)}<br>${TOUCH ? '引きずると動く' : 'ドラッグすると動く'}（緑は置ける・赤は置けない）</p>`;
+    fbar.hidden = false; showFoot(W.furnCells(f), b.z, fmSel, true); placeFbar();
+  }
+  function placeFbar() {
+    if (fbar.hidden || !FS) return; const b = W.buildingById(s.world, FS.id), f = b?.furn?.[FS.i]; if (!f) return;
+    if (innerWidth <= 640) { fbar.style.left = fbar.style.top = ''; return; }
+    // 家具を隠さないよう、画面に映る家具の外側（上、だめなら下、だめなら横）に置く
+    const pts = []; for (const [x, y] of W.furnCells(f)) for (const [ox, oy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) for (const h of [0, 1]) pts.push(toScreen(new THREE.Vector3(x + ox, b.z + h, y + oy)));
+    const L = Math.min(...pts.map(q => q.x)), R = Math.max(...pts.map(q => q.x)), T0 = Math.min(...pts.map(q => q.y)), B0 = Math.max(...pts.map(q => q.y)), w2 = fbar.offsetWidth, h2 = fbar.offsetHeight;
+    let x = (L + R) / 2 - w2 / 2, y = T0 - h2 - 14;
+    if (y < 64) { y = B0 + 14; if (y + h2 > innerHeight - 120) { y = (T0 + B0) / 2 - h2 / 2; x = R + 16 + w2 < innerWidth - 10 ? R + 16 : L - 16 - w2; } }
+    fbar.style.left = Math.max(10, Math.min(innerWidth - w2 - 10, x)) + 'px'; fbar.style.top = Math.max(64, Math.min(innerHeight - h2 - 120, y)) + 'px';
+  }
+  fbar.onclick = (ev) => {
+    const bt = ev.target.closest('[data-f]'); if (!bt || bt.disabled || !FS) return;
+    const k = bt.dataset.f, { id, i } = FS;
+    if (k === 'x') { selectFurn(null); return; }
+    if (k === 'rot') act(() => { const d = W.cloneHouse(W.buildingById(s.world, id)); const err = W.draftRotateFurn(d, i, 1); if (err) return err; return W.buildBuilding(s, d); }, '回した');
+    else if (k.startsWith('t:')) { const t = k.slice(2); act(() => { const d = W.cloneHouse(W.buildingById(s.world, id)); const err = W.draftSwapFurn(d, i, t); if (err) return err; return W.buildBuilding(s, d); }, `${W.FURN[t].name}に`); }
+    if (FS) renderFurn();
+  };
+  // 引きずって動かす：家具の上で押したときだけ、視点を回す代わりに家具をつかむ（The Sims・あつ森と同じ）
+  let FD = null; const ray = new THREE.Raycaster(), plane = new THREE.Plane();
+  const floorCell = (e, z) => { ray.setFromCamera(ndcOf(e), v.camera); plane.set(new THREE.Vector3(0, 1, 0), -z); const q = ray.ray.intersectPlane(plane, new THREE.Vector3()); return q ? cellOf(q) : null; };
+  canvas.addEventListener('pointerdown', (e) => {
+    if (FD && FD.pid !== e.pointerId) { FD = null; FS ? renderFurn() : fmarkG.clear(); return; }   // 2本目の指：つかむのをやめて、視点に任せる
+    if (e.button !== 0 || G.mode !== 'near' || !stage.cut || G.draft || (G.tool && G.tool !== 'house')) return;
+    const p = stage.pick(ndcOf(e)); if (!p || p.kind !== 'building') return;
+    const b = W.buildingById(s.world, p.id); if (nearestEdge(b, p.point, p.normal, true)) return;
+    const h = furnHit(p); if (!h) return;
+    e.stopImmediatePropagation(); canvas.setPointerCapture(e.pointerId);
+    const f = b.furn[h.i]; FD = { ...h, pid: e.pointerId, x: e.clientX, y: e.clientY, ts: e.timeStamp, dx: h.cell.x - f.x, dy: h.cell.y - f.y, z: b.z, drag: false, to: null };
+  }, { capture: true });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!FD || e.pointerId !== FD.pid) return; e.stopImmediatePropagation();
+    if (!FD.drag && Math.hypot(e.clientX - FD.x, e.clientY - FD.y) < 8) return;
+    if (!FD.drag) { FD.drag = true; fbar.hidden = true; closePick(); select(null); }
+    const c = floorCell(e, FD.z); if (!c) return;
+    const b = W.buildingById(s.world, FD.id), f = b.furn[FD.i], g = { ...f, x: c.x - FD.dx, y: c.y - FD.dy };
+    if (FD.to && FD.to.x === g.x && FD.to.y === g.y) return;
+    const why = W.furnProblem(b, g, FD.i); FD.to = { x: g.x, y: g.y, why };
+    showFoot(W.furnCells(g), b.z, why ? fmBad : fmOk);
+    if (why) tip(why, e.clientX, e.clientY); else $('#tip').hidden = true;
+  }, { capture: true });
+  const fup = (e) => {
+    if (!FD || e.pointerId !== FD.pid) return; e.stopImmediatePropagation();
+    const d0 = FD; FD = null; $('#tip').hidden = true;
+    if (!d0.drag) { if (e.type === 'pointerup') selectFurn(d0); return; }
+    const b = W.buildingById(s.world, d0.id), f = b.furn[d0.i];
+    if (!d0.to || (d0.to.x === f.x && d0.to.y === f.y) || e.type !== 'pointerup') { selectFurn(d0); return; }
+    if (d0.to.why) { toast(`ここには置けない：${d0.to.why}`); selectFurn(d0); return; }
+    act(() => { const d = W.cloneHouse(b); const err = W.draftMoveFurn(d, d0.i, d0.to.x, d0.to.y, f.r || 0); if (err) return err; return W.buildBuilding(s, d); }, `${W.FURN[f.t].name}を動かした`);
+    selectFurn(d0);
+  };
+  canvas.addEventListener('pointerup', fup, { capture: true }); canvas.addEventListener('pointercancel', fup, { capture: true });
 
   /* ---------- 水：タンク ---------- */
   const site = () => E.SITES[SITE];
@@ -451,6 +596,7 @@ async function boot() {
     if (['heap', 'coop', 'pond', 'filter'].includes(sel.kind)) { const q = cellOf(sel.point); return blocksAtCell(w, q.x, q.y, sel.kind === 'filter' ? ['media', 'plant'] : [sel.kind]).length > 0; }
     return false; }
   function select(p) {
+    if (p && p.kind !== 'ground') { closePick(); selectFurn(null); }
     if (!p || p.kind === 'ground') { G.sel = null; card.hidden = true; document.body.classList.remove('carded'); v.focusPoint = null; v.req(); return; }
     if (p.kind === 'trees') { const t = treeNear(p.point); if (!t) { select(null); return; } p = { kind: 'tree', t }; }
     G.sel = p; renderCard(); v.focusPoint = anchorOf(p); v.req();
@@ -489,6 +635,7 @@ async function boot() {
       <p class="sub">${bx.X1 - bx.X0}×${bx.Y1 - bx.Y0}m · 床${n}m² · ${W.WALLS[b.wall].name}・${R.name}</p>
       ${id === 'main' ? '' : `<div class="row"><span>使い道</span>${seg('use', [['stay', '泊める'], ['store', 'しまう'], ['grow', '育てる']], use)}</div>`}
       <div class="row"><span>工法</span>${seg('method', [['local', 'この土地の工法'], ['ins', '断熱した', !knows('insulation')]], ins ? 'ins' : 'local')}</div>
+      <div class="row"><span>中</span><div><button class="wide" data-act="inside">${stage.cut ? '壁を戻す' : '中を見る・家具を動かす'}</button></div></div>
       ${roofRow}${fixtures}${power}${rain}
       <p class="note">${U.note}${!knows('insulation') ? ' 断熱は、季節を過ごして学ぶと選べる。' : ''}</p>`;
   }
@@ -542,10 +689,11 @@ async function boot() {
     const y = Math.max(108, Math.min(innerHeight - ch - 130, a.y - ch * 0.35));
     card.style.left = x + 'px'; card.style.top = y + 'px';
   }
-  v.onFrame = placeCard;
+  v.onFrame = () => { placeCard(); placePick(); placeFbar(); };
   card.onclick = (e) => {
     const bt = e.target.closest('[data-act]'); if (!bt || bt.disabled) return;
     const [k, a, c] = bt.dataset.act.split(':'), w = s.world, p = G.sel;
+    if (k === 'inside') { const on = !stage.cut, id = p.id; setCut(on); if (on) { const b0 = W.buildingById(w, id), bx = W.roofBox(b0); select(null); v.flyTo(new THREE.Vector3((bx.X0 + bx.X1) / 2, b0.z, (bx.Y0 + bx.Y1) / 2), Math.max(9, (bx.X1 - bx.X0 + bx.Y1 - bx.Y0) * 1.1), 52, 700); } else renderCard(); return; }
     if (k === 'close') { select(null); return; }
     if (k === 'cut' && p && p.kind === 'tree') { const t = p.t; act(() => W.cutTree(s, t.cx, t.cy), '切った。薪とチップにとっておく'); return; }
     if (!p || p.kind !== 'building') return;
@@ -605,8 +753,10 @@ async function boot() {
     const n = ndcOf(e), p = stage.pick(n);
     if (Q.has('debug')) console.log('tap', G.mode, G.tool, p && p.kind, p && p.id, p && p.point && [p.point.x.toFixed(2), p.point.y.toFixed(2), p.point.z.toFixed(2)].join(','));
     if (G.mode === 'map') { const g = stage.groundAt(n) || p?.point; if (g) flyNear(g); return; }
-    if (G.tool === 'house') { if (p && p.kind === 'draft') draftWallTap(p); else if (p && p.kind === 'building') wallTap(p); else if (!G.draft) toast('地面をなぞって床を描く'); return; }
+    if (G.tool === 'house') { if (p && p.kind === 'draft') draftWallTap(p); else if (p && p.kind === 'building') wallTap(p); else { closePick(); selectFurn(null); if (!G.draft) toast('地面をなぞって床を描く'); } return; }
     if (p && p.kind === 'draft') { toast('下書き：［建てる］か［やめる］を押す'); return; }
+    if (!G.tool && p && p.kind === 'building') { wallTap(p); return; }
+    closePick(); selectFurn(null);
     const sub = G.sub[G.tool], g = stage.groundAt(n), c = g ? cellOf(g) : null, one = c ? { a: c, b: c } : null;
     if (G.tool === 'water' && sub === 'tank') { placeTank(p, n); return; }
     if (G.tool === 'water' && sub === 'pump') { if (c) actFlow(() => W.put(s, c.x, c.y, W.h(s.world, c.x, c.y), 'pump', 'hire'), 'ポンプを置いた'); return; }

@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { matte, hash } from './look.js';
-import { HOUSE_H, roofZ, roofBox, eavesDepth, houseOuterEdges, drainDirs, ACCENTS, WALLS, furnCells } from '/js/world.js';
+import { HOUSE_H, roofZ, roofBox, eavesDepth, houseOuterEdges, drainDirs, ACCENTS, WALLS, furnCells, FDIR as W_FDIR } from '/js/world.js';
 
 const T = 0.2;   // 壁の厚さ
 const DV = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] };
@@ -128,16 +128,29 @@ export function buildHouse(hs, P, at, opt = {}) {
     const blanket = matte({ color: '#C08A4E', vary: 0.12, freq: 3, bump: 0.25, bumpFreq: 8 }), brick = matte({ color: '#A85F45', vary: 0.18, freq: 5, bump: 0.6, bumpFreq: 8 });
     const water = new THREE.MeshStandardMaterial({ color: '#9FC3CC', roughness: 0.25, transparent: true, opacity: 0.55 });
     for (const f of hs.furn || []) {
-      const cs = furnCells(f), mx = cs.reduce((a, c) => a + c[0] + 0.5, 0) / cs.length, my = cs.reduce((a, c) => a + c[1] + 0.5, 0) / cs.length;
+      const cs = furnCells(f), xs = cs.map(c => c[0]), ys = cs.map(c => c[1]);
+      const X0 = Math.min(...xs), X1 = Math.max(...xs) + 1, Y0 = Math.min(...ys), Y1 = Math.max(...ys) + 1;
+      // 壁ぎわの辺は、壁の厚み（内へ 0.1m）とすき間のぶん内側へ寄せ、形もそのぶん縮める
+      const wall = (dx, dy) => cs.some(([x, y]) => !has(x + dx, y + dy)), G = T / 2 + 0.04, g0 = 0.02;
+      const iw = wall(-1, 0) ? G : g0, ie = wall(1, 0) ? G : g0, inn = wall(0, -1) ? G : g0, is = wall(0, 1) ? G : g0;
+      const mx = (X0 + iw + X1 - ie) / 2, my = (Y0 + inn + Y1 - is) / 2, kx = (X1 - X0 - iw - ie) / (X1 - X0), ky = (Y1 - Y0 - inn - is) / (Y1 - Y0);
+      const fb = (mat, dx, dy, z0, sx, sy, sz) => box(mat, mx + dx * kx, my + dy * ky, z + z0 + sz / 2, sx * kx, sy * ky, sz);
       const long = cs.length > 1 && cs[0][0] !== cs[1][0];   // 2マスの家具が東西に長いか
-      const B = (mat, da, dl, z0, sw, sl, sz) => box(mat, mx + (long ? dl : da), my + (long ? da : dl), z + z0 + sz / 2, long ? sl : sw, long ? sw : sl, sz);   // da・sw＝横、dl・sl＝長さの向き
-      const head = cs.length > 1 ? [cs[0][0] - cs[1][0], cs[0][1] - cs[1][1]] : [0, -1];
-      if (f.t === 'bed') { B(woodMat, 0, 0, 0, 0.95, 1.9, 0.3); B(cloth, 0, 0, 0.3, 0.88, 1.84, 0.14); B(blanket, 0, -0.25 * (long ? head[0] : head[1]), 0.44, 0.9, 1.15, 0.06); box(white, mx + head[0] * 0.72, my + head[1] * 0.72, z + 0.5, 0.36, 0.36, 0.1); }
-      else if (f.t === 'table') { B(woodMat, 0, 0, 0.72, 0.85, 1.3, 0.05); for (const [a, b2] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B(woodMat, a * 0.36, b2 * 0.56, 0, 0.06, 0.06, 0.72); for (const sgn of [-1, 1]) { B(woodMat, sgn * 0.62, 0, 0, 0.36, 0.4, 0.45); B(woodMat, sgn * 0.78, 0, 0.45, 0.05, 0.4, 0.45); } }
-      else if (f.t === 'toilet') { box(white, mx, my, z + 0.2, 0.38, 0.5, 0.4); box(white, mx + head[0] * 0.22, my + head[1] * 0.22, z + 0.55, 0.4, 0.18, 0.35); }
-      else if (f.t === 'ctoilet') { box(woodMat, mx, my, z + 0.23, 0.55, 0.6, 0.46); box(woodMat, mx, my, z + 0.48, 0.5, 0.5, 0.04); box(cloth, mx + 0.32, my, z + 0.2, 0.14, 0.3, 0.4); }
-      else if (f.t === 'shower' || f.t === 'shower2') { box(white, mx, my, z + 0.03, 0.86, 0.86, 0.06); box(water, mx + 0.42, my, z + 0.6, 0.02, 0.86, 1.1); box(water, mx, my + 0.42, z + 0.6, 0.86, 0.02, 1.1); }
-      else if (f.t === 'stove') { box(brick, mx, my, z + 0.4, 0.8, 0.65, 0.8); box(matte({ color: '#3A332E' }), mx, my, z + 0.81, 0.6, 0.45, 0.03); cyl(brick, mx + 0.25, my + 0.18, z + 0.8, 0.11, 1.4, 10); }
+      const B = (mat, da, dl, z0, sw, sl, sz) => fb(mat, long ? dl : da, long ? da : dl, z0, long ? sl : sw, long ? sw : sl, sz);   // da・sw＝横、dl・sl＝長さの向き
+      const D = W_FDIR[(f.r || 0) % 4], head = cs.length > 1 ? [cs[0][0] - cs[1][0], cs[0][1] - cs[1][1]] : [-D[0], -D[1]];
+      if (f.t === 'bed') { B(woodMat, 0, 0, 0, 0.98, 1.96, 0.3); B(cloth, 0, 0, 0.3, 0.9, 1.88, 0.14); B(blanket, 0, -0.25 * (long ? head[0] : head[1]), 0.44, 0.92, 1.2, 0.06); fb(white, head[0] * 0.74, head[1] * 0.74, 0.45, 0.36, 0.36, 0.1); }
+      else if (f.t === 'table') {   // 長い向きにテーブル、両端に椅子
+        B(woodMat, 0, 0, 0.72, 0.78, 1.1, 0.05); for (const [a, b2] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B(woodMat, a * 0.33, b2 * 0.48, 0, 0.06, 0.06, 0.72);
+        for (const sgn of [-1, 1]) { B(woodMat, 0, sgn * 0.74, 0, 0.42, 0.38, 0.45); B(woodMat, 0, sgn * 0.92, 0.45, 0.42, 0.05, 0.45); }
+      }
+      else if (f.t === 'toilet') { fb(white, -head[0] * 0.06, -head[1] * 0.06, 0, 0.4, 0.4, 0.4); fb(white, head[0] * 0.3, head[1] * 0.3, 0.2, head[0] ? 0.18 : 0.42, head[0] ? 0.42 : 0.18, 0.5); }
+      else if (f.t === 'ctoilet') { fb(woodMat, 0, 0, 0, 0.6, 0.6, 0.46); fb(woodMat, 0, 0, 0.46, 0.52, 0.52, 0.04); fb(cloth, -head[1] * 0.37, head[0] * 0.37, 0, head[1] ? 0.14 : 0.3, head[1] ? 0.3 : 0.14, 0.4); }
+      else if (f.t === 'shower' || f.t === 'shower2') {   // ガラスは壁のない辺にだけ
+        fb(white, 0, 0, 0, 0.94, 0.94, 0.06);
+        if (!wall(1, 0)) fb(water, 0.46, 0, 0.06, 0.02, 0.94, 1.1); if (!wall(-1, 0)) fb(water, -0.46, 0, 0.06, 0.02, 0.94, 1.1);
+        if (!wall(0, 1)) fb(water, 0, 0.46, 0.06, 0.94, 0.02, 1.1); if (!wall(0, -1)) fb(water, 0, -0.46, 0.06, 0.94, 0.02, 1.1);
+      }
+      else if (f.t === 'stove') { fb(brick, 0, 0, 0, 0.82, 0.7, 0.8); fb(matte({ color: '#3A332E' }), 0, 0, 0.8, 0.6, 0.46, 0.03); cyl(brick, mx + head[0] * 0.22 * kx, my + head[1] * 0.22 * ky, z + 0.8, 0.11, 1.4, 10); }
     }
   }
   function inRoof(px, py, m = 0) {   // 屋根の形（家のマスを外へ E だけ広げた形）の中か

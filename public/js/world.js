@@ -708,6 +708,28 @@ export function draftRotateFurn(d, i, dir = 1) {
   for (const [x, y] of cand) { const g = { ...f, x, y, r }; if (!furnProblem(d, g, i)) { d.furn[i] = g; return null; } }
   return '回すと入らない（まわりをあけるか、動かしてから回す）';
 }
+/* 家具をよける：床の外・扉の前・重なりで置けなくなった家具を、もとの場所に近い、置ける所へ動かす。
+   向きはなるべくそのまま、壁ぎわを少し好む。動かした家具と、どこにも置けなかった家具の名前を返す */
+export function settleFurn(d) {
+  const moved = [], stuck = [];
+  for (let i = 0; i < d.furn.length; i++) {
+    const f = d.furn[i]; if (!furnProblem(d, f, i)) continue;
+    const c0 = furnCells(f), ox = c0.reduce((a, c) => a + c[0], 0) / c0.length, oy = c0.reduce((a, c) => a + c[1], 0) / c0.length;
+    let best = null;
+    for (const k in d.cells) {
+      const [x, y] = k.split(',').map(Number);
+      for (const r of [0, 1, 2, 3]) {
+        const g = { ...f, x, y, r }; if (furnProblem(d, g, i)) continue;
+        const cs = furnCells(g), cx = cs.reduce((a, c) => a + c[0], 0) / cs.length, cy = cs.reduce((a, c) => a + c[1], 0) / cs.length;
+        const walls = cs.reduce((a, [p, q]) => a + [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => !d.cells[ck(p + dx, q + dy)]).length, 0);
+        const sc = Math.hypot(cx - ox, cy - oy) + (r !== (f.r || 0) ? 0.4 : 0) - 0.15 * Math.min(2, walls);
+        if (!best || sc < best.sc) best = { g, sc };
+      }
+    }
+    if (best) { d.furn[i] = best.g; moved.push(FURN[f.t].name); } else stuck.push(FURN[f.t].name);
+  }
+  return { moved, stuck };
+}
 export function draftSwapFurn(d, i, t) { if (FURN[t].group !== FURN[d.furn[i].t].group) return '種類がちがう'; d.furn[i].t = t; return null; }
 /* 最初の家具の置き方：水まわりは扉から遠い隅、ベッドは壁ぎわ、テーブルは窓のそば */
 export function autoFurnish(d, items = ['shower', 'toilet', 'bed', 'table']) {

@@ -197,3 +197,24 @@ dl.cpoints dt { font-weight: 700; white-space: nowrap; } dl.cpoints dd { margin:
 @media (max-width: 640px) { .trip { top: auto; bottom: 84px; right: 12px; max-height: 52vh; } .atlas-card { top: auto; bottom: 12px; max-height: 50vh; } }
 svg.clim { stroke: none; } svg.clim .ax, svg.clim .rb { stroke: none; } svg.clim .gl { fill: none; }
 .mail-act button.yes { background: #6E8B5B; border-color: #6E8B5B; color: #fff; font-weight: 600; }
+
+/* 壁の選択肢・家具の操作：押した物のそばに出す小さな板 */
+.pick { position: fixed; z-index: 6; width: 312px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px 10px; box-shadow: 0 8px 28px rgba(30, 40, 35, .16); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); font-size: 13px; }
+.pick-h { display: flex; align-items: baseline; gap: 8px; } .pick-h b { font-size: 15px; } .pick-h .sub { color: var(--sub); font-size: 12px; }
+.pick-h .x { margin-left: auto; border: 0; background: none; font-size: 20px; line-height: 1; color: var(--sub); cursor: pointer; padding: 0 2px; }
+.pick-o { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 6px; margin: 8px 0 4px; }
+.pick-o button { display: flex; flex-direction: column; align-items: center; gap: 2px; border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 8px 4px 6px; cursor: pointer; font: inherit; color: var(--ink); }
+.pick-o button b { font-size: 13px; font-weight: 600; } .pick-o button span { font-size: 11px; color: var(--sub); }
+.pick-o button.on { border-color: #6E8B5B; background: #EEF4EA; box-shadow: inset 0 0 0 1px #6E8B5B; }
+.pick-o button:disabled { opacity: .42; cursor: default; }
+.pick-n { margin: 4px 0 0; color: var(--sub); font-size: 12px; line-height: 1.55; } .pick-n .bad { color: var(--bad); }
+.pick-more { margin-top: 8px; width: 100%; border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 7px; cursor: pointer; font: inherit; font-size: 12.5px; color: var(--ink); }
+.op { position: relative; display: block; width: 30px; height: 24px; border-radius: 3px; background: #C9A47A; margin-bottom: 2px; }
+.op-window::after, .op-window2::after { content: ''; position: absolute; left: 7px; right: 7px; top: 5px; bottom: 7px; background: #9DB3BA; border: 2px solid #F4EEE2; border-radius: 1px; }
+.op-window2::before { content: ''; position: absolute; left: 14px; top: 5px; bottom: 7px; width: 2px; background: #F4EEE2; z-index: 1; }
+.op-door::after { content: ''; position: absolute; left: 10px; right: 10px; top: 5px; bottom: 0; background: #7A5A3A; border-radius: 1px 1px 0 0; }
+.op-rot { background: none; } .op-rot::after { content: '↻'; position: absolute; inset: 0; font-size: 22px; line-height: 24px; text-align: center; color: var(--ink); }
+.card button.wide { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 6px 12px; cursor: pointer; font: inherit; font-size: 12.5px; color: var(--ink); }
+@media (max-width: 640px) { .pick { left: 8px; right: 8px; width: auto; bottom: calc(max(10px, env(safe-area-inset-bottom)) + 84px); } }
+.pick.furnbar { width: 250px; }
+@media (max-width: 640px) { .pick.furnbar { width: auto; } }
