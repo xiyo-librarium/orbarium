@@ -18,9 +18,10 @@ export const MODHINT = {
 };
 
 /* メール：差出人の丸いアイコン、名前と肩書き、宛先、日付、件名、本文、添付（ノート）、ボタン */
+/* 差出人：「トミー（設計士＠…）」を名前と肩書きに。顔の色は名前から */
+export function mailWho(m) { const mm = /^(.+?)（(.+)）$/.exec(m.from || ''), name = (mm ? mm[1] : m.from) || '?', role = mm ? mm[2] : ''; return { name, role, hue: [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360 }; }
 export function mailHTML(m, o = {}) {
-  const mm = /^(.+?)（(.+)）$/.exec(m.from || ''), name = mm ? mm[1] : m.from, role = mm ? mm[2] : '';
-  const hue = [...(name || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
+  const { name, role, hue } = mailWho(m);
   const body = (Array.isArray(m.body) ? m.body : [m.body]).map(p => `<p>${esc(p)}</p>`).join('');
   return `<article class="mail${o.cls ? ' ' + o.cls : ''}">
     <div class="mail-top"><span>受信トレイ</span><span>${esc(o.date || '')}</span></div>
