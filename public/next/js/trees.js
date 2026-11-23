@@ -72,7 +72,7 @@ export function buildTrees(list, at, P, opt = {}) {
   const big = [blobGeo(coarse ? 2 : 3, 0), blobGeo(coarse ? 2 : 3, 1)], small = [blobGeo(2, 0), blobGeo(2, 1)];
   const tiers = [tierGeo(0), tierGeo(1)];
   const woodGeo = new THREE.CylinderGeometry(0.62, 1, 1, 7, 1); woodGeo.translate(0, 0.5, 0);
-  const B = { big: [[], []], small: [[], []], tier: [[], []], wood: [] };
+  const B = { big: [[], []], small: [[], []], tier: [[], []], wood: [], fruit: [] };
   const col = new THREE.Color(), tmp = new THREE.Color();
 
   for (const t of list) {
@@ -133,8 +133,15 @@ export function buildTrees(list, at, P, opt = {}) {
       continue;
     }
 
-    // 広葉樹：形を 4 つから選ぶ（丸い・横に広い・縦に長い・二股）
-    const u = r(11), form = u < 0.34 ? 'round' : u < 0.6 ? 'spread' : u < 0.8 ? 'tall' : 'twin';
+    if (t.kind === 'hedge') {
+      // 生け垣：刈りこんだ低い茂み。となりの株とつながるよう、少し横に広い
+      const c = leafOf(P.pine), n = 2;
+      for (let i = 0; i < n; i++) { const a = r(5 + i) * 6.28, d = i ? 0.22 : 0; blob(base.clone().add(new THREE.Vector3(Math.cos(a) * d, t.h * (i ? 0.62 : 0.48), Math.sin(a) * d)), [0.66, t.h * (i ? 0.42 : 0.52), 0.66], c, i ? 1.04 : 0.94); }
+      continue;
+    }
+    // 広葉樹：形を 4 つから選ぶ（丸い・横に広い・縦に長い・二股）。植えた果樹は丸く小さく、実がなる
+    const fruit = t.kind === 'fruit';
+    const u = r(11), form = fruit ? 'round' : u < 0.34 ? 'round' : u < 0.6 ? 'spread' : u < 0.8 ? 'tall' : 'twin';
     const R = t.r * (form === 'spread' ? 1.18 : form === 'tall' ? 0.8 : 1), Rv = R * (form === 'spread' ? 0.62 : form === 'tall' ? 1.2 : 0.85);
     const H = t.h * (form === 'tall' ? 1.12 : form === 'spread' ? 0.9 : 1), c0 = leafOf(P.leaf[Math.floor(r(3) * 4)]);
     const forkH = H * (form === 'twin' ? 0.28 : form === 'spread' ? 0.42 : 0.36) + 0.25 * r(12);
@@ -159,6 +166,11 @@ export function buildTrees(list, at, P, opt = {}) {
         for (let j = 0; j < ns; j++) { const b = a + (r(40 + j + i * 3) - 0.5) * 2.2, d = s * (0.7 + 0.2 * r(44 + j)); blob(e.clone().add(new THREE.Vector3(Math.cos(b) * d, (r(48 + j + i) - 0.6) * s * 0.8, Math.sin(b) * d)), s * (0.42 + 0.14 * r(52 + j + i)), c0, lit * 0.97, true); }
       }
       blob(cr.c.clone().addScaledVector(UP, cr.Rv * 0.42), [cr.R * 0.58, cr.Rv * 0.6, cr.R * 0.58], c0, 1.08);   // てっぺん（日が当たって明るい）
+      if (fruit) {   // 実：冠のまわりに小さな玉
+        const fc = ['#E08A2E', '#D9B23A', '#C8452F'][Math.floor(r(60) * 3)], nf = 7 + Math.floor(r(61) * 5);
+        for (let k = 0; k < nf; k++) { const a = r(62 + k) * 6.28, el = (r(80 + k) - 0.35) * 1.2, rr = 0.92;
+          B.fruit.push({ p: cr.c.clone().add(new THREE.Vector3(Math.cos(a) * Math.cos(el) * cr.R * rr, Math.sin(el) * cr.Rv * rr, Math.sin(a) * Math.cos(el) * cr.R * rr)), q: new THREE.Quaternion(), s: new THREE.Vector3(1, 1, 1).multiplyScalar(0.075 + 0.02 * r(100 + k)), c: fc, k: 0.9 + 0.2 * r(120 + k) }); }
+      }
     }
   }
 
@@ -179,5 +191,6 @@ export function buildTrees(list, at, P, opt = {}) {
   B.small.forEach((items, v) => inst(small[v], leafMat, items));
   B.tier.forEach((items, v) => inst(tiers[v], leafMat, items));
   inst(woodGeo, woodMat, B.wood);
+  if (B.fruit.length) { const fm = matte({ color: '#ffffff', vary: 0.1, freq: 6, rough: 0.55 }); fm.emissive = new THREE.Color('#3A2410'); fm.emissiveIntensity = 0.25; inst(new THREE.IcosahedronGeometry(1, 1), fm, B.fruit); }
   return group;
 }

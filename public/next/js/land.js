@@ -30,14 +30,20 @@ export function buildLand(world, N, P, opt = {}) {
     c.multiplyScalar(1 / n);
     const dug = world.H0 && world.H0[Math.min(N - 1, y) * N + Math.min(N - 1, x)] > world.H[Math.min(N - 1, y) * N + Math.min(N - 1, x)];
     if (dug) c.lerp(c2.set(P.soil), 0.8);
+    if (opt.paint) {   // 塗る所（砂利・池の底）：そのマスに触れる頂点を塗る
+      let pc = null; for (const [qx, qy] of [[Math.floor(px - 1e-6), Math.floor(py - 1e-6)], [Math.floor(px), Math.floor(py - 1e-6)], [Math.floor(px - 1e-6), Math.floor(py)], [Math.floor(px), Math.floor(py)]]) { const h2 = opt.paint(qx, qy); if (h2) { pc = h2; break; } }
+      if (pc) c.lerp(c2.set(pc), 0.85);
+    }
     return c;
   };
   // 平らにする所（段々の畑）：そのマスに触れる地面を、畑の高さより少し下に抑える。
   // 上り側は切り土の斜面、下り側は畑の側面（段差）が見える
   const flat = opt.flat || (() => null), vh = new Float32Array((M + 1) * (M + 1)), path = new THREE.Color(P.soil);
   for (let j = 0; j <= M; j++) for (let i = 0; i <= M; i++) {
-    const px = i / S, py = j / S; let hh = at(px, py), onFlat = false;
-    for (const cx of (i % S ? [Math.floor(px)] : [px - 1, px])) for (const cy of (j % S ? [Math.floor(py)] : [py - 1, py])) { const L = flat(cx, cy); if (L != null) { hh = Math.min(hh, L - 0.02); onFlat = true; } }
+    const px = i / S, py = j / S; let hh = at(px, py), onFlat = false, nT = 0, pondT = [];
+    for (const cx of (i % S ? [Math.floor(px)] : [px - 1, px])) for (const cy of (j % S ? [Math.floor(py)] : [py - 1, py])) { nT++; const L = flat(cx, cy); if (L != null) { hh = Math.min(hh, L - 0.02); onFlat = true; } const B = opt.basin && opt.basin(cx, cy); if (B) pondT.push(B); }
+    // 池：中は底まで掘り、ふちは水面より少し高い土手に（斜面の下り側でも水がたまる）
+    if (pondT.length) hh = pondT.length === nT ? Math.min(hh, Math.min(...pondT.map(B => B.b))) : Math.max(hh, Math.max(...pondT.map(B => B.wl)) + 0.14);
     vh[j * (M + 1) + i] = hh;
     pos.push(px, hh, py); const g = groundCol(px, py); if (onFlat) g.lerp(path, 0.45); col.push(g.r, g.g, g.b);
   }

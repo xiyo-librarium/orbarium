@@ -35,6 +35,14 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .tools button.later { opacity: .42; }
 .season { border: 0; border-radius: 999px; padding: 13px 26px; font-size: 16px; font-weight: 600; letter-spacing: .04em; color: #fff; background: #6E8B5B; box-shadow: 0 4px 14px rgba(40, 60, 40, .25); cursor: pointer; }
 
+/* 道具の中の種類（果樹・生け垣など） */
+.subs { display: flex; gap: 4px; padding: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 999px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.subs button { border: 0; background: none; border-radius: 999px; padding: 6px 13px; font-size: 13px; color: var(--sub); cursor: pointer; }
+.subs button.on { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
+body.drafting .subs { display: none; }
+.flowline { display: inline-flex; flex-wrap: wrap; gap: 2px 10px; }
+.flowline .up { color: var(--good); } .flowline .down { color: var(--bad); }
+
 /* 下書きの確認：なぞっただけでは建たない */
 .draftbar { display: flex; align-items: center; gap: 12px; max-width: min(620px, calc(100% - 16px)); background: var(--card); border: 1px solid rgba(184, 135, 62, .45); border-radius: 16px; padding: 9px 10px 9px 14px; box-shadow: 0 6px 22px rgba(30, 40, 35, .16); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); font-size: 13px; line-height: 1.5; }
 .draftbar #draftTxt b { font-weight: 600; }

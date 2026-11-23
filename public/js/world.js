@@ -84,7 +84,7 @@ export function canPut(w, x, y, z, t) {
   if (at(w, x, y, z)) return 'もう何かある';
   if (z === g) { const tw = treeWhy(w, x, y); if (tw) return tw; }
   { const bd = buildingAt(w, x, y); if (bd && z >= bd.z - 1 && z < bd.z + HOUSE_H && !['batt'].includes(d.kind)) return bd === w.house ? '家の中' : '建物の中'; }
-  if (d.overlay && z !== g) return d.kind === 'bed' ? '畑は地面の上に' : '床や植物は地面の上に';
+  if (d.overlay && z !== g && !(d.kind === 'plant' && at(w, x, y, z - 1) && BLOCKS[at(w, x, y, z - 1).t].kind === 'media')) return d.kind === 'bed' ? '畑は地面の上に' : '床や植物は地面の上に';   // 植物は、埋めた浄化の層の上にも植えられる
   if (d.overlay && d.kind === 'plant') { const below = at(w, x, y, z - 1); if (!below || BLOCKS[below.t].kind !== 'media') return 'ヨシやカンナは、浄化の層の上に植える'; }
   if (d.pit && z >= w.H0[idx(x, y)]) return '掘った穴の中にしか置けない（先に掘る）';
   if (d.kind === 'roof' || d.kind === 'pv') {
