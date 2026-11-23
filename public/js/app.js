@@ -1,5 +1,5 @@
 import * as E from './engine.js';
-import { NOTES, LESSON, eventText, ATLAS, INVITE, LANDS } from './content.js';
+import { NOTES, LESSON, eventText, ATLAS, INVITE, LANDS, CLIMATE } from './content.js';
 import { createGlobe, flyTo, loadLand } from './globe.js';
 import { createView, sunVector, dirName, vegObjects } from './iso.js';
 import { loadRealPlot, mapsUrl } from './realsite.js';
@@ -39,7 +39,7 @@ async function title() {
   let run = true; const spin = () => { if (!run) return; g.lon -= 0.08; g.draw(); requestAnimationFrame(spin); }; spin();
   const onR = () => { g.size(); g.draw(); }; window.addEventListener('resize', onR);
   stopAnim = () => { run = false; window.removeEventListener('resize', onR); };
-  document.getElementById('new').onclick = () => { if (!saved || confirmBox('今の暮らしを消して、はじめからにしますか？')) travel(E.SITES.tokyo, E.SITES.med, startGame, INVITE); };
+  document.getElementById('new').onclick = () => { if (!saved || confirmBox('はじめからやり直しますか？')) travel(E.SITES.tokyo, E.SITES.med, startGame, INVITE); };
   const c = document.getElementById('cont'); if (c) c.onclick = () => { G.s = saved; game(); };
   document.getElementById('atlas').onclick = () => atlas(() => title());
 }
@@ -48,15 +48,17 @@ function confirmBox(msg) { return window.confirm(msg); }
 async function travel(from = E.SITES.tokyo, to = E.SITES.med, after = startGame, story = null) {
   stop();
   const toKey = Object.keys(E.SITES).find(k => E.SITES[k] === to);
-  if (toKey && toKey !== 'tokyo') G.realP = realPromise(toKey);
-  app.innerHTML = `<div class="travel"><div class="cap" id="cap">${from.name ? `${esc(from.name)}から、${esc(to.name)}へ` : esc(to.name)}</div>${story ? `<div class="mailcard trip"><div class="small">メール · ${esc(story.from)}</div><b>${esc(story.subject)}</b><div>${esc(story.body)}</div></div>` : ''}<canvas id="tg" aria-hidden="true"></canvas><button class="btn skip" id="skip">とばす</button></div>`;
+  if (toKey && toKey !== 'tokyo') G.realP = realPromise(toKey);   // 実データは、メールを読んでいるあいだに裏で取ってくる
+  const wait = !!(story && story.go);   // メールがあるときは、出発の地点で止まって［行く］を待つ
+  const body = Array.isArray(story?.body) ? story.body.map(p => `<p>${esc(p)}</p>`).join('') : story ? `<p>${esc(story.body)}</p>` : '';
+  app.innerHTML = `<div class="travel"><div class="cap" id="cap">${wait ? esc(from.name || '') : from.name ? `${esc(from.name)}から、${esc(to.name)}へ` : esc(to.name)}</div>${story ? `<div class="mailcard trip" id="trip"><div class="small">メール · ${esc(story.from)}</div><b>${esc(story.subject)}</b>${body}${wait ? `<div class="go"><button class="btn primary" id="go">${esc(story.go)}</button></div>` : ''}</div>` : ''}<canvas id="tg" aria-hidden="true"></canvas><button class="btn skip" id="skip"${wait ? ' hidden' : ''}>とばす</button></div>`;
   await loadLand();
   const g = createGlobe(document.getElementById('tg'), { lon: from.lon, lat: from.lat });
   g.label = from.name ? { lon: from.lon, lat: from.lat, text: from.name } : null; g.draw();
   let done = false;
   const finish = () => { if (done) return; done = true; cancelAnimationFrame(g.raf); after(); };
   document.getElementById('skip').onclick = finish;
-  setTimeout(() => {
+  const fly = () => {
     if (done) return;
     g.label = { lon: to.lon, lat: to.lat, text: to.name };
     flyTo(g, { lon: to.lon, lat: to.lat, scale: 1 }, 3200, () => {
@@ -64,7 +66,11 @@ async function travel(from = E.SITES.tokyo, to = E.SITES.med, after = startGame,
       cap.textContent = `${to.name}・標高${to.elev.toLocaleString()}m`;
       flyTo(g, { lon: to.lon, lat: to.lat, scale: 14 }, 1400, () => { document.querySelector('.travel')?.classList.add('fade-out'); setTimeout(finish, 500); });
     });
-  }, 500);
+  };
+  if (wait) {
+    const go = document.getElementById('go'); go.focus();
+    go.onclick = () => { document.getElementById('trip')?.classList.add('gone'); const sk = document.getElementById('skip'); sk.hidden = false; document.getElementById('cap').textContent = `${from.name}から、${to.name}へ`; fly(); };
+  } else setTimeout(fly, 500);
 }
 function chooseLand() {
   const s = G.s;
@@ -81,7 +87,7 @@ function chooseLand() {
       travel(from, to, async () => {
         const real = await waitReal(G.realP || realPromise(k), to.name); G.realP = null;
         G.s = E.newGame({ site: k, seed: Math.floor(Math.random() * 1e6), cash: s.cash - to.plotPrice, persons: s.persons, known: s.known, learned: s.learned, year: s.year, flags: { history: hist }, real });
-        G.s.q = s.q; G.tab = 'web'; G.cat = null; persist(); game();
+        G.s.q = s.q; G.tab = 'web'; G.cat = null; persist(); game(); climate(true);
       });
     }
   });
@@ -100,7 +106,7 @@ async function startGame() {
   G.s = E.newGame({ seed: Math.floor(Math.random() * 1e6), real });
   G.tab = 'web'; G.cat = null; G.report = null;
   persist();
-  game();
+  game(); climate(true);
 }
 
 /* ================= ゲーム画面 ================= */
@@ -133,14 +139,44 @@ function renderBar() {
   document.getElementById('menu').onclick = menu;
 }
 function menu() {
-  modal(`<h2>メニュー</h2><div style="display:flex;flex-direction:column;gap:8px">
-    ${G.s.flags['done_' + G.s.site] != null ? '<button class="btn primary" data-m="next">次の土地を選ぶ</button>' : ''}<button class="btn" data-m="atlas">地球儀で学ぶ（図鑑）</button><button class="btn" data-m="src">この土地のデータの出典</button><button class="btn" data-m="title">タイトルへ（自動で保存）</button><button class="btn ghost" data-m="close">閉じる</button></div>`, (m, close) => {
+  modal(`<h2>メニュー</h2><div class="mgrid">
+    ${G.s.flags['done_' + G.s.site] != null ? '<button class="btn primary" data-m="next">次の土地を選ぶ</button>' : ''}<button class="btn" data-m="atlas">地球儀で学ぶ（図鑑）</button><button class="btn" data-m="climate">この土地の気候</button><button class="btn" data-m="src">この土地のデータの出典</button><button class="btn" data-m="title">タイトルへ（自動で保存）</button><button class="btn ghost" data-m="close">閉じる</button></div>`, (m, close) => {
     if (m === 'src') { close(); sources(); }
+    if (m === 'climate') { close(); climate(false); }
     if (m === 'atlas') { close(); atlas(() => game()); }
     if (m === 'next') { close(); chooseLand(); }
     if (m === 'title') { close(); title(); }
     if (m === 'close') close();
   });
+}
+/* この土地の気候：着いたとき（first）と、メニューから。数字は実データ（月ごとの平年値）から計算し、東京と並べる */
+function climate(first) {
+  const s = G.s, S = E.SITES[s.site], C = CLIMATE[s.site], T = E.SITES.tokyo; if (!C) return;
+  const sum = (a) => a.reduce((x, y) => x + y, 0), avg = (a) => sum(a) / a.length, r1 = (x) => Math.round(x * 10) / 10;
+  const lo = Math.min(...S.tmin), hi = Math.max(...S.tmax), rain = Math.round(sum(S.rain)), days = Math.round(sum(S.rainDays));
+  const MO = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
+  // 図：雨（棒）と気温（朝の最低〜昼の最高の帯、平均の線）。点線は東京の平均気温
+  const W2 = 560, H2 = 230, L = 34, R = 40, Tp = 14, B = 26, cw = (W2 - L - R) / 12;
+  const tMin = Math.min(0, Math.floor(Math.min(...S.tmin, ...T.tmin) / 5) * 5), tMax = Math.ceil(Math.max(...S.tmax, ...T.tmax) / 5) * 5, rMax = Math.max(250, Math.ceil(Math.max(...S.rain, ...T.rain) / 50) * 50);
+  const yT = (t) => Tp + (H2 - Tp - B) * (1 - (t - tMin) / (tMax - tMin)), yR = (r) => Tp + (H2 - Tp - B) * (1 - r / rMax), xM = (i) => L + cw * (i + 0.5);
+  const band = [...S.tmax.map((t, i) => `${xM(i)},${yT(t)}`), ...S.tmin.map((_, i) => `${xM(11 - i)},${yT(S.tmin[11 - i])}`)].join(' ');
+  const svg = `<svg class="clim" viewBox="0 0 ${W2} ${H2}" role="img" aria-label="月ごとの気温と雨">
+    ${[...Array((tMax - tMin) / 5 + 1)].map((_, k) => { const t = tMin + k * 5, y = yT(t); return `<line x1="${L}" x2="${W2 - R}" y1="${y}" y2="${y}" class="gl"/><text x="${L - 6}" y="${y + 4}" class="ax" text-anchor="end">${t}℃</text>`; }).join('')}
+    ${[0, rMax / 2, rMax].map(r => `<text x="${W2 - R + 6}" y="${yR(r) + 4}" class="ax rn">${r}mm</text>`).join('')}
+    ${S.rain.map((r, i) => `<rect x="${xM(i) - cw * 0.32}" y="${yR(r)}" width="${cw * 0.64}" height="${yR(0) - yR(r)}" class="rb"><title>${i + 1}月 雨${Math.round(r)}mm</title></rect>`).join('')}
+    <polygon points="${band}" class="tb"/>
+    <polyline points="${S.tmean.map((t, i) => `${xM(i)},${yT(t)}`).join(' ')}" class="tm"/>
+    <polyline points="${T.tmean.map((t, i) => `${xM(i)},${yT(t)}`).join(' ')}" class="tk"/>
+    ${MO.map((m, i) => `<text x="${xM(i)}" y="${H2 - 8}" class="ax" text-anchor="middle">${m}月</text>`).join('')}
+  </svg>
+  <div class="clegend"><span><i class="k-tb"></i>${esc(S.name)}の気温（朝の最低〜昼の最高）</span><span><i class="k-tm"></i>平均</span><span><i class="k-tk"></i>東京の平均</span><span><i class="k-rb"></i>雨（月）</span></div>`;
+  const stats = [['年の平均気温', `${r1(avg(S.tmean))}℃`, `東京 ${r1(avg(T.tmean))}℃`], ['朝の最低〜昼の最高', `${lo.toFixed(0)}〜${hi.toFixed(0)}℃`, `東京 ${Math.min(...T.tmin).toFixed(0)}〜${Math.max(...T.tmax).toFixed(0)}℃`], ['一年の雨', `${rain.toLocaleString()}mm`, `東京 ${Math.round(sum(T.rain)).toLocaleString()}mm`], ['雨の日', `年${days}日`, `東京 年${Math.round(sum(T.rainDays))}日`]];
+  modal(`<div class="small">${esc(S.sub || '')}・標高${S.elev.toLocaleString()}m</div><h2>${esc(C.title)}</h2><p style="margin:0 0 8px">${esc(C.lead)}</p>
+    <div class="cstats">${stats.map(([k, v2, t]) => `<div><span class="small">${esc(k)}</span><b>${esc(v2)}</b><span class="small">${esc(t)}</span></div>`).join('')}</div>
+    ${svg}
+    <dl class="cpoints">${C.points.map(([k, v2]) => `<dt>${esc(k)}</dt><dd>${esc(v2)}</dd>`).join('')}</dl>
+    <p class="small" style="margin:6px 0 10px">${S.real ? '2014〜2023年の、この区画の実際の気象（Open-Meteo）から作った平年値。' : '実際の気象を取れなかったので、仮の平年値です。'}</p>
+    <button class="btn primary" data-m="close">${first ? 'この土地で暮らしを始める' : '閉じる'}</button>`, (m, close) => { if (m === 'close') close(); });
 }
 /* この土地のデータの出典（植生・建物のデータは表示の義務がある） */
 function sources() {
@@ -154,7 +190,7 @@ function modal(html, on) {
   document.body.appendChild(d);
   const close = () => d.remove();
   d.addEventListener('click', (e) => { const b = e.target.closest('[data-m]'); if (b) on(b.dataset.m, close); else if (e.target === d) close(); });
-  d.querySelector('button')?.focus();
+  d.querySelector('button')?.focus({ preventScroll: true }); d.querySelector('.box').scrollTop = 0;
 }
 
 /* ---------- 真上から見た段々の地図（canvas） ---------- */
@@ -266,7 +302,7 @@ function draw2D(wrap, w, o) {
 }
 function hintText() {
   const s = G.s, S = E.summarize(s);
-  if (s.turn === 0 && s.site === 'med') return `${s.real ? `メデジン西部、サン・クリストバル地区の実在の山腹です。等高線は実際の標高、${s.world.veg && s.real.lc ? '木や草地は衛星から見た実際の植生、' : ''}気温と雨は2014〜2023年の実際の気象。${s.real.pick?.checked?.length ? '区画は、人の家や道にかからない50m四方を選んでいます。' : ''}` : '実際の標高と気候を取れなかったので、仮の地形で始めています（通信を確かめて、はじめからやり直すと取り直します）。'}オレンジ色が、ルシアの祖父母の小さな板壁の家（12m²、高さ3m。トイレ・シャワー・ベッド・テーブルつき）。地図を押すと拡大して、何を作るか選べます。`;
+  if (s.turn === 0 && s.site === 'med') return `${s.real ? `メデジン西部、サン・クリストバル地区の実在の山腹です。等高線は実際の標高、${s.world.veg && s.real.lc ? '木や草地は衛星から見た実際の植生、' : ''}気温と雨は2014〜2023年の実際の気象。${s.real.pick?.checked?.length ? '区画は、人の家や道にかからない50m四方を選んでいます。' : ''}` : '実際の標高と気候を取れなかったので、仮の地形で始めています（通信を確かめて、はじめからやり直すと取り直します）。'}オレンジ色が、トミーが貸してくれた小さな板壁の家（12m²、高さ3m。トイレ・シャワー・ベッド・テーブルつき）。地図を押すと拡大して、何を作るか選べます。`;
   return '';
 }
 /* 地図の下の帯：はじめは土地の説明（地図には重ねない。閉じられる）、ふだんは操作の一言 */

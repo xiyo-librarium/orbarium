@@ -756,7 +756,7 @@ export function relations(s) {
     { id: 'frogs', name: 'カエルとトンボ', v: clamp(S.pondArea / 15 + (S.filter ? S.filter.m.life : 0)), good: true, why: S.pondArea || S.filter ? 'ため池やバイオフィルターの水辺に生き物が集まる' : '水辺がない' },
     { id: 'lizards', name: 'トカゲと苔', v: clamp(S.wallLen / 60), good: true, why: S.wallArea ? `石垣${Math.round(S.wallArea)}m²のすき間が住みかになり、畑の虫を食べる` : '石垣のすき間が住みかになる' },
     { id: 'neighbors', name: '近所の人', v: clamp(localYen / 40), good: true, why: localYen > 0.5 ? `この1年、近所とのやりとり ${Math.round(localYen)}万円（野菜を売る・工事を頼む・材料を買う）` : 'まだ付き合いは薄い' },
-    { id: 'friend', name: 'ルシア', v: s.site === 'med' ? 0.5 : 0.2, good: true, why: s.site === 'med' ? '祖父母の土地を貸してくれた' : '世界のどこかから時々メールが来る' },
+    { id: 'friend', name: 'トミー', v: s.site === 'med' ? 0.5 : 0.2, good: true, why: s.site === 'med' ? '山の斜面の家を貸してくれた' : '世界のどこかから時々メールが来る' },
     { id: 'river', name: '下流の川', v: clamp((sewer * 0.6 + runoff * 0.15) / 40), good: false, why: `下水 ${sewer.toFixed(0)}m³・畑から流れた雨 ${runoff.toFixed(0)}m³` },
     { id: 'ground', name: '地下の水', v: clamp(recharge / 150), good: true, why: `畑から地下へ浸みた水 ${recharge.toFixed(0)}m³` },
     { id: 'money', name: 'お金', v: clamp(1 - (ws + ps + fs) / 3), good: null, why: '買って済ませている割合' }

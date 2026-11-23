@@ -16,7 +16,7 @@ try:
         page.on('console', lambda m: errs.append(m.text) if m.type == 'error' and 'Failed to load resource' not in m.text else None)
         mock_real.install(page)
         page.goto('http://localhost:8766/index.html'); page.wait_for_timeout(600)
-        page.click('#new'); page.wait_for_timeout(800); page.click('#skip'); page.wait_for_timeout(1500)
+        page.click('#new'); page.wait_for_timeout(800); page.click('#go'); page.wait_for_timeout(200); page.click('#skip'); page.wait_for_timeout(1500); page.click('.modal [data-m="close"]'); page.wait_for_timeout(200)
         page.screenshot(path=f'{OUT}/1_map.png')
         info = page.evaluate("()=>{const {G,E}=window.__orb;const w=G.s.world;let f=null;for(let y=0;y<50&&!f;y++)for(let x=0;x<50;x++)if(w.veg[y*50+x]===10){f=[x,y];break;}const hs=w.house;const k=Object.keys(hs.cells)[0].split(',').map(Number);return {forest:f,house:k,pick:G.s.real.pick}}")
         print(info)
