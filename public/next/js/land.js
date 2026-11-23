@@ -1,6 +1,6 @@
 /* 土地：本物の標高（1m の段）を、描くときだけなだらかな斜面にする。草・木・畑 */
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { matte, hash } from './look.js';
 
 /* 座標：world.x＝東 → three.x、world.y＝南 → three.z、高さ → three.y */
@@ -37,7 +37,7 @@ export function buildLand(world, N, P, opt = {}) {
   }
   for (let j = 0; j < M; j++) for (let i = 0; i < M; i++) { const a = j * (M + 1) + i, b = a + 1, d = a + M + 1, e = d + 1; idx.push(a, d, b, b, d, e); }
   const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); gg.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); gg.setIndex(idx); gg.computeVertexNormals();
-  const ground = new THREE.Mesh(gg, matte({ vertexColors: true, vary: 0.1, freq: 0.9, bump: 0.25, bumpFreq: 1.6 }));
+  const ground = new THREE.Mesh(gg, matte({ vertexColors: true, vary: 0.1, freq: 0.9, bump: 0.08, bumpFreq: 1.2, rough: 0.9 }));
   ground.receiveShadow = true; group.add(ground);
 
   // 区画の切り口：土の側面（地層の帯）
@@ -64,7 +64,7 @@ export function buildLand(world, N, P, opt = {}) {
     const n = Math.floor(dens * (v === 30 ? 1.2 : 0.8) + hash(x, y, 3));
     for (let k = 0; k < n; k++) { const px = x + hash(x, y, 10 + k), py = y + hash(x, y, 40 + k); spots.push([px, py, hash(x, y, 70 + k)]); }
   }
-  const grass = new THREE.InstancedMesh(tuft, matte({ color: '#ffffff', vertexColors: true, vary: 0.25, freq: 0.6, rough: 1 }), spots.length);
+  const grass = new THREE.InstancedMesh(tuft, matte({ color: '#ffffff', vertexColors: true, vary: 0.2, freq: 0.6, rough: 0.7 }), spots.length);
   const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(), tp = new THREE.Vector3(), gc = new THREE.Color(), tip = new THREE.Color(P.grassTip), gbase = new THREE.Color(P.grass);
   spots.forEach(([px, py, r], i) => { e.set(0, r * 6.28, 0); q.setFromEuler(e); const s = 0.8 + r * 0.9; sc.set(s, s * (0.8 + 0.5 * hash(px, py, 5)), s); tp.set(px, at(px, py) - 0.02, py); mtx.compose(tp, q, sc); grass.setMatrixAt(i, mtx); grass.setColorAt(i, gc.copy(gbase).lerp(tip, hash(px, py, 6) * 0.6)); });
   grass.receiveShadow = true; group.add(grass);
@@ -76,10 +76,11 @@ export function buildLand(world, N, P, opt = {}) {
 export function buildTrees(list, at, P, opt = {}) {
   const group = new THREE.Group();
   // 葉のかたまり：丸みのある小さなふくらみ。法線は球の向きに寄せて、ふんわり見せる
-  const blobGeo = new THREE.IcosahedronGeometry(1, 2), p = blobGeo.getAttribute('position'), v = new THREE.Vector3();
+  let blobGeo = new THREE.IcosahedronGeometry(1, matchMedia('(pointer: coarse)').matches ? 2 : 3); blobGeo.deleteAttribute('uv'); blobGeo.deleteAttribute('normal'); blobGeo = mergeVertices(blobGeo);   // 頂点を共有させて、なめらかな面に
+  const p = blobGeo.getAttribute('position'), v = new THREE.Vector3();
   for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); const n = 1 + 0.07 * Math.sin(v.x * 4.1 + v.y * 2.7) * Math.cos(v.z * 3.3 - v.x * 1.7) + 0.035 * Math.sin(v.y * 8 + v.z * 7); v.multiplyScalar(n); v.y *= 0.84; p.setXYZ(i, v.x, v.y, v.z); }
   blobGeo.computeVertexNormals();
-  { const nm = blobGeo.getAttribute('normal'), w2 = new THREE.Vector3(); for (let i = 0; i < nm.count; i++) { v.fromBufferAttribute(p, i).normalize(); w2.fromBufferAttribute(nm, i).lerp(v, 0.55).normalize(); nm.setXYZ(i, w2.x, w2.y, w2.z); } }
+  { const nm = blobGeo.getAttribute('normal'), w2 = new THREE.Vector3(); for (let i = 0; i < nm.count; i++) { v.fromBufferAttribute(p, i).normalize(); w2.fromBufferAttribute(nm, i).lerp(v, 0.5).normalize(); nm.setXYZ(i, w2.x, w2.y, w2.z); } }
   const coneGeo = new THREE.ConeGeometry(1, 1, 9, 1, false); coneGeo.translate(0, 0.5, 0);
   const trunkGeo = new THREE.CylinderGeometry(0.6, 1, 1, 7); trunkGeo.translate(0, 0.5, 0);
   const blobs = [], cones = [], trunks = [];
@@ -93,9 +94,9 @@ export function buildTrees(list, at, P, opt = {}) {
     blobs.push({ p: [t.x, top, t.y], s: [R * 0.95, R * 0.9, R * 0.95], c: P.leaf[seed % 4], k: 1 });
     for (let k = 0; k < n; k++) { const a = k / n * 6.28 + s * 3, rr = R * (0.55 + 0.2 * hash(t.x, k, 2)); blobs.push({ p: [t.x + Math.cos(a) * rr, top - R * (0.15 + 0.25 * hash(t.y, k, 3)), t.y + Math.sin(a) * rr], s: Array(3).fill(R * (0.48 + 0.18 * hash(t.x, t.y, k))), c: P.leaf[(seed + k) % 4], k: 0.95 + 0.1 * hash(k, t.x, 4) }); }
   }
-  const leafMat = matte({ color: '#ffffff', vary: 0.2, freq: 1.8, bump: 0.35, bumpFreq: 7, rough: 0.9 });
+  const leafMat = matte({ color: '#ffffff', vary: 0.12, freq: 0.7, rough: 0.62 });   // 植物はさらっと：凹凸を付けず、ほんのりつや
   // 葉は光を少し通す：日かげ側が真っ黒に沈まないよう、自分の色で少し光らせる
-  leafMat.emissive = new THREE.Color('#2E3A22'); leafMat.emissiveIntensity = 0.35;
+  leafMat.emissive = new THREE.Color('#3A4A22'); leafMat.emissiveIntensity = 0.42;
   const inst = (geo, mat, items, colorOf) => { const m = new THREE.InstancedMesh(geo, mat, items.length), mt = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), c = new THREE.Color();
     items.forEach((it, i) => { e.set(0, hash(it.p[0], it.p[2], 9) * 6.28, 0); q.setFromEuler(e); mt.compose(new THREE.Vector3(...it.p), q, new THREE.Vector3(...it.s)); m.setMatrixAt(i, mt); if (colorOf) m.setColorAt(i, c.set(colorOf(it)).multiplyScalar(it.k ?? 1)); });
     m.castShadow = true; m.receiveShadow = true; group.add(m); return m; };

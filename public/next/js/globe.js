@@ -31,13 +31,20 @@ export function landTexture(rings, W = 2048) {
   const ice = lx.createLinearGradient(0, 0, 0, H); ice.addColorStop(0, 'rgba(240,241,236,1)'); ice.addColorStop(0.13, 'rgba(240,241,236,.92)'); ice.addColorStop(0.19, 'rgba(240,241,236,0)'); ice.addColorStop(0.81, 'rgba(240,241,236,0)'); ice.addColorStop(0.86, 'rgba(240,241,236,.95)'); ice.addColorStop(1, 'rgba(240,241,236,1)');
   lx.globalCompositeOperation = 'source-atop'; lx.fillStyle = ice; lx.fillRect(0, 0, W, H);
   x.drawImage(lc, 0, 0); x.fillStyle = '#EEF0EA'; x.fillRect(0, Y(-79), W, H - Y(-79));
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  // 粗さ：海は少しなめらか（日の光がやわらかく照り返す）、陸はつや消し
+  const rc = document.createElement('canvas'); rc.width = W / 2; rc.height = H / 2; const rx = rc.getContext('2d');
+  const lm = document.createElement('canvas'); lm.width = rc.width; lm.height = rc.height; const lmx = lm.getContext('2d');
+  lmx.drawImage(lc, 0, 0, lm.width, lm.height); lmx.globalCompositeOperation = 'source-in'; lmx.fillStyle = '#ffffff'; lmx.fillRect(0, 0, lm.width, lm.height);
+  rx.fillStyle = 'rgb(160,160,160)'; rx.fillRect(0, 0, rc.width, rc.height); rx.drawImage(lm, 0, 0);
+  const rough = new THREE.CanvasTexture(rc);
+  return { map: t, rough };
 }
 
 export function buildGlobe(rings, pins = [], route = null) {
   const g = new THREE.Group();
-  const earth = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 64), matte({ vary: 0.06, freq: 9, bump: 0.06, bumpFreq: 30, rough: 1 }));
-  earth.material.map = landTexture(rings); earth.material.needsUpdate = true; earth.castShadow = false; earth.receiveShadow = false; g.add(earth);
+  const earth = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 64), matte({ vary: 0.04, freq: 6, rough: 1 }));
+  const tex = landTexture(rings); earth.material.map = tex.map; earth.material.roughnessMap = tex.rough; earth.material.needsUpdate = true; earth.castShadow = false; earth.receiveShadow = false; g.add(earth);
   // 大気：縁だけ薄く光る
   const atm = new THREE.Mesh(new THREE.SphereGeometry(1.035, 96, 48), new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.BackSide, blending: THREE.AdditiveBlending, uniforms: { c: { value: new THREE.Color('#A9CBE0') }, s: { value: new THREE.Vector3(1, 0, 0) } },

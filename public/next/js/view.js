@@ -6,6 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { sunColor } from './look.js';
 
 export function createView(canvas, opt = {}) {
@@ -45,9 +46,12 @@ export function createView(canvas, opt = {}) {
   const ao = new GTAOPass(scene, camera, 1, 1, undefined, { radius: 0.9, distanceExponent: 1.6, thickness: 2.5, scale: 1.25, samples: mobile ? 8 : 16, distanceFallOff: 1, screenSpaceRadius: false });
   ao.blendIntensity = 0.9;
   composer.addPass(ao);
+  // ピント：見ている所（回す中心）に合わせ、奥ほどぼかす。手前も少しだけ
+  const dof = new BokehPass(scene, camera, { focus: 26, aperture: 0.0006, maxblur: 0.015 });
+  composer.addPass(dof);
   composer.addPass(new OutputPass());
 
-  const v = { renderer, scene, camera, controls, sun, ao, need: true, focus: new THREE.Vector3(25, 0, 25), span: 30 };
+  const v = { renderer, scene, camera, controls, sun, ao, dof, need: true, focus: new THREE.Vector3(25, 0, 25), span: 30 };
   v.setPalette = (P) => {
     scene.background = sky(P.sky[0], P.sky[1]);
     scene.environment = envFrom(P.hemiSky, P.fog, P.hemiGround); scene.environmentIntensity = 0.6;
@@ -70,7 +74,10 @@ export function createView(canvas, opt = {}) {
   };
   v.resize = () => { const w = canvas.clientWidth, h = canvas.clientHeight; renderer.setSize(w, h, false); composer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); v.req(); };
   v.req = () => { v.need = true; };
-  v.render = () => { composer.render(); v.lastDraw = performance.now(); };
+  v.render = () => {
+    if (dof.enabled) { const f = camera.position.distanceTo(controls.target); dof.uniforms.focus.value = f; dof.uniforms.aperture.value = (v.blur ?? 0.016) / f; }
+    composer.render(); v.lastDraw = performance.now();
+  };
   controls.addEventListener('change', v.req);
   addEventListener('resize', v.resize);
   const loop = () => { requestAnimationFrame(loop); const moving = controls.update(); if (v.need || moving) { v.need = false; v.render(); } };

@@ -88,7 +88,7 @@ async function bootGlobe() {
   const rings = await (await fetch('/data/land110.json')).json();
   const v = createView($('#c'), { keep: Q.has('shot') });
   v.setPalette({ ...PALETTES.med, sky: ['#D9DEDB', '#EFEADF'] });
-  v.scene.fog = null; v.scene.environmentIntensity = 0.45; v.ao.enabled = false; v.sun.castShadow = false;
+  v.scene.fog = null; v.scene.environmentIntensity = 0.45; v.ao.enabled = false; v.dof.enabled = false; v.sun.castShadow = false;
   const med = E.SITES.med, taos = E.SITES.taos;
   const pins = [{ lat: 35.68, lon: 139.69, main: true, color: '#3F6E8C' }, { lat: Math.round(med.lat * 10) / 10, lon: Math.round(med.lon * 10) / 10, main: true }, { lat: Math.round(taos.lat * 10) / 10, lon: Math.round(taos.lon * 10) / 10 }];
   const globe = buildGlobe(rings, pins, [{ lat: 35.68, lon: 139.69 }, { lat: med.lat, lon: med.lon }]);
