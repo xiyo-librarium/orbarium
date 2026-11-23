@@ -449,6 +449,15 @@ function openBuild(cx, cy, o = {}) {
   const cellAny = (f) => !f ? null : ['terrain', 'block', 'floor', 'furn', 'wall', 'roof', 'veg'].includes(f.type) ? [f.x, f.y] : null;
   const inDraftHouse = (x, y) => (st.draft && st.draft.cells[`${x},${y}`]) || (dw.house && dw.house.cells[`${x},${y}`]);
   const T = () => toolDef(st.cat, st.tool);
+  /* 道具がねらうマス：木を切る・雨樋・動かす は指したもの。それ以外は木や家に隠れていても指した所の地面（段々の斜面でずれない）。
+     ものを積む道具だけ、指したブロックの上面ならその上に */
+  const aimAt = (e, f, t) => {
+    if (!t || ['cut', 'gutter', 'move'].includes(t.how)) return { c: cellAny(f), f };
+    if (t.how === 'point' && f && f.type === 'block' && f.face === 4 && !E.W.BLOCKS[f.b.t].overlay) return { c: [f.x, f.y], f };
+    const c = v.groundAt(e.clientX, e.clientY); if (!c) return { c: cellAny(f), f };
+    return { c, f: { type: 'terrain', x: c[0], y: c[1], face: 4, z: E.W.h(dw, c[0], c[1]) } };
+  };
+  const rectCells = (r) => { const out = []; for (let y = r.ya; y <= r.yb; y++) for (let x = r.xa; x <= r.xb; x++) out.push([x, y]); return out; };
   const pointZ = (f, x, y) => f && f.type === 'block' && f.face === 4 && f.x === x && f.y === y && !E.W.BLOCKS[f.b.t].overlay ? f.z + 1 : E.W.h(dw, x, y);
   const topAt = (x, y) => { let best = null; for (const k in dw.blocks) { const [bx, by, bz] = k.split(',').map(Number); if (bx === x && by === y && (!best || bz > best.z)) best = { x, y, z: bz, b: dw.blocks[k] }; } return best; };
   // 雨が入るか（タンク）：家（設計中）の軒から1m以内で、入口が軒より低い／小屋の屋根の隣で低い
@@ -551,11 +560,12 @@ function openBuild(cx, cy, o = {}) {
       if (!['add', 'remove'].includes(st.tool)) return;
       const c = cellOf(f0); if (!c) return;
       st.drag = { a: c, b: c }; cv.setPointerCapture(e.pointerId);
-      v.rect = { ...rectFrom(c, c), mode: st.tool === 'remove' ? 'remove' : 'add', ok: okCell }; v.draw();
+      v.rect = { ...rectFrom(c, c), mode: st.tool === 'remove' ? 'remove' : 'add', ok: okCell, house: true }; v.draw();
       return;
     }
-    const t = T(), c = cellAny(f0); if (!t || !c) return;
-    st.drag = { a: c, b: c, f: f0, path: [c], seen: new Set([String(c)]) }; cv.setPointerCapture(e.pointerId);
+    const t = T(), A = aimAt(e, f0, t), c = A.c; if (!t || !c) return;
+    st.drag = { a: c, b: c, f: A.f, path: [c], seen: new Set([String(c)]) }; cv.setPointerCapture(e.pointerId);
+    v.aim = [c];
     if (t.how === 'area') { v.rect = { ...rectFrom(c, c), mode: 'add', ok: areaOk(t) }; v.ghost = null; v.draw(); }
   });
   cv.addEventListener('pointermove', (e) => {
@@ -566,33 +576,35 @@ function openBuild(cx, cy, o = {}) {
     cv.style.cursor = 'crosshair';
     if (st.cat !== 'house') {
       const t = T(); if (!t) return;
+      const A = aimAt(e, f, t);
       if (st.drag) {
-        const c = cellAny(f); if (!c) return; st.drag.b = c;
-        if (t.how === 'area') { const r = rectFrom(st.drag.a, c), n = (r.xb - r.xa + 1) * (r.yb - r.ya + 1), pr = toolPrice(t); v.rect = { ...r, mode: 'add', ok: areaOk(t) }; tip.textContent = `${toolName(t)} ${r.xb - r.xa + 1}×${r.yb - r.ya + 1}m${pr != null ? ` · 約${(n * pr).toFixed(1)}万円` : ''}`; v.draw(); return; }
+        const c = A.c; if (!c) return; st.drag.b = c;
+        if (t.how === 'area') { const r = rectFrom(st.drag.a, c), n = (r.xb - r.xa + 1) * (r.yb - r.ya + 1), pr = toolPrice(t); v.rect = { ...r, mode: 'add', ok: areaOk(t) }; v.aim = rectCells(r); tip.textContent = `${toolName(t)} ${r.xb - r.xa + 1}×${r.yb - r.ya + 1}m${pr != null ? ` · 約${(n * pr).toFixed(1)}万円` : ''}`; v.draw(); return; }
         if (!st.drag.seen.has(String(c))) { st.drag.seen.add(String(c)); st.drag.path.push(c); }
+        v.aim = st.drag.path;
         v.ghost = { ok: true, cells: st.drag.path.map(([x, y]) => [x, y, E.W.h(dw, x, y), t.how === 'point' ? 1 : t.how === 'cut' ? 0.2 : 0.15]) };
         tip.textContent = `${toolName(t)} ×${st.drag.path.length}${toolPrice(t) ? ` · 約${(st.drag.path.length * toolPrice(t)).toFixed(1)}万円` : ''}`; v.draw(); return;
       }
-      const hi = hoverInfo(f); v.ghost = hi ? hi.ghost : null; tip.textContent = hi ? hi.say : f ? describeFace(f) : ''; v.draw(); return;
+      const hi = hoverInfo(A.f); v.ghost = hi ? hi.ghost : null; v.aim = A.c ? [A.c] : null; tip.textContent = hi ? hi.say : A.f ? describeFace(A.f) : ''; v.draw(); return;
     }
     tip.textContent = f ? describeFace(f) : '';
-    if (st.drag) { const c = cellOf(f); if (c) { st.drag.b = c; v.rect = { ...rectFrom(st.drag.a, c), mode: st.tool === 'remove' ? 'remove' : 'add', ok: okCell }; v.draw(); } return; }
+    if (st.drag) { const c = cellOf(f); if (c) { st.drag.b = c; v.rect = { ...rectFrom(st.drag.a, c), mode: st.tool === 'remove' ? 'remove' : 'add', ok: okCell, house: true }; v.draw(); } return; }
     if (isOpenTool()) { v.ghostEdge = f && f.type === 'wall' ? { e: f.e, t: st.tool === 'unopen' ? 'remove' : st.tool, low: v.wallMode !== 'up' } : null; v.draw(); return; }
     st.hoverFurn = f && f.type === 'furn' ? f.i : null;
     if (st.tool === 'furn') { const c = cellOf(f); if (c) st.hoverC = c; st.updateGhost(); cv.style.cursor = st.sel >= 0 ? 'grabbing' : st.hoverFurn != null ? 'grab' : 'default'; v.draw(); return; }
-    const c = cellOf(f); v.rect = c && ['add', 'remove'].includes(st.tool) ? { ...rectFrom(c, c), mode: st.tool === 'remove' ? 'remove' : 'add', ok: okCell } : null; v.draw();
+    const c = cellOf(f); v.rect = c && ['add', 'remove'].includes(st.tool) ? { ...rectFrom(c, c), mode: st.tool === 'remove' ? 'remove' : 'add', ok: okCell, house: true } : null; v.draw();
   });
-  cv.addEventListener('pointerleave', () => { if (!st.drag) { v.rect = null; v.ghostEdge = null; v.ghost = null; v.hoverCell = null; v.draw(); tip.textContent = ''; } });
+  cv.addEventListener('pointerleave', () => { if (!st.drag) { v.rect = null; v.ghostEdge = null; v.ghost = null; v.hoverCell = null; v.aim = null; v.draw(); tip.textContent = ''; } });
   cv.addEventListener('pointerup', (e) => {
     const f = v.pickAt(e.clientX, e.clientY);
     if (!st.cat) { if (isHouseFace(f)) { st.tab = 'plan'; st.setCat('house'); } return; }
     if (st.cat !== 'house') {
-      const t = T(), dr = st.drag; st.drag = null; v.rect = null; v.ghost = null;
+      const t = T(), dr = st.drag; st.drag = null; v.rect = null; v.ghost = null; v.aim = null;
       if (!t || !dr) return;
       const before = snap(); let err = null, n = 0;
       if (t.how === 'area') err = applyArea(t, dr.a, dr.b);
       else if (t.how === 'move' || t.how === 'gutter') { const r = applyAt(t, f || dr.f, dr.b[0], dr.b[1], {}); if (r) err = r; else n++; }
-      else { const state = {}; for (const [x, y] of dr.path) { const r = applyAt(t, dr.path.length === 1 ? f || dr.f : null, x, y, state); if (r) err = err || r; else n++; } }
+      else { const state = {}, f1 = dr.path.length === 1 ? aimAt(e, f, t).f || dr.f : null; for (const [x, y] of dr.path) { const r = applyAt(t, f1, x, y, state); if (r) err = err || r; else n++; } }
       if (snap() !== before) { st.undo.push(before); st.msg = err && n ? `一部は${err}` : ''; } else st.msg = err || '';
       redraw(); return;
     }

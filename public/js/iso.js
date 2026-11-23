@@ -344,13 +344,20 @@ export function createView(canvas, world, opt = {}) {
     }
     if (v.rect) {
       const { xa, xb, ya, yb, ok } = v.rect, z = hs ? hs.z : 0;
-      for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) rbox(list, x + 0.04, y + 0.04, x + 0.96, y + 0.96, Math.max(z, h(world, x, y)) + 0.02, 0.06, v.rect.mode === 'remove' ? '#D9534F' : ok(x, y) ? '#4C7BD9' : '#B9BDB8', { type: 'ghost' }, 0.55);
+      for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) rbox(list, x + 0.04, y + 0.04, x + 0.96, y + 0.96, (v.rect.house ? Math.max(z, h(world, x, y)) : groundTop(x, y)) + 0.02, 0.06, v.rect.mode === 'remove' ? '#D9534F' : ok(x, y) ? '#4C7BD9' : '#B9BDB8', { type: 'ghost' }, 0.55);
     }
     if (v.ghost) for (const gh of v.ghost.cells) box(list, gh[0], gh[1], gh[2], gh[3] ?? 1, v.ghost.ok ? '#F0A85A' : '#D9534F', { type: 'ghost' }, 0.5);
     list.sort((p, q) => p.depth - q.depth);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!v.top) { const gr = ctx.createLinearGradient(0, 0, 0, canvas.height); gr.addColorStop(0, '#D6E8F2'); gr.addColorStop(0.6, '#F1F3EC'); gr.addColorStop(1, '#F6F0E2'); ctx.fillStyle = gr; ctx.fillRect(0, 0, canvas.width, canvas.height); }
     for (const it of list) it.draw(ctx);
+    // ねらっているマス：木や家に隠れていても見えるよう、いちばん上に地面の高さで枠を描く
+    if (v.aim && v.aim.length) {
+      const g0 = geom(), q = (x, y) => { const z = groundTop(x, y); return [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]].map(([a, b]) => project(a, b, z + 0.01, g0)); };
+      const strokeQ = (pts, col, wdt) => { ctx.strokeStyle = col; ctx.lineWidth = wdt * v.dpr; ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (const r of pts) ctx.lineTo(r[0], r[1]); ctx.closePath(); ctx.stroke(); };
+      const many = v.aim.length > 1;
+      for (const [x, y] of v.aim) { const pts = q(x, y); strokeQ(pts, 'rgba(255,255,255,.95)', many ? 1.6 : 3); strokeQ(pts, 'rgba(25,45,60,.85)', many ? 0.8 : 1.4); }
+    }
     // 当たり判定用
     v.faces = [];
     pctx.clearRect(0, 0, pick.width, pick.height);
@@ -371,6 +378,8 @@ export function createView(canvas, world, opt = {}) {
       ctx.strokeStyle = 'rgba(255,170,40,.9)'; ctx.lineWidth = 2 * v.dpr; for (let i = 0; i < 8; i++) { const a2 = i * Math.PI / 4; ctx.beginPath(); ctx.moveTo(sx + Math.cos(a2) * 12 * v.dpr, sy + Math.sin(a2) * 12 * v.dpr); ctx.lineTo(sx + Math.cos(a2) * 16 * v.dpr, sy + Math.sin(a2) * 16 * v.dpr); ctx.stroke(); }
     }
   }
+  /* 地面（と畑・マルチ）の上面の高さ */
+  function groundTop(x, y) { const g = h(world, x, y), b = at(world, x, y, g); return g + (b && BLOCKS[b.t]?.kind === 'bed' ? 0.14 : 0); }
   /* ---------- 形の部品：球・円柱・接地の影 ---------- */
   const dep = (x, y, z, ht = 1) => { const g = geom(); return v.top ? (z + ht) * 10 : project(x + 0.5, y + 0.5, z, g)[2] + z * 0.001 + ht * 0.0005; };
   function sunScreen() { const g = geom(), S = v.sun.dir, a = project(v.cx, v.cy, 0, g), b = project(v.cx + S[0], v.cy + S[1], S[2], g); const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [dx / l, dy / l]; }
@@ -1079,6 +1088,21 @@ export function createView(canvas, world, opt = {}) {
   }
   v.size = size; v.draw = draw;
   v.screenOf = (x, y, z) => { const g = geom(), p = project(x, y, z, g), r = canvas.getBoundingClientRect(); return [r.left + p[0] / v.dpr, r.top + p[1] / v.dpr]; };
+  /* 地面で選ぶ：木・家・屋根に隠れていても、指した所の地面（畑なら畑の上面）のマスを返す。
+     見えているマスの上面のうち、指した点をふくむいちばん手前のもの。段差の側面を指したときは、上面の中心がいちばん近いマス */
+  v.groundAt = (clientX, clientY) => {
+    const r = canvas.getBoundingClientRect(), px = (clientX - r.left) * v.dpr, py = (clientY - r.top) * v.dpr, g0 = geom();
+    const x0 = Math.max(0, v.cx - v.R), x1 = Math.min(N - 1, v.cx + v.R), y0 = Math.max(0, v.cy - v.R), y1 = Math.min(N - 1, v.cy + v.R);
+    let best = null, bd = -1e9, near = null, nd = 1e18;
+    const inside = (pts) => { let sgn = 0; for (let i = 0; i < 4; i++) { const a = pts[i], b = pts[(i + 1) % 4], c = (b[0] - a[0]) * (py - a[1]) - (b[1] - a[1]) * (px - a[0]); if (Math.abs(c) < 1e-9) continue; const s2 = Math.sign(c); if (sgn && s2 !== sgn) return false; sgn = s2; } return true; };
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const z = groundTop(x, y), pts = [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]].map(([a, b]) => project(a, b, z, g0));
+      if (inside(pts)) { const d = pts[0][2] + pts[2][2] + z * 0.01; if (d > bd) { bd = d; best = [x, y]; } }
+      const c = project(x + 0.5, y + 0.5, z, g0), dd = (c[0] - px) ** 2 + (c[1] - py) ** 2; if (dd < nd) { nd = dd; near = [x, y]; }
+    }
+    if (best) return best;
+    return near && nd < (g0.tw || g0.s || 40) ** 2 ? near : null;
+  };
   v.pickAt = (clientX, clientY) => {
     const r = canvas.getBoundingClientRect(), x = Math.round((clientX - r.left) * v.dpr), y = Math.round((clientY - r.top) * v.dpr);
     if (x < 0 || y < 0 || x >= pick.width || y >= pick.height) return null;
