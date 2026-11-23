@@ -1,6 +1,6 @@
 /* 土地：本物の標高（1m の段）を、描くときだけなだらかな斜面にする。草・木・畑 */
 import * as THREE from 'three';
-import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { matte, hash } from './look.js';
 
 /* 座標：world.x＝東 → three.x、world.y＝南 → three.z、高さ → three.y */
@@ -73,35 +73,5 @@ export function buildLand(world, N, P, opt = {}) {
 }
 
 /* 木：幹と、でこぼこした葉のかたまり（1つの形を大きさと色を変えて使い回す） */
-export function buildTrees(list, at, P, opt = {}) {
-  const group = new THREE.Group();
-  // 葉のかたまり：丸みのある小さなふくらみ。法線は球の向きに寄せて、ふんわり見せる
-  let blobGeo = new THREE.IcosahedronGeometry(1, matchMedia('(pointer: coarse)').matches ? 2 : 3); blobGeo.deleteAttribute('uv'); blobGeo.deleteAttribute('normal'); blobGeo = mergeVertices(blobGeo);   // 頂点を共有させて、なめらかな面に
-  const p = blobGeo.getAttribute('position'), v = new THREE.Vector3();
-  for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); const n = 1 + 0.07 * Math.sin(v.x * 4.1 + v.y * 2.7) * Math.cos(v.z * 3.3 - v.x * 1.7) + 0.035 * Math.sin(v.y * 8 + v.z * 7); v.multiplyScalar(n); v.y *= 0.84; p.setXYZ(i, v.x, v.y, v.z); }
-  blobGeo.computeVertexNormals();
-  { const nm = blobGeo.getAttribute('normal'), w2 = new THREE.Vector3(); for (let i = 0; i < nm.count; i++) { v.fromBufferAttribute(p, i).normalize(); w2.fromBufferAttribute(nm, i).lerp(v, 0.5).normalize(); nm.setXYZ(i, w2.x, w2.y, w2.z); } }
-  const coneGeo = new THREE.ConeGeometry(1, 1, 9, 1, false); coneGeo.translate(0, 0.5, 0);
-  const trunkGeo = new THREE.CylinderGeometry(0.6, 1, 1, 7); trunkGeo.translate(0, 0.5, 0);
-  const blobs = [], cones = [], trunks = [];
-  for (const t of list) {
-    const z = at(t.x, t.y), s = t.s ?? 0.5, seed = Math.floor(s * 1e6);
-    if (opt.skip && opt.skip(t)) continue;
-    if (t.kind === 'shrub') { const r = t.r * 1.05; blobs.push({ p: [t.x, z + t.h * 0.42, t.y], s: [r, t.h * 0.62, r], c: P.leaf[seed % 4], k: 0.92 }); continue; }
-    trunks.push({ p: [t.x, z, t.y], s: [Math.max(0.09, t.r * 0.1), t.h * (t.kind === 'pine' ? 0.55 : 0.62), Math.max(0.09, t.r * 0.1)] });
-    if (t.kind === 'pine') { for (let k = 0; k < 4; k++) { const f = 1 - k * 0.22; cones.push({ p: [t.x, z + t.h * (0.25 + k * 0.17), t.y], s: [t.r * f, t.h * 0.42, t.r * f], c: P.pine }); } continue; }
-    const top = z + t.h * 0.66, R = t.r, n = 4 + Math.floor(s * 3);
-    blobs.push({ p: [t.x, top, t.y], s: [R * 0.95, R * 0.9, R * 0.95], c: P.leaf[seed % 4], k: 1 });
-    for (let k = 0; k < n; k++) { const a = k / n * 6.28 + s * 3, rr = R * (0.55 + 0.2 * hash(t.x, k, 2)); blobs.push({ p: [t.x + Math.cos(a) * rr, top - R * (0.15 + 0.25 * hash(t.y, k, 3)), t.y + Math.sin(a) * rr], s: Array(3).fill(R * (0.48 + 0.18 * hash(t.x, t.y, k))), c: P.leaf[(seed + k) % 4], k: 0.95 + 0.1 * hash(k, t.x, 4) }); }
-  }
-  const leafMat = matte({ color: '#ffffff', vary: 0.12, freq: 0.7, rough: 0.62 });   // 植物はさらっと：凹凸を付けず、ほんのりつや
-  // 葉は光を少し通す：日かげ側が真っ黒に沈まないよう、自分の色で少し光らせる
-  leafMat.emissive = new THREE.Color('#3A4A22'); leafMat.emissiveIntensity = 0.42;
-  const inst = (geo, mat, items, colorOf) => { const m = new THREE.InstancedMesh(geo, mat, items.length), mt = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), c = new THREE.Color();
-    items.forEach((it, i) => { e.set(0, hash(it.p[0], it.p[2], 9) * 6.28, 0); q.setFromEuler(e); mt.compose(new THREE.Vector3(...it.p), q, new THREE.Vector3(...it.s)); m.setMatrixAt(i, mt); if (colorOf) m.setColorAt(i, c.set(colorOf(it)).multiplyScalar(it.k ?? 1)); });
-    m.castShadow = true; m.receiveShadow = true; group.add(m); return m; };
-  if (blobs.length) inst(blobGeo, leafMat, blobs, it => it.c);
-  if (cones.length) inst(coneGeo, leafMat, cones, it => it.c);
-  if (trunks.length) inst(trunkGeo, matte({ color: P.trunk, vary: 0.2, freq: 3, bump: 0.6, bumpFreq: 6 }), trunks);
-  return group;
-}
+
+export { buildTrees } from './trees.js';

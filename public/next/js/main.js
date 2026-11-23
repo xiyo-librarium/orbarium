@@ -36,7 +36,10 @@ async function boot() {
   const blockedCell = new Set(Object.keys(w.blocks).map(k => k.split(',').slice(0, 2).join(',')));
   const land = buildLand(w, N, P, { blocked: (x, y) => blockedCell.has(`${x},${y}`) });
   v.scene.add(land.group);
-  const trees = buildTrees(E.W.vegObjects(w), land.at, P, { skip: (t) => hs.cells[`${t.cx},${t.cy}`] || blockedCell.has(`${t.cx},${t.cy}`) });
+  // 家に枝がかかる木は、建てるときに切ったことにする（屋根を突き抜けないように）
+  const hcs = Object.keys(hs.cells).map(k => k.split(',').map(Number));
+  const nearHouse = (t) => t.kind !== 'shrub' && hcs.some(([x, y]) => Math.hypot(Math.max(x - t.x, 0, t.x - x - 1), Math.max(y - t.y, 0, t.y - y - 1)) < t.r * 1.1);
+  const trees = buildTrees(E.W.vegObjects(w), land.at, P, { skip: (t) => hs.cells[`${t.cx},${t.cy}`] || blockedCell.has(`${t.cx},${t.cy}`) || nearHouse(t) });
   v.scene.add(trees);
   v.scene.add(buildHouse(hs, P, land.at));
   v.scene.add(buildBlocks(w, land.at, P));

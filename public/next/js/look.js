@@ -19,7 +19,7 @@ export function matte(o = {}) {
   const U = {
     uVary: { value: o.vary ?? 0.08 }, uFreq: { value: o.freq ?? 1.3 },
     uPatch: { value: new THREE.Color(o.patch ?? o.color ?? 0xffffff) }, uPatchAt: { value: o.patch ? (o.patchAt ?? 0.62) : 2.0 },
-    uBump: { value: o.bump ?? 0.0 }, uBumpFreq: { value: o.bumpFreq ?? 3.0 }
+    uBump: { value: o.bump ?? 0.0 }, uBumpFreq: { value: o.bumpFreq ?? 3.0 }, uSpec: { value: o.spec ?? 1.0 }
   };
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
@@ -29,7 +29,7 @@ export function matte(o = {}) {
       #else
         vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
       #endif`);
-    sh.fragmentShader = `varying vec3 vWPos; uniform float uVary, uFreq, uPatchAt, uBump, uBumpFreq; uniform vec3 uPatch;\n${NOISE}\n` + sh.fragmentShader
+    sh.fragmentShader = `varying vec3 vWPos; uniform float uVary, uFreq, uPatchAt, uBump, uBumpFreq, uSpec; uniform vec3 uPatch;\n${NOISE}\n` + sh.fragmentShader
       .replace('#include <color_fragment>', `#include <color_fragment>
         { float n = fbm(vWPos * uFreq);
           diffuseColor.rgb *= 1.0 + uVary * (n - 0.5) * 2.0;
@@ -37,7 +37,10 @@ export function matte(o = {}) {
           diffuseColor.rgb = mix(diffuseColor.rgb, uPatch * (0.92 + 0.16 * n), pm); }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
         if (uBump > 0.0) { vec3 gW = fbmGrad(vWPos * uBumpFreq, 0.07); vec3 gV = (viewMatrix * vec4(gW, 0.0)).xyz;
-          normal = normalize(normal - uBump * (gV - dot(gV, normal) * normal)); }`);
+          normal = normalize(normal - uBump * (gV - dot(gV, normal) * normal)); }`)
+      // 照り返しの強さ（spec）：葉や布のように、つやを抑えたいもの用
+      .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+        material.specularColorBlended *= uSpec; material.specularF90 *= uSpec;`);
   };
   m.customProgramCacheKey = () => 'matte';
   return m;
@@ -49,14 +52,14 @@ export const PALETTES = {
     sky: ['#C6D6D7', '#EEE9DC'], fog: '#E7E4D8', hemiSky: '#C9D9E0', hemiGround: '#9A8A62',
     ground: { 10: '#557A3C', 20: '#7E9A4C', 30: '#86A450', 40: '#9AA25A', 50: '#A49C8A', 60: '#B49C76', 80: '#6E8C95', 90: '#6F8F5E', 95: '#557A3C', 100: '#86A450' },
     soil: '#8A6A4A', soilDark: '#6C5038', grass: '#6F9440', grassTip: '#A8BC5C',
-    leaf: ['#557F37', '#62893D', '#4F7633', '#6E9443'], pine: '#4B6A48', trunk: '#5B4433',
+    leaf: ['#557F37', '#62893D', '#4F7633', '#6E9443'], pine: '#4B6A48', euca: '#7A8F66', trunk: '#5B4433', bark: '#BCB09A',
     plaster: '#C4A27C', plasterPatch: '#B38E66', lime: '#EDE6D8', limePatch: '#CDB79A', stone: '#A7A193', tile: '#B26A4B', wood: '#8A6440', glass: '#3E4A4A'
   },
   taos: {
     sky: ['#BFD2DD', '#F1E6D2'], fog: '#EDE3D0', hemiSky: '#C8D8E6', hemiGround: '#B0905E',
     ground: { 10: '#77805A', 20: '#A49A6A', 30: '#B4A77A', 40: '#B7AA76', 50: '#AFA190', 60: '#C4A57A', 80: '#7B95A0', 90: '#8E956A', 95: '#77805A', 100: '#B4A77A' },
     soil: '#9C7552', soilDark: '#7A5A3E', grass: '#A79F68', grassTip: '#C6BC86',
-    leaf: ['#6E7F4E', '#7A8A55', '#66784A', '#828F5A'], pine: '#56684C', trunk: '#5E4936',
+    leaf: ['#6E7F4E', '#7A8A55', '#66784A', '#828F5A'], pine: '#56684C', euca: '#87936E', trunk: '#5E4936', bark: '#B8AA92',
     plaster: '#C99E74', plasterPatch: '#B58A60', lime: '#EDE3D1', limePatch: '#CDB08C', stone: '#ADA392', tile: '#B26A4B', wood: '#7E5E40', glass: '#3E4A4A'
   }
 };
