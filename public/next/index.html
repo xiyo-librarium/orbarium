@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orbarium · 作り直し中</title>
+<meta name="robots" content="noindex">
+<script type="importmap">{ "imports": { "three": "/vendor/three.module.js", "three/addons/": "/vendor/addons/" } }</script>
+<link rel="stylesheet" href="/next/next.css">
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hud">
+  <div class="chip" id="where">読みこみ中…</div>
+  <label class="sun"><span aria-hidden="true">☀</span><input type="range" id="hour" min="6" max="18" step="0.25" value="10" aria-label="時刻"><span id="hourTxt"></span></label>
+</div>
+<p class="note">作り直しの試作です。いまは見た目だけで、作る道具はまだありません。<a href="/">今の版へ</a></p>
+<script type="module" src="/next/js/main.js"></script>
+</body>
+</html>
