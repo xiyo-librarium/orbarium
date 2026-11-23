@@ -284,7 +284,8 @@ async function boot() {
   // 下書きの壁を押す：壁→窓→扉
   function draftWallTap(p) {
     const D = G.draft; if (!D || !D.house) return;
-    const e = nearestEdge(D.house.d, p.point); if (!e) return;
+    if (stage.cut) { toast('壁を下げている間は、窓や扉は変えない'); return; }
+    const e = nearestEdge(D.house.d, p.point, p.normal); if (!e) { toast('外壁を押すと 壁→窓→扉'); return; }
     const d = W.cloneHouse(D.house.d), cur = d.open[e], next = !cur ? 'window' : cur === 'window' || cur === 'window2' ? 'door' : null;
     if (next) d.open[e] = next; else delete d.open[e];
     setDraft(houseDraft(d, D.house.hideId, D.cuts));
@@ -347,21 +348,28 @@ async function boot() {
     return null;
   }
   // 押した点にいちばん近い外壁の辺（50cm 以内）
-  function nearestEdge(b, pt) {
+  // 押した所が外壁か：壁の線の外側（または外を向いた面）で、壁の厚み・腰壁・窓台の出っぱりの中、高さが壁の範囲。
+  // 床や家具（壁の内側）、屋根、足もとの石は除く
+  function nearestEdge(b, pt, normal) {
+    if (!normal || pt.y < b.z - 0.05 || pt.y > b.z + W.HOUSE_H + 0.05) return null;
     const px = pt.x, py = pt.z; let best = null, bd = 1e9;
-    if (pt.y > b.z + W.HOUSE_H + 0.05) return null;
     for (const o of W.houseOuterEdges(b)) {
       const [t, r] = o.e.split(':'), [ex, ey] = r.split(',').map(Number);
       const [ax, ay, bx, by] = t === 'h' ? [ex, ey, ex + 1, ey] : [ex, ey, ex, ey + 1];
-      const u = Math.max(0, Math.min(1, ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2)));
-      const dd = Math.hypot(px - (ax + (bx - ax) * u), py - (ay + (by - ay) * u)); if (dd < bd) { bd = dd; best = o; }
+      const u = ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2); if (u < -0.05 || u > 1.05) continue;
+      const [ox, oy] = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] }[o.dir];
+      const sd = (px - ax) * ox + (py - ay) * oy;   // 壁の線から外へどれだけ
+      const facing = normal.x * ox + normal.z * oy >= 0.5, outside = sd >= -0.02 && pt.y > b.z + 0.3;
+      if (Math.abs(sd) > 0.27 || !(facing || outside)) continue;
+      if (Math.abs(sd) < bd) { bd = Math.abs(sd); best = o; }
     }
-    return best && bd <= 0.5 ? best.e : null;
+    return best ? best.e : null;
   }
   // 壁を押す：壁→窓→扉→壁
   function wallTap(p) {
     const w = s.world, b = W.buildingById(w, p.id); if (!b) return;
-    const e = nearestEdge(b, p.point); if (!e) { select(p); return; }
+    if (stage.cut) { select(p); toast('壁を下げている間は、窓や扉は変えない（上のボタンで壁を戻す）'); return; }   // 中を見ているときに、床のつもりで壁を押してしまわないように
+    const e = nearestEdge(b, p.point, p.normal); if (!e) { select(p); return; }
     const best = { e };
     const cur = b.open[best.e], next = !cur ? 'window' : cur === 'window' || cur === 'window2' ? 'door' : null;
     act(() => { const d = W.cloneHouse(b); const err = W.draftSetOpening(d, best.e, next); if (err) return err; return W.buildBuilding(s, d); }, next === 'window' ? '窓にした' : next === 'door' ? '扉にした' : '壁にした');
@@ -525,7 +533,7 @@ async function boot() {
   canvas.addEventListener('pointerdown', (e) => {
     if (down && down.id !== e.pointerId) { if (down.trace) hideTrace(); down = null; return; }   // 2本目の指：回す・寄るに任せる
     if (e.button !== 0) return;
-    down = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId, trace: null };
+    down = { x: e.clientX, y: e.clientY, ts: e.timeStamp, id: e.pointerId, trace: null };
     if (G.mode === 'near' && traces(G.tool)) {
       const n = ndcOf(e), p = stage.pick(n), sub = G.sub[G.tool];
       const noTrace = !p ? false : ['building', 'draft', 'tank'].includes(p.kind) || (G.tool === 'tree' && p.kind === 'trees');
@@ -540,14 +548,15 @@ async function boot() {
     else tip($('#tip').innerHTML, e.clientX, e.clientY);
   });
   const up = (e) => {
-    if (Q.has('debug')) console.log('up', e.type, !!down, down && down.id, e.pointerId, down && !!down.trace);
+    if (Q.has('debug')) console.log('up', e.type, !!down, down && down.id, e.pointerId, down && !!down.trace, down && Math.round(e.timeStamp - down.ts));
     if (!down || e.pointerId !== down.id) return;
     const d = down; down = null;
-    const moved = Math.hypot(e.clientX - d.x, e.clientY - d.y), quick = performance.now() - d.t < 1500;
+    const moved = Math.hypot(e.clientX - d.x, e.clientY - d.y), quick = e.timeStamp - d.ts < 500;   // 長押しは押したことにしない
     if (d.trace) { hideTrace(); if (e.type === 'pointerup' && (d.trace.a.x !== d.trace.b.x || d.trace.a.y !== d.trace.b.y)) { traced(d.trace); return; } }
     if (e.type === 'pointerup' && moved < 8 && quick) onTap(e);
   };
   canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());   // 長押しのメニューを出さない
   function onTap(e) {
     const n = ndcOf(e), p = stage.pick(n);
     if (Q.has('debug')) console.log('tap', G.mode, G.tool, p && p.kind, p && p.id, p && p.point && [p.point.x.toFixed(2), p.point.y.toFixed(2), p.point.z.toFixed(2)].join(','));
