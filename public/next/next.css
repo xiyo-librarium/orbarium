@@ -235,3 +235,12 @@ svg.clim { stroke: none; } svg.clim .ax, svg.clim .rb { stroke: none; } svg.clim
 .mailview .mv-in { width: min(540px, calc(100% - 28px)); max-height: calc(100vh - 60px); overflow: auto; border-radius: 18px; }
 .mailview .mail { box-shadow: 0 18px 50px rgba(20, 30, 25, .3); }
 @media (max-width: 640px) { .notif { top: 10px; right: 10px; left: 10px; width: auto; transform: translateY(-140%); } .notif.in { transform: none; } }
+/* 改築の下書き：カードを開いているときは、カードの中のボタンで決める（下の帯は隠す） */
+body.carded.remodel #draft { display: none; }
+.card .flow.remodel { background: #FFF6E2; border: 1px solid #E8D3A4; }
+.card .flow.remodel .acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
+.card .flow.remodel .acts button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 6px 12px; cursor: pointer; font: inherit; font-size: 12.5px; }
+.card .flow.remodel .acts button.yes { background: #6E8B5B; border-color: #6E8B5B; color: #fff; font-weight: 600; }
+.card .flow.remodel .bad { color: var(--bad); }
+@media (max-width: 640px) { body.drafting .pick { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 84px + 100px); } }
+.card .flow.remodel { position: sticky; top: -14px; z-index: 2; box-shadow: 0 6px 14px rgba(30, 40, 35, .08); }

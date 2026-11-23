@@ -29,7 +29,7 @@ export function createStage(v, s, P) {
     const blockedCell = new Set(Object.keys(lw.blocks).map(k => k.split(',').slice(0, 2).join(',')));
     const bedLevel = bedLevelOf(lw);
     const sigLand = JSON.stringify([Array.from(lw.H), bedLevel, w.H0 ? Array.from(w.H0).length : 0, [...blockedCell].sort(), bs.map(b => [Object.keys(b.cells), b.z])]);
-    const sigHouse = JSON.stringify([bs, W.blocksOf(w, 'tank').map(t => [t.x, t.y, t.z]), st.cut, st.draft && st.draft.d && [st.draft.d, st.draft.hideId]]);
+    const sigHouse = JSON.stringify([bs, W.blocksOf(w, 'tank').map(t => [t.x, t.y, t.z]), st.cut, st.draft && st.draft.d && [st.draft.d, st.draft.hideId, st.draft.real]]);
     const fed = W.blocksOf(w, 'tank').length ? W.analyze(w, E.SITES[s.site], s.persons.length).fedKeys : [];   // 雨が入るタンク（水の窓を青く、つながりの管を描く）
     const sigBlocks = JSON.stringify(w.blocks) + sigLand.length + fed.join(' ') + JSON.stringify(bs.map(b => Object.keys(b.cells)));
     const cutCells = new Set(st.draft ? st.draft.cut : []);
@@ -50,7 +50,9 @@ export function createStage(v, s, P) {
       const g = new THREE.Group();
       const tanks = W.blocksOf(w, 'tank').map(t => ({ x: t.x, y: t.y, z: t.z }));
       for (const b of bs) { if (st.draft && W.bid(b) === st.draft.hideId) continue; const hg = buildHouse(b, P, st.at, { tanks, cut: st.cut, lat: E.SITES[s.site]?.lat, free: (x, y) => !W.buildingAt(w, x, y) && !Object.keys(w.blocks).some(k => k.startsWith(`${x},${y},`)) }); hg.userData.pick = { kind: 'building', id: W.bid(b) }; g.add(hg); }
-      if (st.draft && st.draft.d) { const hg = buildHouse(st.draft.d, P, st.at, { tanks, cut: st.cut, lat: E.SITES[s.site]?.lat, free: (x, y) => !W.buildingAt(w, x, y) && !Object.keys(w.blocks).some(k => k.startsWith(`${x},${y},`)) }); ghostify(hg); hg.userData.pick = { kind: 'draft' }; g.add(hg); }
+      if (st.draft && st.draft.d) { const hg = buildHouse(st.draft.d, P, st.at, { tanks, cut: st.cut, lat: E.SITES[s.site]?.lat, free: (x, y) => !W.buildingAt(w, x, y) && !Object.keys(w.blocks).some(k => k.startsWith(`${x},${y},`)) });
+        // 改築の下書きは本物の見た目で（押すと建物として扱う）。新しい建物の下書きは白い模型
+        if (st.draft.real && st.draft.hideId) hg.userData.pick = { kind: 'building', id: st.draft.hideId }; else { ghostify(hg); hg.userData.pick = { kind: 'draft' }; } g.add(hg); }
       swap('houses', g); st.sig.house = sigHouse;
     }
     if (sigTrees !== st.sig.trees || changed) {

@@ -267,11 +267,11 @@ async function boot() {
   const scratch = () => ({ ...s, world: JSON.parse(JSON.stringify(s.world)), cash: s.cash });
   // dr = { what, apply(t) → 理由 or null, house?: {d, hideId}, cuts?, land?: 地形が変わるか, real?: 模型でなく本物の見た目, note?, ok? }
   function setDraft(dr) {
-    if (!dr) { G.draft = null; stage.draft = null; $('#draft').hidden = true; document.body.classList.remove('drafting'); prev.count = 0; stage.rebuild(); syncTop(); return; }
+    if (!dr) { const wasR = G.draft?.kind === 'remodel'; document.body.classList.remove('remodel'); G.draft = null; stage.draft = null; $('#draft').hidden = true; document.body.classList.remove('drafting'); prev.count = 0; stage.rebuild(); syncTop(); if (wasR) refreshPanels(); return; }
     const t = scratch(); let err = null;
     try { err = dr.apply(t); } catch (e) { console.error(e); err = 'うまくいかなかった'; }
     const nb = {}; if (!err) for (const k in t.world.blocks) if (JSON.stringify(s.world.blocks[k]) !== JSON.stringify(t.world.blocks[k])) nb[k] = t.world.blocks[k];
-    G.draft = { ...dr, t: err ? null : t, err, cost: err ? 0 : s.cash - t.cash };
+    G.draft = { ...dr, t: err ? null : t, err, cost: err ? 0 : s.cash - t.cash }; document.body.classList.toggle('remodel', dr.kind === 'remodel');
     stage.draft = { d: dr.house ? (err ? dr.house.d : W.buildingById(t.world, W.bid(dr.house.d)) || dr.house.d) : null, hideId: dr.house ? dr.house.hideId : null,
       cut: (dr.cuts || []).map(c => c.join(',')), blocks: dr.house ? null : nb, landWorld: dr.land && !err ? t.world : null, real: !!dr.real };
     if (!dr.land) prev.count = 0;
@@ -281,12 +281,37 @@ async function boot() {
     $('#draftYes').disabled = !!err; $('#draftYes').textContent = dr.ok || '建てる';
     $('#draft').hidden = false; document.body.classList.add('drafting'); syncTop();
   }
-  $('#draftNo').onclick = () => setDraft(null);
+  /* ---------- 改築の下書き：建物のカード・壁・家具の変更は、まず下書き（本物の見た目で描く）。［改築する］で初めて払う ---------- */
+  const remodelOf = (id) => (G.draft && G.draft.kind === 'remodel' && G.draft.rid === id ? G.draft : null);
+  const bOf = (id) => remodelOf(id)?.house.d || W.buildingById(s.world, id);
+  function remodelDraft(id, d) {
+    const cur = W.buildingById(s.world, id), est = W.estimate(s.world, cur, d), name = id === 'main' ? '母屋' : '建物';
+    const what = est.lines.length ? est.lines.slice(0, 3).map(l => l.label).join('・') + (est.lines.length > 3 ? ` ほか${est.lines.length - 3}件` : '') : '模様替え';
+    return { kind: 'remodel', rid: id, what: `${name}の改築：${what}`, house: { d, hideId: id }, real: true, cuts: [], ok: '改築する', done: `${name}を改築した`,
+      note: '試しているあいだはお金はかからない。［改築する］で払う。［やめる］で元どおり',
+      apply: (t) => { const err = W.buildBuilding(t, W.cloneHouse(d)); if (err) return err; return autoGutter(t); } };
+  }
+  const refreshPanels = () => { if (G.sel) renderCard(); if (PK) renderPick(); if (FS) renderFurn(); };
+  function remodel(id, fn) {
+    const base = bOf(id); if (!base) return 'その建物がない';
+    if (G.draft && !remodelOf(id)) { const was = G.draft.what; setDraft(null); toast(`下書き（${was}）をやめて、こちらを試す`); }
+    const d = W.cloneHouse(base), err = fn(d); if (err) { toast(err); return err; }
+    if (JSON.stringify(d) === JSON.stringify(W.buildingById(s.world, id))) setDraft(null);   // 元どおりに戻したら下書きは消える
+    else setDraft(remodelDraft(id, d));
+    refreshPanels(); return null;
+  }
+  // お金のかからない変更（家具を動かす・回す）：下書きがあれば下書きに、なければその場で
+  function freeEdit(id, fn, msg) {
+    if (remodelOf(id)) return remodel(id, fn);
+    return act(() => { const d = W.cloneHouse(W.buildingById(s.world, id)); const e = fn(d); if (e) return e; return W.buildBuilding(s, d); }, msg);
+  }
+  $('#draftNo').onclick = () => { const r = G.draft?.kind === 'remodel'; setDraft(null); if (r) { refreshPanels(); toast('改築の下書きをやめた（元どおり）'); } };
   $('#draftYes').onclick = () => {
     const D = G.draft; if (!D || D.err) return;
     const t = scratch(); const err = D.apply(t); if (err) { toast(err); return; }
     setDraft(null);
     act(() => { s.world = t.world; s.cash = t.cash; return null; }, D.done || '置いた');
+    if (D.kind === 'remodel') refreshPanels();
   };
 
   /* 家の下書き */
@@ -399,7 +424,7 @@ async function boot() {
   }
   // 壁を押す：その場に［壁｜窓｜二重窓｜扉］。外れたところ（床・屋根）は建物のカード
   function wallTap(p) {
-    const b = W.buildingById(s.world, p.id); if (!b) return;
+    const b = bOf(p.id); if (!b) return;
     const e = nearestEdge(b, p.point, p.normal, stage.cut);
     if (!e) { if (stage.cut) { const h = furnHit(p); if (h) { selectFurn(h); return; } } select(p); return; }
     openPick({ id: p.id, e });
@@ -412,7 +437,7 @@ async function boot() {
   const markMat = new THREE.MeshBasicMaterial({ color: 0xF0B84A, transparent: true, opacity: 0.5, depthWrite: false });
   const wallMark = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), markMat); wallMark.visible = false; wallMark.renderOrder = 6; v.scene.add(wallMark);
   let PK = null;
-  const pkHouse = () => PK && (PK.draft ? G.draft?.house?.d : W.buildingById(s.world, PK.id));
+  const pkHouse = () => PK && (PK.draft ? G.draft?.house?.d : bOf(PK.id));
   const edgeMid = (b, e) => { const [t, r] = e.split(':'), [ex, ey] = r.split(',').map(Number), along = t === 'h'; return { along, x: along ? ex + 0.5 : ex, y: along ? ey : ey + 0.5 }; };
   function openPick(o) { select(null); selectFurn(null); PK = o; renderPick(); }
   function closePick() { PK = null; pk.hidden = true; wallMark.visible = false; v.req(); }
@@ -424,14 +449,14 @@ async function boot() {
       if (o.cur) return o;
       const d = W.cloneHouse(b); W.draftSetOpening(d, e, t || null); const st = W.settleFurn(d); o.moved = st.moved;
       const pr = W.houseProblems(d); if (pr.length) { o.why = pr[0].replace('（出入りできない）', ''); return o; }
-      if (!PK.draft) { const tt = scratch(); const err = W.buildBuilding(tt, d); if (err) o.why = err; else o.cost = s.cash - tt.cash; }
+      if (!PK.draft) { const tt = scratch(); const err = W.buildBuilding(tt, d); if (err) o.why = err; else o.cost = (s.cash - tt.cash) - (remodelOf(PK.id)?.cost || 0); }   // 今の下書きからの差
       return o;
     });
   }
   function renderPick() {
     const b = pkHouse(); if (!b || !W.houseOuterEdges(b).some(x => x.e === PK.e)) { closePick(); return; }
     const opts = pickOptions(b, PK.e), cur = opts.find(o => o.cur) || opts[0];
-    const price = (o) => o.cur ? 'いま' : o.lock ? '🔒 まだ' : o.why ? '選べない' : PK.draft ? '' : Math.abs(o.cost) < 0.05 ? '0円' : (o.cost > 0 ? '−' : '+') + yen(Math.abs(o.cost));
+    const price = (o) => o.cur ? 'いま' : o.lock ? '🔒 まだ' : o.why ? '選べない' : PK.draft ? '' : Math.abs(o.cost) < 0.05 ? '±0円' : (o.cost > 0 ? '+' : '−') + yen(Math.abs(o.cost));
     pk.innerHTML = `<div class="pick-h"><b>この壁</b><span class="sub">${PK.draft ? '下書き' : W.WALLS[b.wall].name}</span><button class="x" data-p="x" aria-label="閉じる">×</button></div>
       <div class="pick-o">${opts.map(o => `<button data-p="${o.t || 'wall'}" class="${o.cur ? 'on' : ''}" ${o.lock || o.why ? 'disabled' : ''} title="${BK.esc(o.why || o.note)}"><i class="op op-${o.t || 'wall'}"></i><b>${o.name}</b><span>${price(o)}</span></button>`).join('')}</div>
       <p class="pick-n">${BK.esc(cur.note)}${opts.filter(o => o.why && !o.lock).map(o => `<br><span class="bad">${o.name}：${BK.esc(o.why)}</span>`).join('')}${opts.find(o => o.t === 'door' && !o.cur && o.moved?.length && !o.why) ? `<br>扉にすると、${opts.find(o => o.t === 'door').moved.join('・')}を近くへよける` : ''}</p>
@@ -459,9 +484,8 @@ async function boot() {
       setDraft(houseDraft(d, D.house.hideId, D.cuts)); if (st.moved.length) toast(`${st.moved.join('・')}をよけた`); renderPick(); return;
     }
     let moved = [];
-    act(() => { const b = W.buildingById(s.world, PK.id), d = W.cloneHouse(b); const err = W.draftSetOpening(d, PK.e, t); if (err) return err; moved = W.settleFurn(d).moved; return W.buildBuilding(s, d); },
-      (spent) => `${name}にした${moved.length ? `。${moved.join('・')}をよけた` : ''}${Math.abs(spent) > 0.05 ? `（${spent > 0 ? '−' : '+'}${yen(Math.abs(spent))}）` : ''}`);
-    renderPick();
+    const e0 = PK.e; remodel(PK.id, (d) => { const err = W.draftSetOpening(d, e0, t); if (err) return err; moved = W.settleFurn(d).moved; return null; });
+    toast(`${name}にしてみた${moved.length ? `。${moved.join('・')}をよけた` : ''}（下の［改築する］で決まる）`);
   };
 
   /* ---------- 家具：壁を下げているときに、押すと選ぶ（回す・種類）、引きずると動く ---------- */
@@ -481,7 +505,7 @@ async function boot() {
   // 押した点の下の家具（壁を下げているときだけ）
   function furnHit(p) {
     if (!stage.cut || !p || p.kind !== 'building') return null;
-    const b = W.buildingById(s.world, p.id); if (!b || p.point.y > b.z + 1.3) return null;
+    const b = bOf(p.id); if (!b || p.point.y > b.z + 1.3) return null;
     const c = cellOf(p.point), i = (b.furn || []).findIndex(f => W.furnCells(f).some(([x, y]) => x === c.x && y === c.y));
     return i < 0 ? null : { id: p.id, i, cell: c };
   }
@@ -492,7 +516,7 @@ async function boot() {
     closePick(); select(null); renderFurn();
   }
   function renderFurn() {
-    const b = FS && W.buildingById(s.world, FS.id), f = b?.furn?.[FS.i]; if (!f) { selectFurn(null); return; }
+    const b = FS && bOf(FS.id), f = b?.furn?.[FS.i]; if (!f) { selectFurn(null); return; }
     const F = W.FURN[f.t], alts = Object.entries(W.FURN).filter(([k, x]) => x.group === F.group && k !== f.t && k !== 'stove');
     fbar.innerHTML = `<div class="pick-h"><b>${F.name}</b><button class="x" data-f="x" aria-label="閉じる">×</button></div>
       <div class="pick-o">${F.d > 1 || f.t !== 'shower' ? '<button data-f="rot"><i class="op op-rot"></i><b>回す</b><span>90°</span></button>' : ''}
@@ -501,7 +525,7 @@ async function boot() {
     fbar.hidden = false; showFoot(W.furnCells(f), b.z, fmSel, true); placeFbar();
   }
   function placeFbar() {
-    if (fbar.hidden || !FS) return; const b = W.buildingById(s.world, FS.id), f = b?.furn?.[FS.i]; if (!f) return;
+    if (fbar.hidden || !FS) return; const b = bOf(FS.id), f = b?.furn?.[FS.i]; if (!f) return;
     if (innerWidth <= 640) { fbar.style.left = fbar.style.top = ''; return; }
     // 家具を隠さないよう、画面に映る家具の外側（上、だめなら下、だめなら横）に置く
     const pts = []; for (const [x, y] of W.furnCells(f)) for (const [ox, oy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) for (const h of [0, 1]) pts.push(toScreen(new THREE.Vector3(x + ox, b.z + h, y + oy)));
@@ -514,8 +538,8 @@ async function boot() {
     const bt = ev.target.closest('[data-f]'); if (!bt || bt.disabled || !FS) return;
     const k = bt.dataset.f, { id, i } = FS;
     if (k === 'x') { selectFurn(null); return; }
-    if (k === 'rot') act(() => { const d = W.cloneHouse(W.buildingById(s.world, id)); const err = W.draftRotateFurn(d, i, 1); if (err) return err; return W.buildBuilding(s, d); }, '回した');
-    else if (k.startsWith('t:')) { const t = k.slice(2); act(() => { const d = W.cloneHouse(W.buildingById(s.world, id)); const err = W.draftSwapFurn(d, i, t); if (err) return err; return W.buildBuilding(s, d); }, `${W.FURN[t].name}に`); }
+    if (k === 'rot') freeEdit(id, (d) => W.draftRotateFurn(d, i, 1), '回した');
+    else if (k.startsWith('t:')) { const t = k.slice(2); remodel(id, (d) => W.draftSwapFurn(d, i, t)); }
     if (FS) renderFurn();
   };
   // 引きずって動かす：家具の上で押したときだけ、視点を回す代わりに家具をつかむ（The Sims・あつ森と同じ）
@@ -525,7 +549,7 @@ async function boot() {
     if (FD && FD.pid !== e.pointerId) { FD = null; FS ? renderFurn() : fmarkG.clear(); return; }   // 2本目の指：つかむのをやめて、視点に任せる
     if (e.button !== 0 || G.mode !== 'near' || !stage.cut || G.draft || (G.tool && G.tool !== 'house')) return;
     const p = stage.pick(ndcOf(e)); if (!p || p.kind !== 'building') return;
-    const b = W.buildingById(s.world, p.id); if (nearestEdge(b, p.point, p.normal, true)) return;
+    const b = bOf(p.id); if (nearestEdge(b, p.point, p.normal, true)) return;
     const h = furnHit(p); if (!h) return;
     e.stopImmediatePropagation(); canvas.setPointerCapture(e.pointerId);
     const f = b.furn[h.i]; FD = { ...h, pid: e.pointerId, x: e.clientX, y: e.clientY, ts: e.timeStamp, dx: h.cell.x - f.x, dy: h.cell.y - f.y, z: b.z, drag: false, to: null };
@@ -535,7 +559,7 @@ async function boot() {
     if (!FD.drag && Math.hypot(e.clientX - FD.x, e.clientY - FD.y) < 8) return;
     if (!FD.drag) { FD.drag = true; fbar.hidden = true; closePick(); select(null); }
     const c = floorCell(e, FD.z); if (!c) return;
-    const b = W.buildingById(s.world, FD.id), f = b.furn[FD.i], g = { ...f, x: c.x - FD.dx, y: c.y - FD.dy };
+    const b = bOf(FD.id), f = b.furn[FD.i], g = { ...f, x: c.x - FD.dx, y: c.y - FD.dy };
     if (FD.to && FD.to.x === g.x && FD.to.y === g.y) return;
     const why = W.furnProblem(b, g, FD.i); FD.to = { x: g.x, y: g.y, why };
     showFoot(W.furnCells(g), b.z, why ? fmBad : fmOk);
@@ -545,10 +569,10 @@ async function boot() {
     if (!FD || e.pointerId !== FD.pid) return; e.stopImmediatePropagation();
     const d0 = FD; FD = null; $('#tip').hidden = true;
     if (!d0.drag) { if (e.type === 'pointerup') selectFurn(d0); return; }
-    const b = W.buildingById(s.world, d0.id), f = b.furn[d0.i];
+    const b = bOf(d0.id), f = b.furn[d0.i];
     if (!d0.to || (d0.to.x === f.x && d0.to.y === f.y) || e.type !== 'pointerup') { selectFurn(d0); return; }
     if (d0.to.why) { toast(`ここには置けない：${d0.to.why}`); selectFurn(d0); return; }
-    act(() => { const d = W.cloneHouse(b); const err = W.draftMoveFurn(d, d0.i, d0.to.x, d0.to.y, f.r || 0); if (err) return err; return W.buildBuilding(s, d); }, `${W.FURN[f.t].name}を動かした`);
+    freeEdit(d0.id, (d) => W.draftMoveFurn(d, d0.i, d0.to.x, d0.to.y, f.r || 0), `${W.FURN[f.t].name}を動かした`);
     selectFurn(d0);
   };
   canvas.addEventListener('pointerup', fup, { capture: true }); canvas.addEventListener('pointercancel', fup, { capture: true });
@@ -634,6 +658,7 @@ async function boot() {
     const use = id === 'main' ? 'live' : (b.use || 'store'), U = W.USES[use];
     const name = id === 'main' ? '母屋' : use === 'stay' ? '離れ' : use === 'grow' ? '温室' : '倉庫';
     const ins = b.wall === INSUL.wall, L = LOCAL[SITE] || LOCAL.med, R = W.ROOFS[b.roof];
+    const method = ins ? 'ins' : b.wall === L.wall && b.roof === L.roof ? 'local' : b.wall === 'board' && (b.roof === 'tin' || b.roof === 'tinins') ? 'basic' : '';   // 今の工法（どれでもなければ印なし）
     const A = W.analyze(w, site(), s.persons.length), bb = A.byBuilding?.[id] || { area: 0, got: 0, tanks: 0 };
     const m3 = Math.round(bb.area * rainY / 1000), got = Math.round(bb.got * rainY / 1000);
     const rain = bb.got > 0 && bb.gut ? `<div class="flow">屋根で年 <b>${m3}m³</b> の雨を受け、雨どいからタンクへ。</div>`
@@ -658,7 +683,9 @@ async function boot() {
     return `<h3>${name}<span class="sub" style="margin:0">${U.name}</span><button class="x" data-act="close" aria-label="閉じる">×</button></h3>
       <p class="sub">${bx.X1 - bx.X0}×${bx.Y1 - bx.Y0}m · 床${n}m² · ${W.WALLS[b.wall].name}・${R.name}</p>
       ${id === 'main' ? '' : `<div class="row"><span>使い道</span>${seg('use', [['stay', '泊める'], ['store', 'しまう'], ['grow', '育てる']], use)}</div>`}
-      <div class="row"><span>工法</span>${seg('method', [['local', 'この土地の工法'], ['ins', '断熱した', !knows('insulation')]], ins ? 'ins' : 'local')}</div>
+      ${remodelOf(id) ? `<div class="flow remodel">試している（まだお金はかからない）。${G.draft.err ? `<br><span class="bad">${BK.esc(G.draft.err)}</span>` : `改築すると約 <b>${yen(G.draft.cost || 0)}</b>。`}
+        <div class="acts"><button data-act="rno">やめる（元どおり）</button><button class="yes" data-act="ryes" ${G.draft.err ? 'disabled' : ''}>改築する</button></div></div>` : ''}
+      <div class="row"><span>工法</span>${seg('method', [['basic', '板とトタン'], ['local', 'この土地の工法'], ['ins', '断熱した', !knows('insulation')]], method)}</div>
       <div class="row"><span>中</span><div><button class="wide" data-act="inside">${stage.cut ? '壁を戻す' : '中を見る・家具を動かす'}</button></div></div>
       ${roofRow}${fixtures}${power}${rain}
       <p class="note">${U.note}${!knows('insulation') ? ' 断熱は、季節を過ごして学ぶと選べる。' : ''}</p>`;
@@ -666,7 +693,7 @@ async function boot() {
   function renderCard() {
     const p = G.sel, w = s.world; if (!p) return;
     let html = '';
-    if (p.kind === 'building') html = buildingCard(W.buildingById(w, p.id));
+    if (p.kind === 'building') html = buildingCard(bOf(p.id));
     else if (p.kind === 'tank') {
       const A = W.analyze(w, site(), s.persons.length), fed = A.fedKeys.includes(`${p.x},${p.y},${p.z}`);
       html = `<h3>雨水タンク<button class="x" data-act="close" aria-label="閉じる">×</button></h3><p class="sub">1m³（1,000L）</p>
@@ -719,35 +746,35 @@ async function boot() {
     const [k, a, c] = bt.dataset.act.split(':'), w = s.world, p = G.sel;
     if (k === 'inside') { const on = !stage.cut, id = p.id; setCut(on); if (on) { const b0 = W.buildingById(w, id), bx = W.roofBox(b0); select(null); v.flyTo(new THREE.Vector3((bx.X0 + bx.X1) / 2, b0.z, (bx.Y0 + bx.Y1) / 2), Math.max(9, (bx.X1 - bx.X0 + bx.Y1 - bx.Y0) * 1.1), 52, 700); } else renderCard(); return; }
     if (k === 'close') { select(null); return; }
+    if (k === 'rno') { $('#draftNo').click(); return; }
+    if (k === 'ryes') { $('#draftYes').click(); return; }
     if (k === 'cut' && p && p.kind === 'tree') { const t = p.t; act(() => W.cutTree(s, t.cx, t.cy), '切った。薪とチップにとっておく'); return; }
     if (!p || p.kind !== 'building') return;
-    const b = W.buildingById(w, p.id), d = W.cloneHouse(b);
-    if (k === 'use') { act(() => { d.use = a; return W.buildBuilding(s, d); }, `使い道を「${W.USES[a].name}」に`); return; }
-    if (k === 'method') { const L = LOCAL[SITE] || LOCAL.med; act(() => { if (a === 'ins') Object.assign(d, INSUL); else Object.assign(d, { wall: L.wall, roof: L.roof, finish: L.finish });
+    const b = bOf(p.id), id = p.id, R = (fn) => remodel(id, (d) => fn(d) || null);
+    if (k === 'use') { R((d) => { d.use = a; }); return; }
+    if (k === 'method') { const L = LOCAL[SITE] || LOCAL.med; R((d) => {
+        if (a === 'ins') Object.assign(d, INSUL); else if (a === 'basic') Object.assign(d, { wall: 'board', roof: 'tin' }); else Object.assign(d, { wall: L.wall, roof: L.roof, finish: L.finish });
         const R2 = W.ROOFS[d.roof];   // 瓦は傾けた屋根に、土の屋根は平らに（今の版と同じ）
         if (R2.pitched && (d.roofShape || 'flat') === 'flat') { d.roofShape = L.roofShape && L.roofShape !== 'flat' ? L.roofShape : 'gable'; d.roofDir = L.roofDir || 'ns'; d.pitch = Math.max(d.pitch || 0.3, L.pitch || 0.5); d.eaves = L.eaves ?? d.eaves; }
-        if (R2.flat) { d.roofShape = 'flat'; d.eaves = 0.16; }
-        return W.buildBuilding(s, d); }, a === 'ins' ? '断熱した壁と屋根に' : 'この土地の工法に'); return; }
-    if (k === 'pitch') { const i = W.PITCHES.findIndex(([q]) => Math.abs(q - (b.pitch || 0.3)) < 0.01), j = Math.max(0, Math.min(W.PITCHES.length - 1, (i < 0 ? 1 : i) + +a)); if (j === i) return; act(() => { d.pitch = W.PITCHES[j][0]; d.roofShape = d.roofShape && d.roofShape !== 'flat' ? d.roofShape : 'gable'; return W.buildBuilding(s, d); }, `屋根を${W.PITCHES[j][1]}傾きに`); return; }
+        if (R2.flat) { d.roofShape = 'flat'; d.eaves = 0.16; } else if (W.eavesDepth(d) < 0.3) d.eaves = 0.6; }); return; }
+    if (k === 'pitch') { const i = W.PITCHES.findIndex(([q]) => Math.abs(q - (b.pitch || 0.3)) < 0.01), j = Math.max(0, Math.min(W.PITCHES.length - 1, (i < 0 ? 1 : i) + +a)); if (j === i) return; R((d) => { d.pitch = W.PITCHES[j][0]; d.roofShape = d.roofShape && d.roofShape !== 'flat' ? d.roofShape : 'gable'; }); return; }
     if (k === 'shape') { if ((b.roofShape || 'flat') === a) return; const eqSide = (site().lat ?? 6) >= 0 ? 's' : 'n';
-      act(() => { d.roofShape = a; if (a === 'gable' && !['ns', 'ew'].includes(d.roofDir)) d.roofDir = 'ns'; if (a === 'mono' && !['n', 'e', 's', 'w'].includes(d.roofDir)) d.roofDir = eqSide; if (a !== 'flat') d.pitch = d.pitch || 0.3; return W.buildBuilding(s, d); }, `屋根を${W.ROOF_SHAPES[a]}に`); return; }
-    if (k === 'rdir') { act(() => { d.roofDir = a; return W.buildBuilding(s, d); }, (b.roofShape === 'gable' ? (a === 'ew' ? '東と西へ' : '北と南へ') : `${{ n: '北', e: '東', s: '南', w: '西' }[a]}へ`) + '下がる屋根に'); return; }
-    if (k === 'eaves') { const i = W.EAVE_STEPS.findIndex(q => Math.abs(q - W.eavesDepth(b)) < 0.01), j = Math.max(0, Math.min(W.EAVE_STEPS.length - 1, (i < 0 ? 1 : i) + +a)); if (j === i) return; act(() => { d.eaves = W.EAVE_STEPS[j]; return W.buildBuilding(s, d); }, `軒を${W.EAVE_STEPS[j]}mに`); return; }
+      R((d) => { d.roofShape = a; if (a === 'gable' && !['ns', 'ew'].includes(d.roofDir)) d.roofDir = 'ns'; if (a === 'mono' && !['n', 'e', 's', 'w'].includes(d.roofDir)) d.roofDir = eqSide; if (a !== 'flat') d.pitch = d.pitch || 0.3; }); return; }
+    if (k === 'rdir') { R((d) => { d.roofDir = a; }); return; }
+    if (k === 'eaves') { const i = W.EAVE_STEPS.findIndex(q => Math.abs(q - W.eavesDepth(b)) < 0.01), j = Math.max(0, Math.min(W.EAVE_STEPS.length - 1, (i < 0 ? 1 : i) + +a)); if (j === i) return; R((d) => { d.eaves = W.EAVE_STEPS[j]; }); return; }
     if (k === 'pv' || k === 'batt' || k === 'deep') {
-      act(() => {
+      R((d) => {
         if (k === 'pv') d.pv = Math.max(0, Math.min(Object.keys(d.cells).length, (d.pv || 0) + +a));
         if (k === 'batt') d.batt = Math.max(0, Math.min(6, (d.batt || 0) + +a));
         if (k === 'deep') { d.eq = d.eq || { depth: 0 }; d.eq.depth = Math.max(0.3, Math.min(3, Math.round(((d.eq.depth || 0.3) + 0.3 * +a) * 10) / 10)); }
-        return W.buildBuilding(s, d);
-      }, (spent) => (k === 'pv' ? `太陽光を${d.pv}枚に` : k === 'batt' ? `蓄電池を${d.batt}台に` : `基礎を${d.eq?.depth}mに`) + (spent > 0.05 ? `（−${yen(spent)}）` : ''));
+      });
       return;
     }
     if (k === 'furn') {
-      act(() => {
+      R((d) => {
         if (a === 'stove') { if (c === 'stove') { const err = W.placeStove(d); if (err) return err; d.stove = true; } else { W.removeStove(d); d.stove = false; } }
         else { const i = d.furn.findIndex(f => W.FURN[f.t].group === a); if (i < 0) return 'その設備がない'; const err = W.draftSwapFurn(d, i, c); if (err) return err; }
-        return W.buildBuilding(s, d);
-      }, `${W.FURN[c]?.name || 'かまどなし'}に`);
+      });
     }
   };
 
