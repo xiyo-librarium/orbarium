@@ -857,10 +857,65 @@ async function boot() {
     const goodN = E.relations(ns).nodes.filter(x => x.good === true && x.v > 0.15).length;
     const end = goodN >= BK.GOAL && ns.flags['done_' + ns.site] == null;
     if (end) ns.flags['done_' + ns.site] = ns.turn;
-    for (const k of Object.keys(s)) delete s[k]; Object.assign(s, ns);   // 同じ入れ物のまま中身を入れ替える（舞台や道具が s を見ている）
-    G.undo = []; G.redo = []; fCache = { sig: null, f: null };
-    changed(); persist(); seasonLabel();
-    showReport(before, report, lessons, end);
+    // その3か月の天気（計算に使った毎日の雨と日差し）を早回しで見せてから、結果に入れ替えて報告
+    const q = before.q, days = (ns.flags.weatherYear || []).filter(d => d.m >= q * 3 && d.m < q * 3 + 3);
+    const finish = () => {
+      for (const k of Object.keys(s)) delete s[k]; Object.assign(s, ns);   // 同じ入れ物のまま中身を入れ替える（舞台や道具が s を見ている）
+      G.undo = []; G.redo = []; fCache = { sig: null, f: null };
+      changed(); persist(); seasonLabel();
+      showReport(before, report, lessons, end);
+    };
+    if (days.length && !Q.has('fast')) replayWeather(days, before.year, finish); else finish();
+  }
+
+  /* ---------- 天気の早回し：1日≒70ms。雨の日は雨が降り、曇ると日差しが弱まる。上に日付・天気・雨の合計と、日ごとの雨の棒 ---------- */
+  const rainN = 4200, rainGeo = new THREE.BufferGeometry(), rainPos = new Float32Array(rainN * 6), rainSeed = new Float32Array(rainN * 3);
+  for (let i = 0; i < rainN; i++) { rainSeed[i * 3] = Math.random(); rainSeed[i * 3 + 1] = Math.random(); rainSeed[i * 3 + 2] = Math.random(); }
+  rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+  const rain = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: '#E4ECF0', transparent: true, opacity: 0.7, depthWrite: false }));
+  rain.frustumCulled = false; rain.visible = false; rain.renderOrder = 8; v.scene.add(rain);
+  function rainStep(tm, amount, snow = 0) {   // 見ている所のまわりの箱の中で、斜めに落ちる線（雪は白く短く、ゆっくり）
+    const c = v.controls.target, span = Math.max(30, v.distance() * 0.9), top = 26, n = Math.floor(rainN * amount), fall = 22 - 18 * snow, len = (0.8 + v.distance() * 0.016) * (1 - 0.8 * snow);   // 遠くから見ても線に見える長さ
+    rain.material.color.set(snow > 0.5 ? '#FFFFFF' : '#E4ECF0'); rain.material.opacity = snow > 0.5 ? 0.9 : 0.7;
+    for (let i = 0; i < rainN; i++) {
+      const sx = rainSeed[i * 3], sy = rainSeed[i * 3 + 1], sz = rainSeed[i * 3 + 2];
+      const h = top - ((tm * fall * (0.85 + 0.3 * sz) + sy * top) % top), x = c.x + (sx - 0.5) * span + h * 0.12, z = c.z + (sz - 0.5) * span, y = c.y - 4 + h;
+      const o = i * 6; rainPos[o] = x; rainPos[o + 1] = y; rainPos[o + 2] = z; rainPos[o + 3] = x - 0.11 * len; rainPos[o + 4] = y - len; rainPos[o + 5] = z;
+    }
+    rainGeo.setDrawRange(0, n * 2); rainGeo.attributes.position.needsUpdate = true; rain.visible = n > 0;
+  }
+  function replayWeather(days, year, done) {
+    const per = +(Q.get('wxper') || 70), T = days.length * per, maxRain = Math.max(8, ...days.map(d => d.rain)), pshMax = Math.max(...days.map(d => d.psh));
+    const hud = document.createElement('div'); hud.className = 'wx';
+    hud.innerHTML = `<div class="wx-top"><b class="wx-date"></b><span class="wx-icon"></span><span class="wx-rain"></span><button class="wx-skip">とばす</button></div>
+      <div class="wx-bars">${days.map((d, i) => `<i style="--h:${Math.round(100 * Math.min(1, d.rain / maxRain))}%" data-i="${i}"></i>`).join('')}</div>`;
+    document.body.appendChild(hud); document.body.classList.add('replaying');
+    const bars = [...hud.querySelectorAll('.wx-bars i')], shield = document.createElement('div'); shield.className = 'wx-shield'; document.body.appendChild(shield);
+    const dim = document.createElement('div'); dim.className = 'wx-dim'; document.body.appendChild(dim);   // 曇り・雨の日は画面ぜんたいを少し暗く
+    const auto0 = v.controls.autoRotate, sp0 = v.controls.autoRotateSpeed; v.controls.autoRotate = true; v.controls.autoRotateSpeed = 0.6;
+    const hr0 = +$('#hour').value; setHour(11);
+    let t0 = performance.now(), tPrev = t0, cloud = 0, wet = 0, sum = 0, last = -1, stop = false;
+    const end = () => { if (stop) return; stop = true; hud.classList.add('out'); setTimeout(() => hud.remove(), 400); shield.remove(); dim.remove(); document.body.classList.remove('replaying');
+      rain.visible = false; v.setWeather(0); v.controls.autoRotate = auto0; v.controls.autoRotateSpeed = sp0; setHour(hr0); v.req(); done(); };
+    hud.querySelector('.wx-skip').onclick = end; shield.onclick = end;
+    const step = () => {
+      if (stop) return;
+      const el = performance.now() - t0, i = Math.min(days.length - 1, Math.floor(el / per)), d = days[i];
+      if (i !== last) { for (let k = last + 1; k <= i; k++) { sum += days[k].rain; bars[k]?.classList.add('on'); } last = i;
+        const D = days[i], kind = D.rain > 0.5 && D.t < 0.5 ? 'snow' : D.rain > 8 ? 'rain' : D.rain > 0.5 ? 'drizzle' : D.psh < pshMax * 0.7 ? 'cloud' : 'sun';
+        hud.querySelector('.wx-date').textContent = `${year}年 ${D.m + 1}月${D.d + 1}日`;
+        hud.querySelector('.wx-icon').textContent = { rain: '☂ 雨', drizzle: '☂ 小雨', snow: '❄ 雪', cloud: '☁ くもり', sun: '☀ 晴れ' }[kind];
+        hud.querySelector('.wx-icon').dataset.k = kind;
+        hud.querySelector('.wx-rain').textContent = `雨 ${Math.round(sum)}mm · ${Math.round(D.t)}℃`; }
+      // 雲と雨の強さは、その日の値へなめらかに寄せる（ちらつかないように）
+      const wantC = d.rain > 8 ? 1 : d.rain > 0.5 ? 0.75 : Math.max(0, Math.min(0.55, 1 - d.psh / Math.max(1e-6, pshMax))) * 0.9, wantR = d.rain > 0.5 ? Math.min(1, 0.25 + d.rain / 25) : 0;
+      const now = performance.now(), dt = Math.min(0.25, (now - tPrev) / 1000); tPrev = now;   // 時間で寄せる（コマ数によらない）
+      cloud += (wantC - cloud) * (1 - Math.exp(-dt / 0.12)); wet += (wantR - wet) * (1 - Math.exp(-dt / 0.08));
+      dim.style.opacity = (cloud * 0.24).toFixed(3); v.setWeather(cloud); rainStep(el / 1000, wet, d.t < 0.5 ? 1 : 0); v.req();
+      if (el >= T + 350) { end(); return; }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
   }
   function showReport(before, rep, lessons, end) {
     const more = end && BK.nextLands(s).length, cm = more ? BK.chapterMail(s, rep) : null;

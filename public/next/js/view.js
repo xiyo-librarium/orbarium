@@ -64,13 +64,18 @@ export function createView(canvas, opt = {}) {
   };
   // 太陽：世界の向き（x 東, y 南, z 上）→ three（x, 上, z）
   // 時刻の色：日差しの色と強さ、空の光（影の色）、空と霞。朝と夕方で色味を変える
+  // 天気：k＝0 晴れ … 1 厚い雲と雨。日差しを弱め、影を薄く、霞を灰色に寄せる
+  let base = null, wk = 0; const grayFog = new THREE.Color('#A9AFB0');
+  const applyWeather = () => { if (!base) return;
+    sun.intensity = base.sunK * (1 - 0.85 * wk); scene.environmentIntensity = base.env * (1 - 0.12 * wk); renderer.toneMappingExposure = base.exp * (1 - 0.14 * wk);
+    if (scene.fog) scene.fog.color.copy(base.fog).lerp(grayFog, 0.7 * wk); v.req(); };
+  v.setWeather = (k) => { wk = Math.max(0, Math.min(1, k)); applyWeather(); };
   v.setSun = (dir, elevDeg, am = true) => {
     const d = new THREE.Vector3(dir[0], Math.max(0.05, dir[2]), dir[1]).normalize();
     const L = skyLight(v.P, elevDeg, am);
-    sun.color.copy(L.sun); sun.intensity = L.sunK;
-    scene.environmentIntensity = L.env; envWant = L;   // 環境の光は次に描く前に焼き直す（スライダーを動かしている間も1回/コマ）
-    if (scene.fog) scene.fog.color.copy(L.fog);
-    renderer.toneMappingExposure = L.exposure;   // 朝夕は少し明るめに写す（目が慣れるのと同じ）
+    sun.color.copy(L.sun); base = { sunK: L.sunK, env: L.env, exp: L.exposure, fog: L.fog.clone() };
+    envWant = L;   // 環境の光は次に描く前に焼き直す（スライダーを動かしている間も1回/コマ）
+    applyWeather();   // 曇り・雨のときは日差しを弱め、霞を灰色に（朝夕は少し明るめに写す、は exposure で）
     glow.set(L.day);
     sun.target.position.copy(v.focus); sun.position.copy(v.focus).addScaledVector(d, 80);
     const cam = sun.shadow.camera; cam.left = -v.span; cam.right = v.span; cam.top = v.span; cam.bottom = -v.span; cam.near = 20; cam.far = 170; cam.updateProjectionMatrix();

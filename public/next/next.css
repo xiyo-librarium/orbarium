@@ -256,3 +256,20 @@ body.editing #season { display: none; }
 .editbar button.yes { flex-shrink: 0; padding: 9px 16px; }
 @media (max-width: 640px) { .draftbar.editbar { flex-direction: row; align-items: center; } }
 @media (max-width: 640px) { body.editing .card, body.editing .pick { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 84px + 62px); } }
+
+/* 季節の早回し：上に日付と天気、日ごとの雨の棒。押すと飛ばせる */
+.wx { position: fixed; left: 50%; top: 64px; transform: translateX(-50%); z-index: 12; width: min(560px, calc(100% - 20px)); background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px 9px; box-shadow: 0 8px 26px rgba(30, 40, 35, .16); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); transition: opacity .35s; }
+.wx.out { opacity: 0; }
+.wx-top { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+.wx-date { font-variant-numeric: tabular-nums; min-width: 9.5em; }
+.wx-icon { font-weight: 600; min-width: 5em; } .wx-icon[data-k="rain"], .wx-icon[data-k="drizzle"] { color: #3F7DA8; } .wx-icon[data-k="sun"] { color: #C0862E; } .wx-icon[data-k="cloud"] { color: var(--sub); }
+.wx-rain { color: #3F7DA8; font-variant-numeric: tabular-nums; }
+.wx-skip { margin-left: auto; border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 5px 12px; cursor: pointer; font: inherit; font-size: 12.5px; }
+.wx-bars { display: flex; align-items: flex-end; gap: 1px; height: 34px; margin-top: 8px; }
+.wx-bars i { flex: 1; height: max(2px, var(--h)); background: rgba(79, 134, 184, .18); border-radius: 1px; }
+.wx-bars i.on { background: #4F86B8; }
+.wx-shield { position: fixed; inset: 0; z-index: 11; cursor: pointer; }
+body.replaying .bottom, body.replaying .card, body.replaying .pick { opacity: 0; pointer-events: none; transition: opacity .25s; }
+@media (max-width: 640px) { .wx { top: 112px; } .wx-top { gap: 8px; font-size: 13px; flex-wrap: wrap; } .wx-date { min-width: 0; } }
+.wx-icon[data-k="snow"] { color: #6C8FA8; }
+.wx-dim { position: fixed; inset: 0; z-index: 3; pointer-events: none; background: #46535A; opacity: 0; mix-blend-mode: multiply; }
