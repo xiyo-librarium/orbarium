@@ -53,6 +53,7 @@ export const SITES = {
     quarters: ['1〜3月・乾いた季節', '4〜6月・雨の季節', '7〜9月・小さな乾季', '10〜12月・雨の季節'],
     /* 仮の値：停電・断水は年あたりの回数。エルニーニョの年は断水が増える */
     outage: { power: 1.6, water: 1.2, ninoWater: 2.5 },
+    quake: 0.025,   // 家が揺れるほどの地震（3か月あたりの確率）。アンデスの地震帯の中ほど
     enso: { nino: 0.2, nina: 0.2, ninoRain: 0.7, ninaRain: 1.3 },
     soilOM: 2.2, quake: 0.02, frostDepth: 0, humid: true,
     terrain: 'med', plotPrice: 0
@@ -249,6 +250,7 @@ export function newGame(opt = {}) {
   const site = opt.site || 'med', seed = opt.seed ?? 1;
   if (opt.real) applyReal(site, opt.real); else if (SITES[site].real) { /* 実データは前のまま */ } 
   const s = makeGame(site, seed, opt);
+  s.world.site = site;   // 土地の工法の値段に使う
   if (opt.real) s.real = opt.real;
   // 植生：実データ（ESA WorldCover）があればそれ、なければ草地
   s.world.veg = opt.real && Array.isArray(opt.real.lc) && opt.real.lc.length === W.N * W.N ? opt.real.lc.slice() : new Array(W.N * W.N).fill(30);
@@ -591,7 +593,7 @@ export function advance(state) {
   const cFood = foodBought * MARKET.buyFood;
   const houseCost = S.house ? Math.max(30, S.houseM.A * 6) : 0;
   const rent = S.house ? 0 : 4;   // 家ができるまでは仮住まい
-  const maint = houseCost * 0.01 * qFrac;
+  const maint = houseCost * 0.01 * qFrac + (HM ? HM.upkeep || 0 : 0) * qFrac;   // アドベは外の泥を毎年塗り直す
   // 寿命の来た設備（ブロックごと）
   let replace = 0; const replaced = [];
   for (const k in s.world.blocks) {
@@ -620,6 +622,11 @@ export function advance(state) {
   if (HM && A.condDays > 30) { const rp = 3; repair += rp; if (s.flags.condYear !== s.year) { events.push({ kind: 'condensation', days: A.condDays, repair: rp }); s.flags.condYear = s.year; } }
   if (HM && HM.rotRisk > 0.2 && A.rain > 250 && r() < HM.rotRisk * 0.45) { const rp = Math.max(2, Math.round(houseCost * 0.04)); repair += rp; events.push({ kind: 'rot', repair: rp }); }
   if (clogged) { repair += 2; events.push({ kind: 'clog', repair: 2 }); }
+  // 地震：壁と屋根の強さで傷みが変わる（竹と土壁はしなって耐え、版築や重い瓦は傷む）
+  if (S.house && HM && (site.quake || 0) > 0 && r() < site.quake * qFrac) {
+    const weak = 1 - (HM.quake ?? 0.7), rp = Math.round(houseCost * 0.35 * weak);
+    if (rp > 1) repair += rp; events.push({ kind: 'quake', repair: rp > 1 ? rp : 0, wall: s.world.house?.wall });
+  }
   // 暑すぎる日：同じ年にはしつこく言わない（ひどいときだけ）
   if (HM && A.hotDays > 15 && s.flags.hotYear !== s.year) { events.push({ kind: 'overheat', days: A.hotDays }); s.flags.hotYear = s.year; }
   // 自分で作っているもの：週の「作業」の日で進む

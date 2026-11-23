@@ -81,6 +81,7 @@ export function eventText(e) {
     case 'replace': return { title: '設備の交換', body: `${e.names.join('・')}が寿命で、${Math.round(e.cost)}万円で入れ替えた。`, tone: 'info' };
     case 'overwork': return { title: '手が足りない', body: `手入れに週${e.need.toFixed(1)}日要るのに、畑の日は${e.have}日。畑が荒れ気味。`, tone: 'bad' };
     case 'crack': return { title: '地面にひび', body: `めったにない大雨のあと、家のまわりにひびが入った。基礎があと${e.short.toFixed(1)}m浅い。`, tone: 'bad' };
+    case 'quake': return e.repair ? { title: '地震で家が傷んだ', body: `大きく揺れて、壁にひびが入った。修理に${e.repair}万円。竹と土壁（バハレケ）の家は、しなって耐えると近所の人は言う。`, tone: 'bad' } : { title: '地震があった', body: '大きく揺れたが、家はしなって持ちこたえた。', tone: 'good' };
     case 'landslide': return { title: '斜面が崩れた', body: `めったにない大雨で斜面が動き、家が傷んだ。修理に${e.repair}万円。`, tone: 'bad' };
     default: return { title: e.kind, body: '', tone: 'info' };
   }

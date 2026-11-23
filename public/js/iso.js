@@ -1,5 +1,5 @@
 /* 斜め上から見下ろす3D（アイソメトリック）。カメラは固定。回転ボタンを押したときだけ短くなめらかに回る */
-import { BLOCKS, N, h, at, WALLS, ROOFS, FLOORS, OPENINGS, FURN, FDIR, HOUSE_H, houseOuterEdges, furnCells, vegObjects, roofZ, roofBox, eavesDepth, drainDirs } from './world.js';
+import { BLOCKS, N, h, at, WALLS, ROOFS, FLOORS, OPENINGS, FURN, FDIR, HOUSE_H, houseOuterEdges, furnCells, vegObjects, roofZ, roofBox, eavesDepth, drainDirs, ACCENTS } from './world.js';
 export { vegObjects };
 
 const SIDE = [[1, 0], [0, 1], [-1, 0], [0, -1]];   // +x, +y, -x, -y
@@ -51,9 +51,13 @@ function terrainColor(lv, maxLv) {
 }
 
 /* 地面の色（植生ごと）。草地は低い所ほど濃い緑 */
+/* 乾いた土地（タオスのような高地の砂漠）は、草地をセージ色の乾いた草と砂の色に寄せる。0＝しめった土地、1＝砂漠 */
+let ARID = 0;
+const dryHex = (hex, k = 1) => { if (!ARID) return hex; const c = hex3(hex), d = [176, 160, 118]; return toHex(c.map((v, i) => v * (1 - ARID * 0.7 * k) + d[i] * ARID * 0.7 * k)); };
 function vegRGB(cl, lv, maxLv, x, y) {
   const t = maxLv ? lv / maxLv : 0.5, j = (smooth(x, y, 3) - 0.5) * 18 + (hash(x, y) - 0.5) * 4;
-  const grass = [128 + 48 * t + j, 170 + 26 * t + j, 92 + 26 * t + j * 0.6];
+  const wet = [128 + 48 * t + j, 170 + 26 * t + j, 92 + 26 * t + j * 0.6], sand = [200 + 18 * t + j, 178 + 12 * t + j, 132 + j * 0.6];
+  const grass = ARID ? wet.map((v, i) => v * (1 - ARID * 0.78) + sand[i] * ARID * 0.78 + (smooth(x + 9, y + 3, 2) - 0.5) * 14 * ARID) : wet;
   const mix = (a, b, k) => a.map((v, i) => v * (1 - k) + b[i] * k);
   switch (cl) {
     case 10: case 95: return mix(grass, [98, 92, 56], 0.5).map(v => v + j * 0.3);
@@ -74,6 +78,7 @@ export function createView(canvas, world, opt = {}) {
   const ctx = canvas.getContext('2d');
   const pick = document.createElement('canvas'), pctx = pick.getContext('2d', { willReadFrequently: true });
   // top：真上から見る / wallMode：'up' できあがり・'cut' 手前の壁を下げる・'down' 壁を全部下げる / house：描く家（設計中は下書き）/ base：いま建っている家
+  ARID = opt.arid || 0;
   const v = { world, top: false, wallMode: 'up', house: null, base: null, rect: null, ghostEdge: null, furnGhost: null, selFurn: -1, cx: opt.cx ?? 25, cy: opt.cy ?? 25, R: opt.R ?? 8, angle: 0, rot: 0, zoom: 1, hover: null, ghost: null, faces: [], dpr: Math.min(2, window.devicePixelRatio || 1), maxLv: Math.max(...world.H), lat: opt.lat ?? 35, month: opt.month ?? 3, hour: 10, sun: null };
   v.setSun = (lat, month, hour) => { v.lat = lat ?? v.lat; v.month = month ?? v.month; v.hour = hour ?? v.hour; v.sun = sunVector(v.lat, v.month, v.hour); };
   v.setSun();
@@ -559,7 +564,7 @@ export function createView(canvas, world, opt = {}) {
         const pq = q.map(([px, py]) => project(px, py, gz + 0.01, g));
         list.push({ depth: terrainDepth(ox, oy, floorLv) + 2e-5, draw: (cx, pc) => { if (pc) return; const A = [(pq[0][0] + pq[1][0]) / 2, (pq[0][1] + pq[1][1]) / 2], B = [(pq[2][0] + pq[3][0]) / 2, (pq[2][1] + pq[3][1]) / 2], gr = cx.createLinearGradient(A[0], A[1], B[0], B[1]); gr.addColorStop(0, 'rgba(30,35,20,.30)'); gr.addColorStop(1, 'rgba(30,35,20,0)'); cx.fillStyle = gr; cx.beginPath(); cx.moveTo(pq[0][0], pq[0][1]); for (const p of pq) cx.lineTo(p[0], p[1]); cx.closePath(); cx.fill(); } });
       }
-      const seed = (ex * 73 + ey * 151 + (t === 'h' ? 7 : 0)) | 0, tex = (z0, z1) => wallTexture(hs.wall, z0, z1, seed);
+      const seed = (ex * 73 + ey * 151 + (t === 'h' ? 7 : 0)) | 0, tex = (z0, z1) => wallTexture(hs.wall, z0, z1, seed, accentOf(hs));
       // 基礎：石を積んだ帯。外の地面が低ければ、そこまで下ろす
       if (!v.top) {
         const gz = hs.cells[`${ox},${oy}`] ? z : Math.min(z, h(world, ox, oy)), O2 = T / 2 + 0.06;   // 壁の中心線から外側だけ（家の中には出さない）
@@ -568,7 +573,7 @@ export function createView(canvas, world, opt = {}) {
       }
       if (v.top || !full) { rbox(list, ...rect, z, v.top ? HOUSE_H : LOW, O ? O.color : Wm.color, { ...meta, sideDecor: v.top || O ? null : tex(0, LOW) }, alpha); continue; }
       if (op === 'door') {
-        rbox(list, ...rect, z, 2.1, O.color, { ...meta, sideDecor: doorDecor }, alpha); rbox(list, ...rect, z + 2.1, HOUSE_H - 2.1, Wm.color, { ...meta, sideDecor: tex(2.1, HOUSE_H) }, alpha);
+        rbox(list, ...rect, z, 2.1, O.color, { ...meta, sideDecor: (cx2, p2, fc) => doorDecor(cx2, p2, fc, accentOf(hs)) }, alpha); rbox(list, ...rect, z + 2.1, HOUSE_H - 2.1, Wm.color, { ...meta, sideDecor: tex(2.1, HOUSE_H) }, alpha);
         // 扉の前の踏み石
         if (!hs.cells[`${ox},${oy}`] && !v.top) { const gz = h(world, ox, oy), c0 = [o.x + 0.5 + (ox - o.x) * 0.72, o.y + 0.5 + (oy - o.y) * 0.72]; rbox(list, c0[0] - 0.3, c0[1] - 0.22 + (o.dir === 'e' || o.dir === 'w' ? -0.08 : 0), c0[0] + 0.3, c0[1] + 0.22, gz, 0.06, '#B7B2A6', { type: 'ghost' }, 1); }
       } else if (op) {
@@ -576,7 +581,7 @@ export function createView(canvas, world, opt = {}) {
         const isWin = (k) => ['window', 'window2'].includes(hs.open[k]) && outerDir[k] === o.dir;
         const cont = t === 'h' ? { lo: isWin(`h:${ex - 1},${ey}`), hi: isWin(`h:${ex + 1},${ey}`) } : { lo: isWin(`v:${ex},${ey - 1}`), hi: isWin(`v:${ex},${ey + 1}`) };
         rbox(list, ...rect, z, 0.9, Wm.color, { ...meta, sideDecor: tex(0, 0.9) }, alpha);
-        rbox(list, ...rect, z + 0.9, 1.3, O.color, { ...meta, sideDecor: windowDecor(op, t, cont) }, 1);
+        rbox(list, ...rect, z + 0.9, 1.3, O.color, { ...meta, sideDecor: windowDecor(op, t, { ...cont, frame: accentOf(hs) }) }, 1);
         rbox(list, ...rect, z + 2.2, HOUSE_H - 2.2, Wm.color, { ...meta, sideDecor: tex(2.2, HOUSE_H) }, alpha);
         // 窓台
         const SD = 0.1, s0 = cont.lo ? 0 : 0.12, s1 = cont.hi ? 1 : 0.88, sr = t === 'h' ? [ex + s0, ey - T / 2 - SD, ex + s1, ey + T / 2 + SD] : [ex - T / 2 - SD, ey + s0, ex + T / 2 + SD, ey + s1];
@@ -590,7 +595,7 @@ export function createView(canvas, world, opt = {}) {
       const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number);
       for (const [px, py] of t === 'h' ? [[ex, ey], [ex + 1, ey]] : [[ex, ey], [ex, ey + 1]]) { const k = px + ',' + py, e = vtx.get(k) || { h: 0, v: 0, low: false }; e[t]++; if (!(v.wallMode === 'up' || (v.wallMode === 'cut' && !FRONT.includes(o.dir)))) e.low = true; vtx.set(k, e); }
     }
-    const trim = hs.wall === 'board' ? '#8F6B47' : '#F3EEE3';
+    const trim = { board: '#8F6B47', brick: '#8E4630', tapia: WALLS.tapia.color, adobe: WALLS.adobe.color, strawbale: WALLS.strawbale.color }[hs.wall] || '#F3EEE3';
     for (const [k, e] of vtx) {
       if (!e.h || !e.v) continue; const [px, py] = k.split(',').map(Number); if (px < x0 - 1 || px > x1 + 1 || py < y0 - 1 || py > y1 + 1) continue;
       const P2 = T / 2 + 0.025; rbox(list, px - P2, py - P2, px + P2, py + P2, z, v.top ? HOUSE_H + 0.01 : e.low ? LOW + 0.01 : HOUSE_H, trim, { type: 'trim', nopick: true }, 1);
@@ -620,13 +625,39 @@ export function createView(canvas, world, opt = {}) {
         slab(list, [[T2.x0, T2.y0], [T2.x1, T2.y0], [T2.x1, T2.y1], [T2.x0, T2.y1]], RZ, 0.15, R.color, { type: 'roof', x: T2.cx, y: T2.cy, decor, noSides: true });
       }
       for (const sg of RT.edges) { if (inView(Math.floor(sg.mx), Math.floor(sg.my))) fascia(list, sg, RZ, 0.15, R.color); }
+      const g0 = geom(), after = (rr) => { const ds = [[rr[0], rr[1]], [rr[2], rr[1]], [rr[0], rr[3]], [rr[2], rr[3]]].map(([a2, b2]) => project(a2, b2, 0, g0)[2]); return Math.max(...ds) - project((rr[0] + rr[2]) / 2, (rr[1] + rr[3]) / 2, 0, g0)[2] + 0.03; };
+      if (hs.roof === 'mud') {   // 土の平屋根：まわりを低い壁（パラペット）で囲み、ところどころ木の樋（カナレ）を外へ突き出す
+        const canaleAt = new Set(), cxh = (box.X0 + box.X1) / 2, cyh = (box.Y0 + box.Y1) / 2;
+        for (const dd of ['n', 's', 'e', 'w']) { let best = null, bd = 1e9; for (const sg of RT.edges) { if (sg.dir !== dd || Math.abs(sg.b[0] - sg.a[0]) + Math.abs(sg.b[1] - sg.a[1]) < 0.5) continue; const d2 = (dd === 'n' || dd === 's') ? Math.abs(sg.mx - cxh) : Math.abs(sg.my - cyh); if (d2 < bd) { bd = d2; best = sg; } } if (best) canaleAt.add(best); }
+        for (const sg of RT.edges) {
+          if (!inView(Math.floor(sg.mx), Math.floor(sg.my))) continue;
+          const T3 = 0.2, [nx, ny] = sg.n, xa = Math.min(sg.a[0], sg.b[0]), xb = Math.max(sg.a[0], sg.b[0]), ya = Math.min(sg.a[1], sg.b[1]), yb = Math.max(sg.a[1], sg.b[1]);
+          const rr = nx ? [nx > 0 ? xa - T3 : xa, ya, nx > 0 ? xa : xa + T3, yb] : [xa, ny > 0 ? ya - T3 : ya, xb, ny > 0 ? ya : ya + T3];
+          const zt = RZ((rr[0] + rr[2]) / 2, (rr[1] + rr[3]) / 2) - 0.02;
+          rbox(list, ...rr, zt, 0.36, Wm.color, { type: 'roof', x: Math.floor(sg.mx - nx * 0.5), y: Math.floor(sg.my - ny * 0.5), dbias: after(rr), sideDecor: wallTexture(hs.wall, HOUSE_H, HOUSE_H + 0.36, (Math.floor(sg.mx) * 31 + Math.floor(sg.my) * 17) | 0, accentOf(hs)) }, 1);
+          if (canaleAt.has(sg)) {   // カナレ：外へ0.5m、幅14cm。屋根の各辺のまん中あたりに1本
+            const cxm = sg.mx, cym = sg.my, w2 = 0.07, out = 0.5;
+            const cr = nx ? [nx > 0 ? cxm : cxm - out, cym - w2, nx > 0 ? cxm + out : cxm, cym + w2] : [cxm - w2, ny > 0 ? cym : cym - out, cxm + w2, ny > 0 ? cym + out : cym];
+            rbox(list, ...cr, zt + 0.02, 0.1, '#7A5636', { type: 'roof', x: Math.floor(sg.mx - nx * 0.5), y: Math.floor(sg.my - ny * 0.5), dbias: after(cr) + 0.01 }, 1);
+          }
+        }
+      }
+      if ((hs.roofShape || 'flat') === 'gable') {   // 切妻の棟：棟をまたぐ屋根の上に、棟瓦（または棟包み）
+        const ew = hs.roofDir === 'ew', c = ew ? (box.X0 + box.X1) / 2 : (box.Y0 + box.Y1) / 2, ridgeCol = hs.roof === 'teja' ? '#9C4A30' : hs.roof === 'green' ? '#5E8F4E' : '#7E878C';
+        for (const T2 of RT.tiles) {
+          if (!inView(T2.cx, T2.cy)) continue;
+          if (ew ? !(T2.x0 < c && T2.x1 > c) : !(T2.y0 < c && T2.y1 > c)) continue;
+          const rr = ew ? [c - 0.09, T2.y0, c + 0.09, T2.y1] : [T2.x0, c - 0.09, T2.x1, c + 0.09];
+          rbox(list, ...rr, RZ(ew ? c : (T2.x0 + T2.x1) / 2, ew ? (T2.y0 + T2.y1) / 2 : c) - 0.03, 0.12, ridgeCol, { type: 'roof', x: T2.cx, y: T2.cy, dbias: after(rr) + 0.5 }, 1);
+        }
+      }
       // 妻壁：壁の上から屋根の下までの三角・台形の壁（傾いた屋根のとき）
       if ((hs.roofShape || 'flat') !== 'flat') for (const o of houseOuterEdges(hs)) {
         if (!inView(o.x, o.y)) continue;
         const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number), off = 0.07, [ox2, oy2] = { n: [0, -off], s: [0, off], w: [-off, 0], e: [off, 0] }[o.dir];
         const [pa, pb] = t === 'h' ? [[ex, ey], [ex + 1, ey]] : [[ex, ey], [ex, ey + 1]];
         const ha = roofZ(hs, ...pa, box), hb = roofZ(hs, ...pb, box); if (Math.max(ha, hb) < HOUSE_H + 0.02) continue;
-        gableWall(list, [pa[0] + ox2, pa[1] + oy2], [pb[0] + ox2, pb[1] + oy2], z + HOUSE_H, z + ha, z + hb, o.dir, Wm.color, wallTexture(hs.wall, HOUSE_H, Math.max(ha, hb), (ex * 73 + ey * 151) | 0), { type: 'wall', e: o.e, x: o.x, y: o.y });
+        gableWall(list, [pa[0] + ox2, pa[1] + oy2], [pb[0] + ox2, pb[1] + oy2], z + HOUSE_H, z + ha, z + hb, o.dir, Wm.color, wallTexture(hs.wall, HOUSE_H, Math.max(ha, hb), (ex * 73 + ey * 151) | 0, accentOf(hs)), { type: 'wall', e: o.e, x: o.x, y: o.y });
       }
       // かまどの煙突：屋根から出る鉄の煙突と笠。木がとってあれば、うすい煙
       const sf = (hs.furn || []).find(f => f.t === 'stove');
@@ -669,7 +700,9 @@ export function createView(canvas, world, opt = {}) {
     }
     list.push({ depth: Math.max(...b.map(q => q[2])) + 0.01 + (meta?.dbias || 0), meta, draw: (cx, pc) => {
       for (const sd of sides) poly(cx, sd.pts, pc ? pc(sd.face < 0 ? 0 : sd.face) : sd.fill, 1);
-      poly(cx, t, pc ? pc(4) : topFill, 1); if (!pc && meta?.decor) meta.decor(cx, t, g);
+      poly(cx, t, pc ? pc(4) : topFill, 1);
+      if (!pc && meta?.noSides) { cx.strokeStyle = topFill; cx.lineWidth = 1.2 * v.dpr; cx.beginPath(); cx.moveTo(t[0][0], t[0][1]); for (const q of t) cx.lineTo(q[0], q[1]); cx.closePath(); cx.stroke(); }   // 切り分けた屋根のつなぎ目を消す
+      if (!pc && meta?.decor) meta.decor(cx, t, g);
     } });
   }
   /* 屋根の形：家のマスの外に面した辺を E だけ伸ばした長方形の集まり（重なりあり）を、
@@ -710,6 +743,20 @@ export function createView(canvas, world, opt = {}) {
     const U = (wx, wy) => faceAt(t, (wx - T2.x0) / (T2.x1 - T2.x0), (wy - T2.y0) / (T2.y1 - T2.y0));
     const line = (A, B) => { cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.stroke(); };
     if (kind === 'green') { const rd = roofDecor(kind, T2.cx, T2.cy); rd && rd(cx, t, geom()); }
+    else if (kind === 'teja') {   // 素焼きの瓦：流れにそって半円の瓦の列（山と谷）、40cmごとに重なりの段。1枚ずつ焼き色がちがう
+      const P = 0.25, C = 0.4, a0 = along ? T2.y0 : T2.x0, a1 = along ? T2.y1 : T2.x1, b0 = along ? T2.x0 : T2.y0, b1 = along ? T2.x1 : T2.y1;
+      const UQ = (p0, p1, q0, q1, f) => { const pts = along ? [U(q0, p0), U(q1, p0), U(q1, p1), U(q0, p1)] : [U(p0, q0), U(p1, q0), U(p1, q1), U(p0, q1)]; cx.fillStyle = f; cx.beginPath(); cx.moveTo(pts[0][0], pts[0][1]); for (const r of pts) cx.lineTo(r[0], r[1]); cx.closePath(); cx.fill(); };
+      for (let k = Math.floor(a0 / P); k * P < a1; k++) {
+        const p0 = Math.max(a0, k * P), p1 = Math.min(a1, (k + 1) * P), pm = Math.min(p1, Math.max(p0, k * P + P * 0.5)); if (p1 <= p0) continue;
+        for (let j = Math.floor(b0 / C); j * C < b1; j++) { const q0 = Math.max(b0, j * C), q1 = Math.min(b1, (j + 1) * C); if (q1 <= q0) continue; const tn = hash(k, j, 55) - 0.5; UQ(p0, p1, q0, q1, tn > 0 ? `rgba(255,190,150,${(tn * 0.25).toFixed(3)})` : `rgba(90,30,15,${(-tn * 0.25).toFixed(3)})`); UQ(p0, p1, q0, Math.min(q1, q0 + 0.035), 'rgba(70,22,8,.30)'); }
+        if (pm > p0) UQ(p0, pm, b0, b1, 'rgba(255,214,180,.20)');   // 山（上向きの瓦）は明るく
+        UQ(Math.max(p0, k * P + P * 0.5), Math.min(p1, k * P + P * 0.58), b0, b1, 'rgba(70,22,8,.32)');   // 谷との境の影
+      }
+    }
+    else if (kind === 'mud') {   // 土の平屋根：こてで均した泥。ところどころ明るく乾いたむら
+      for (let i = 0; i < 3; i++) { const wx = T2.cx + hash(T2.cx, T2.cy, 56 + i), wy = T2.cy + hash(T2.cx, T2.cy, 60 + i); if (wx <= T2.x0 || wx >= T2.x1 || wy <= T2.y0 || wy >= T2.y1) continue; const [px, py] = U(wx, wy), q2 = U(Math.min(T2.x1, wx + 0.3), wy), rr = Math.max(2, Math.hypot(q2[0] - px, q2[1] - py)), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, i % 2 ? 'rgba(230,195,150,.25)' : 'rgba(100,65,40,.18)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.beginPath(); cx.arc(px, py, rr, 0, 7); cx.fill(); }
+      cx.strokeStyle = 'rgba(95,62,38,.16)'; cx.lineWidth = 0.8 * v.dpr; const wy = T2.cy + 0.3 + hash(T2.cx, T2.cy, 64) * 0.4; if (wy > T2.y0 && wy < T2.y1) line(U(Math.max(T2.x0, T2.cx + 0.1), wy), U(Math.min(T2.x1, T2.cx + 0.8), wy + 0.05));
+    }
     else {
       cx.lineWidth = 1 * v.dpr; const step = 1 / 12;
       if (!along) { for (let k = Math.ceil(T2.x0 / step - 0.5); (k + 0.5) * step < T2.x1; k++) { const wx = (k + 0.5) * step; if (wx <= T2.x0) continue; cx.strokeStyle = k % 2 ? 'rgba(255,255,255,.22)' : 'rgba(30,40,45,.22)'; line(U(wx, T2.y0), U(wx, T2.y1)); } }
@@ -843,11 +890,11 @@ export function createView(canvas, world, opt = {}) {
       switch (cl) {
         case 10: case 95:   // 林の下：落ち葉・こけ・ときどきシダ
           dots(fine ? 14 : 7, [Lc('#8C6B3E'), Lc('#A57E48'), Lc('#6E6B3A'), Lc('#B38D55')], 0.035, 0.07, 300);
-          if (r1 > 0.5) bladesOn(cx, at, x, y, fine ? 7 : 3, 0.04, 0.1, [Lc('#5E7A3C'), Lc('#6F8C45')], M, 2, 340);
+          if (r1 > 0.5) bladesOn(cx, at, x, y, fine ? 7 : 3, 0.04, 0.1, [Lc(dryHex('#5E7A3C')), Lc(dryHex('#6F8C45'))], M, 2, 340);
           if (r2 > 0.7) fern(cx, at(0.3 + r3 * 0.4, 0.45 + r1 * 0.4), 0.3 * M, Lc('#4E7C3A'), Lc('#6A9848', 1.08), x, y);
           break;
         case 20:   // やぶのあいだ：背の高い草と穂
-          bladesOn(cx, at, x, y, fine ? 18 : 9, 0.12, 0.32, [Lc('#7E9A4E', 0.85), Lc('#93AE57'), Lc('#B5B66A', 1.05)], M, 4, 400);
+          bladesOn(cx, at, x, y, ARID ? (fine ? 9 : 4) : (fine ? 18 : 9), 0.12, ARID ? 0.22 : 0.32, [Lc(dryHex('#7E9A4E'), 0.85), Lc(dryHex('#93AE57')), Lc(dryHex('#B5B66A', 0.6), 1.05)], M, 4, 400);
           if (fine) dots(5, [Lc('#E2D597', 1.1)], 0.012, 0.022, 450, 1);
           break;
         case 40:   // 畑のあと：うねと、まばらな草
@@ -875,10 +922,50 @@ export function createView(canvas, world, opt = {}) {
     };
   }
   /* ---------- 家の仕上げ ---------- */
-  function wallTexture(kind, z0, z1, seed) {   // z0, z1：この部分の床からの高さ（m）。seed：壁ごとの板の色むら
+  /* バハレケの腰壁（ソカロ）と窓枠の色 */
+  function accentOf(hs) { const M = WALLS[hs.wall]; return M?.accent ? ACCENTS[(hs.accent ?? 0) % ACCENTS.length][0] : M?.frame || null; }
+  function wallTexture(kind, z0, z1, seed, accent = null) {   // z0, z1：この部分の床からの高さ（m）。seed：壁ごとの板の色むら
     return (cx, p) => {
       const span = z1 - z0, fy = (zz) => (zz - z0) / span, Q = (a0, b0, a1, b1, f) => quadOn(cx, p, a0, b0, a1, b1, f);
-      if (kind === 'board') {   // 縦の板張りと、継ぎ目をおさえる押し縁
+      const band = (za, zb, f) => { const a = Math.max(0, fy(za)), b = Math.min(1, fy(zb)); if (b > a) Q(0, a, 1, b, f); };
+      if (kind === 'bahareque') {   // しっくいの白い壁。ところどころ土色がにじみ、下は色を塗った腰壁（ソカロ）に浮き彫りの模様
+        const W = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]);
+        for (let i = 0; i < 3; i++) { const [px, py] = faceAt(p, hash(seed, i, 41), Math.min(1, Math.max(0, fy(0.9 + hash(seed, i, 42) * 2)))), rr = W * (0.12 + hash(seed, i, 43) * 0.18), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, 'rgba(176,140,98,.16)'); gr.addColorStop(1, 'rgba(176,140,98,0)'); cx.fillStyle = gr; cx.fillRect(px - rr, py - rr, rr * 2, rr * 2); }
+        if (z0 < 0.9 && accent) {
+          band(0, 0.9, accent);
+          const a = Math.max(0, fy(0.12)), b = Math.min(1, fy(0.78));
+          if (b > a) { Q(0.1, a, 0.9, b, 'rgba(255,255,255,.16)'); Q(0.13, a + (b - a) * 0.08, 0.87, b - (b - a) * 0.08, 'rgba(0,0,0,.10)');   // 浮き彫りの枠
+            const mid = (a + b) / 2, hh = (b - a) * 0.32, c0 = faceAt(p, 0.5, mid - hh), c1 = faceAt(p, 0.62, mid), c2 = faceAt(p, 0.5, mid + hh), c3 = faceAt(p, 0.38, mid);
+            cx.fillStyle = 'rgba(255,255,255,.55)'; cx.beginPath(); cx.moveTo(c0[0], c0[1]); cx.lineTo(c1[0], c1[1]); cx.lineTo(c2[0], c2[1]); cx.lineTo(c3[0], c3[1]); cx.closePath(); cx.fill(); }   // ひし形の模様
+          band(0.88, 0.92, 'rgba(255,255,255,.7)');
+        }
+      } else if (kind === 'brick') {   // 赤れんが：15cmごとの段、目地は段ごとにずらす。1つずつ焼き色がちがう
+        const B = 0.15, n = 4;
+        for (let k = Math.floor(z0 / B); k * B < z1; k++) {
+          const a = Math.max(0, fy(k * B)), b = Math.min(1, fy((k + 1) * B)); if (b <= a) continue;
+          for (let j = -1; j < n; j++) { const f0 = Math.max(0, (j + (k % 2) * 0.5) / n), f1 = Math.min(1, (j + 1 + (k % 2) * 0.5) / n); if (f1 <= f0) continue; Q(f0, a, f1, b, tone(hash(seed + k, j, 44) - 0.5, 0.3)); Q(f0, a, Math.min(f1, f0 + 0.012), b, 'rgba(225,212,195,.55)'); }
+          Q(0, a, 1, Math.min(b, a + 0.022 / span), 'rgba(225,212,195,.6)');   // 横の目地
+        }
+        if (z1 > HOUSE_H - 0.3) band(HOUSE_H - 0.15, HOUSE_H, 'rgba(120,120,115,.55)');   // 上の鉄筋コンクリートの梁
+      } else if (kind === 'tapia') {   // 版築：50cmごとに突き固めた層。層の境に型枠の穴（メチナル）
+        const B = 0.5;
+        for (let k = Math.floor(z0 / B); k * B < z1; k++) {
+          const a = Math.max(0, fy(k * B)), b = Math.min(1, fy((k + 1) * B)); if (b <= a) continue;
+          Q(0, a, 1, b, tone(hash(k, 3, 45) - 0.5, 0.1));   // 層ごとの色（となりの壁ともつながる）
+          for (let i = 1; i < 5; i++) { const yy = a + (b - a) * (i + (hash(seed, k * 5 + i, 54) - 0.5) * 0.3) / 5; Q(0, yy, 1, Math.min(b, yy + 0.005 / span), 'rgba(110,78,48,.09)'); }   // 突き固めた薄い層（ゆらぐ）
+          for (let i = 0; i < 26; i++) { const c = faceAt(p, hash(seed, k * 31 + i, 52), a + (b - a) * hash(seed, k * 31 + i, 53)); cx.fillStyle = i % 3 ? 'rgba(95,64,38,.32)' : 'rgba(245,228,198,.45)'; const r2 = (0.6 + hash(seed, i, 57)) * v.dpr; cx.fillRect(c[0], c[1], r2, r2); }   // 土の中の小石とわら
+          Q(0, a, 1, Math.min(b, a + 0.02 / span), 'rgba(80,52,30,.3)');
+          if (k > 0 && fy(k * B) > 0.02) for (const f of [0.25, 0.75]) Q(f - 0.03, fy(k * B) + 0.01 / span, f + 0.03, fy(k * B) + 0.07 / span, 'rgba(45,28,15,.6)');   // 型枠の穴（メチナル）
+        }
+      } else if (kind === 'adobe') {   // アドベ：泥塗りのやわらかいむら。上のほうに梁（ビガ）の丸い木口が出る
+        const W = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]);
+        for (let i = 0; i < 5; i++) { const [px, py] = faceAt(p, hash(seed, i, 46), hash(seed, i, 47)), rr = W * (0.18 + hash(seed, i, 48) * 0.3), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, i % 2 ? 'rgba(225,180,135,.22)' : 'rgba(110,70,40,.16)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.fillRect(px - rr, py - rr, rr * 2, rr * 2); }
+        cx.strokeStyle = 'rgba(95,62,38,.14)'; cx.lineWidth = 0.8 * v.dpr; for (let i = 0; i < 3; i++) { const yy = hash(seed, i, 49); lineOn(cx, faceAt(p, 0.05, yy), faceAt(p, 0.4 + hash(seed, i, 50) * 0.5, yy + 0.03)); }   // こての跡
+        const zv = HOUSE_H - 0.32; if (zv > z0 && zv < z1) { const c = faceAt(p, 0.5, fy(zv)), r0 = 0.065 * geom().tw; cx.fillStyle = 'rgba(40,25,14,.35)'; cx.beginPath(); cx.ellipse(c[0] + r0 * 0.35, c[1] + r0 * 0.45, r0, r0 * 0.8, 0, 0, 7); cx.fill(); cx.fillStyle = '#7A5636'; cx.beginPath(); cx.ellipse(c[0], c[1], r0, r0 * 0.8, 0, 0, 7); cx.fill(); cx.strokeStyle = 'rgba(40,25,14,.5)'; cx.lineWidth = 0.8 * v.dpr; cx.beginPath(); cx.ellipse(c[0], c[1], r0 * 0.55, r0 * 0.42, 0, 0, 7); cx.stroke(); }   // 梁の木口
+      } else if (kind === 'strawbale') {   // わらの壁：厚い土塗りの、ふくらんだ段（ブロック1つ分ずつ）
+        const B = 0.45;
+        for (let k = Math.floor(z0 / B); k * B < z1; k++) { const a = Math.max(0, fy(k * B)), b = Math.min(1, fy((k + 1) * B)); if (b <= a) continue; Q(0, a, 1, b, tone(hash(seed, k, 51) - 0.3, 0.22)); Q(0, Math.max(a, b - 0.05 / span), 1, b, 'rgba(255,248,225,.22)'); Q(0, a, 1, Math.min(b, a + 0.04 / span), 'rgba(110,85,45,.16)'); }
+      } else if (kind === 'board') {   // 縦の板張りと、継ぎ目をおさえる押し縁
         for (let i = 0; i < 5; i++) Q(i / 5, 0, (i + 1) / 5, 1, tone(hash(seed, i, 31) - 0.5, 0.34));
         cx.strokeStyle = 'rgba(90,55,25,.14)'; cx.lineWidth = 0.8 * v.dpr;
         for (let i = 0; i < 5; i++) { const f = (i + 0.35 + hash(seed, i, 32) * 0.3) / 5; lineOn(cx, faceAt(p, f, 0), faceAt(p, f + 0.012, 1)); }
@@ -914,7 +1001,7 @@ export function createView(canvas, world, opt = {}) {
       // 壁の長い面だけに描く（壁の端の細い面には描かない）。面の左（fx=0）がどちら向きかで、つながる側を決める
       if ((et === 'h' && face !== 1 && face !== 3) || (et === 'v' && face !== 0 && face !== 2)) return;
       const inc = (et === 'h' && face === 3) || (et === 'v' && face === 0), L = inc ? cont.lo : cont.hi, Rt = inc ? cont.hi : cont.lo;
-      const Q = (a0, b0, a1, b1, f) => quadOn(cx, p, a0, b0, a1, b1, f), FR = '#EFE9DD';
+      const Q = (a0, b0, a1, b1, f) => quadOn(cx, p, a0, b0, a1, b1, f), FR = cont.frame || '#EFE9DD';
       const g0 = L ? 0 : 0.13, g1 = Rt ? 1 : 0.87, f0 = L ? 0 : 0.06, f1 = Rt ? 1 : 0.94;
       Q(f0, 0.0, f1, 1.0, FR);   // 枠
       const A = faceAt(p, 0.5, 0.94), B = faceAt(p, 0.5, 0.06), gr = cx.createLinearGradient(A[0], A[1], B[0], B[1]);
@@ -928,8 +1015,9 @@ export function createView(canvas, world, opt = {}) {
       cx.strokeStyle = 'rgba(255,255,255,.6)'; cx.lineWidth = 1.6 * v.dpr; lineOn(cx, faceAt(p, 0.57, 0.32), faceAt(p, 0.7, 0.76)); lineOn(cx, faceAt(p, 0.64, 0.26), faceAt(p, 0.73, 0.48));
     };
   }
-  function doorDecor(cx, p) {   // 板の扉：縦の板、横の桟と筋かい、黒い取っ手
+  function doorDecor(cx, p, face, paint = null) {   // 板の扉：縦の板、横の桟と筋かい、黒い取っ手。paint：色を塗った扉（バハレケの家）
     const Q = (a0, b0, a1, b1, f) => quadOn(cx, p, a0, b0, a1, b1, f);
+    if (paint) Q(0.1, 0, 0.9, 0.95, paint);
     for (let i = 0; i < 5; i++) Q(0.1 + i * 0.16, 0, 0.1 + (i + 1) * 0.16, 0.95, tone(hash(i, 7, 71) - 0.5, 0.3));
     cx.strokeStyle = 'rgba(30,18,8,.4)'; cx.lineWidth = 1 * v.dpr; for (let i = 1; i < 5; i++) lineOn(cx, faceAt(p, 0.1 + i * 0.16, 0), faceAt(p, 0.1 + i * 0.16, 0.95));
     Q(0.12, 0.15, 0.88, 0.21, 'rgba(255,232,195,.22)'); Q(0.12, 0.74, 0.88, 0.8, 'rgba(255,232,195,.22)');

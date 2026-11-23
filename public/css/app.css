@@ -381,3 +381,15 @@ dl.cpoints dt { font-weight: 700; white-space: nowrap; } dl.cpoints dd { margin:
 .modal .box svg.clim, .modal .box .cstats, .modal .box .clegend, .modal .box dl.cpoints { flex-shrink: 0; }
 .mgrid { display: flex; flex-direction: column; gap: 8px; }
 @media (max-height: 480px) { .mgrid { display: grid; grid-template-columns: 1fr 1fr; } }
+/* 土地の工法 */
+.mcard .tag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 6px; background: #EAF1E3; color: #3F6B2E; font-size: 11px; font-weight: 600; vertical-align: 1px; }
+.swatch.pat-bahareque { background: linear-gradient(to top, #2F8C8C 0 34%, #fff 34% 38%, var(--c) 38%); }
+.swatch.pat-brick { background: repeating-linear-gradient(0deg, rgba(235,220,200,.75) 0 1px, transparent 1px 6px), repeating-linear-gradient(90deg, rgba(235,220,200,.6) 0 1px, transparent 1px 11px), var(--c); }
+.swatch.pat-tapia { background: repeating-linear-gradient(0deg, rgba(80,52,30,.35) 0 1px, transparent 1px 12px), linear-gradient(180deg, rgba(255,240,215,.2), rgba(90,60,35,.15)), var(--c); }
+.swatch.pat-adobe { background: radial-gradient(circle at 70% 22%, #7A5636 0 2.5px, transparent 3px), radial-gradient(circle at 30% 70%, rgba(230,190,150,.5) 0 6px, transparent 9px), var(--c); }
+.swatch.pat-straw { background: repeating-linear-gradient(0deg, rgba(255,248,225,.35) 0 2px, transparent 2px 9px), var(--c); }
+.swatch.pat-teja { background: repeating-linear-gradient(90deg, rgba(255,214,180,.35) 0 4px, rgba(80,25,10,.35) 4px 5px, transparent 5px 8px), repeating-linear-gradient(0deg, rgba(70,22,8,.3) 0 1px, transparent 1px 8px), var(--c); }
+.swatch.pat-mud { background: linear-gradient(to bottom, #B98A62 0 22%, transparent 22%), radial-gradient(circle at 40% 60%, rgba(230,195,150,.4) 0 5px, transparent 8px), var(--c); }
+.accents { align-items: center; gap: 8px; }
+.accents .sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; background: var(--c); box-shadow: 0 0 0 1px rgba(0,0,0,.15); cursor: pointer; padding: 0; }
+.accents .sw.on { box-shadow: 0 0 0 2px #1F2A2E; }

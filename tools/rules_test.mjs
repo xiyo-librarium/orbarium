@@ -105,4 +105,21 @@ check('林の落ち葉で炭素が足りる', S.compost.buy < 0.01);
   check(`片流れ：タンク側へ下げると雨が入り、反対へ下げると入らない（${A2.fedTanks}つ／${A3.fedTanks}つ）`, A2.fedTanks >= 1 && A3.fedTanks === 0);
   check(`片流れの雨樋は下がる軒だけ（${W.housePerimeter(w9.house)}m／外周${W.houseOuterEdges(w9.house).length}m）`, W.housePerimeter(w9.house) < W.houseOuterEdges(w9.house).length);
 }
+// 土地の工法：地元なら安く地域にお金が回る。地震・雨への強さ、土の平屋根はカナレで雨を集める
+{
+  const rm = W.regional(W.WALLS.bahareque, 'med'), rt = W.regional(W.WALLS.bahareque, 'taos');
+  check(`バハレケはメデジンで安く地域のお金（${rm.cost}万円 / タオスなら${rt.cost}万円）`, rm.cost < rt.cost && rm.local && !rt.local);
+  const s10 = E.newGame({ seed: 21 }), hs = s10.world.house, site = E.SITES.med;
+  const m = (o) => W.houseModel(site, { ...W.cloneHouse(hs), ...o });
+  check(`地震に強いのは竹と土壁（${m({ wall: 'bahareque' }).quake}）、弱いのは版築（${m({ wall: 'tapia' }).quake}）`, m({ wall: 'bahareque' }).quake > m({ wall: 'brick' }).quake && m({ wall: 'brick' }).quake > m({ wall: 'tapia' }).quake);
+  check(`深い軒は土壁を雨から守る（${m({ wall: 'tapia' }).rotRisk.toFixed(2)}→${m({ wall: 'tapia', eaves: 1.2 }).rotRisk.toFixed(2)}）`, m({ wall: 'tapia', eaves: 1.2 }).rotRisk < m({ wall: 'tapia' }).rotRisk * 0.2);
+  check('土の壁は熱をためる', m({ wall: 'adobe', roof: 'mud' }).massLv > m({}).massLv);
+  const s11 = E.newGame({ site: 'taos', seed: 22 }), w11 = s11.world;
+  if (w11.house) {
+    const hc = Object.keys(w11.house.cells).map(k => k.split(',').map(Number)), xs = hc.map(c => c[0]), ys = hc.map(c => c[1]);
+    for (const [x, y] of [[Math.max(...xs) + 1, Math.min(...ys)], [Math.min(...xs) - 1, Math.min(...ys)], [Math.min(...xs), Math.max(...ys) + 1], [Math.min(...xs), Math.min(...ys) - 1]]) if (!W.put(s11, x, y, W.h(w11, x, y), 'tank', 'hire')) break;
+    const A0 = E.summarize(s11).A; const d = W.cloneHouse(w11.house); d.wall = 'adobe'; d.roof = 'mud'; d.roofShape = 'flat'; W.buildHouse(s11, d); const A1 = E.summarize(s11).A;
+    check(`土の平屋根はカナレで屋根全部の雨を集める（${A0.roofCatch.toFixed(1)}→${A1.roofCatch.toFixed(1)}m²）`, A1.roofCatch > A0.roofCatch);
+  }
+}
 console.log(ok.map(x => '  ✓ ' + x).join('\n')); if (ng.length) { console.log(ng.map(x => '  ✗ ' + x).join('\n')); process.exit(1); }

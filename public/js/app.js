@@ -40,7 +40,7 @@ async function title() {
   const onR = () => { g.size(); g.draw(); }; window.addEventListener('resize', onR);
   stopAnim = () => { run = false; window.removeEventListener('resize', onR); };
   document.getElementById('new').onclick = () => { if (!saved || confirmBox('はじめからやり直しますか？')) travel(E.SITES.tokyo, E.SITES.med, startGame, INVITE); };
-  const c = document.getElementById('cont'); if (c) c.onclick = () => { G.s = saved; game(); };
+  const c = document.getElementById('cont'); if (c) c.onclick = () => { G.s = saved; if (G.s.world && !G.s.world.site) G.s.world.site = G.s.site; game(); };
   document.getElementById('atlas').onclick = () => atlas(() => title());
 }
 function confirmBox(msg) { return window.confirm(msg); }
@@ -420,7 +420,7 @@ function openBuild(cx, cy, o = {}) {
     st.msg = `頼んだ！ ${Math.round(before - G.s.cash)}万円（人件費は近所の職人さんに）`; persist(); redraw();
   };
   const site = E.SITES[G.s.site], month = G.s.q * 3 + 2;
-  const v = createView(document.getElementById('isoc'), dw, { cx, cy, R: 8, lat: site.lat, month }); G.view = v; G.build = st; G.house = st;
+  const v = createView(document.getElementById('isoc'), dw, { cx, cy, R: 8, lat: site.lat, month, arid: Math.max(0, Math.min(1, (650 - site.rain.reduce((x, y) => x + y, 0)) / 450)) }); G.view = v;   /* 雨の少ない土地は乾いた草と砂の色（arid） */ G.build = st; G.house = st;
   const sunBtn = ov.querySelector('[data-sun]');
   const sunLabel = () => { const sv = v.sun; sunBtn.textContent = `☀ ${v.hour}時 · ${dirName(sv.az)}から${Math.round(sv.elev)}°`; sunBtn.title = `${month}月の${v.hour}時の日差し。押すと時刻が変わる（8・10・12・14・16時）`; };
   sunBtn.onclick = () => { const hs = [8, 10, 12, 14, 16]; v.setSun(null, null, hs[(hs.indexOf(v.hour) + 1) % hs.length]); sunLabel(); v.draw(); };
@@ -799,17 +799,13 @@ function houseBody(st) {
       }).join('')}`;
   }
   if (st.tab === 'mat') body = `
-    <h3>壁 <span class="small">家全体の壁を、この素材で張る</span></h3><div class="mcards">${Object.entries(E.W.WALLS).map(([k, M]) => matCard('wall', k, M, d.wall === k)).join('')}</div>
-    <h3>屋根 <span class="small">雨を集める面にもなる</span></h3><div class="mcards">${Object.entries(E.W.ROOFS).map(([k, M]) => matCard('roof', k, M, d.roof === k)).join('')}</div>
-    <h3>屋根の形 <span class="small">傾けると雨と雪が1つの向きに落ちる。雨樋とタンクはその軒に</span></h3>
-    <div class="seg-o">${Object.entries(E.W.ROOF_SHAPES).map(([k, n]) => `<button class="opt${(d.roofShape || 'flat') === k ? ' on' : ''}" data-rshape="${k}">${n}</button>`).join('')}</div>
-    ${(d.roofShape || 'flat') === 'mono' ? `<div class="seg-o"><span class="small">下がる向き</span>${[['n', '北'], ['e', '東'], ['s', '南'], ['w', '西']].map(([k, n]) => `<button class="opt${(d.roofDir || 's') === k ? ' on' : ''}" data-rdir="${k}">${n}へ</button>`).join('')}</div>` : ''}
-    ${(d.roofShape || 'flat') === 'gable' ? `<div class="seg-o"><span class="small">下がる向き</span>${[['ns', '北と南'], ['ew', '東と西']].map(([k, n]) => `<button class="opt${(d.roofDir === 'ew' ? 'ew' : 'ns') === k ? ' on' : ''}" data-rdir="${k}">${n}へ</button>`).join('')}</div>` : ''}
-    ${(d.roofShape || 'flat') !== 'flat' ? `<div class="seg-o"><span class="small">傾き</span>${E.W.PITCHES.map(([p2, n]) => `<button class="opt${(d.pitch || 0.3) === p2 ? ' on' : ''}" data-rpitch="${p2}">${n}（${Math.round(Math.atan(p2) * 180 / Math.PI)}°）</button>`).join('')}</div>` : ''}
-    <div class="seg-o"><span class="step">軒の出 <button class="btn ghost" data-eave="-1" aria-label="短く">−</button><b>${E.W.eavesDepth(d).toFixed(1)}m</b><button class="btn ghost" data-eave="1" aria-label="長く">＋</button></span><span class="small">長いほど屋根が広く雨を集め、夏の日差しと壁の雨を防ぐ（屋根 ${Math.round(E.W.roofCatchArea(d))}m²）</span></div>
+    <h3>壁 <span class="small">家全体の壁を、この素材で張る</span></h3><div class="mcards">${Object.entries(E.W.WALLS).filter(([, M]) => !M.home || M.home === G.s.site).map(([k, M]) => matCard('wall', k, M, d.wall === k, wallMeters(M))).join('')}</div>
+    ${E.W.WALLS[d.wall].accent ? `<div class="seg-o accents"><span class="small">腰壁（ソカロ）と窓枠の色</span>${E.W.ACCENTS.map(([c, n], i) => `<button class="sw${(d.accent ?? 0) === i ? ' on' : ''}" data-accent="${i}" style="--c:${c}" aria-label="${n}" title="${n}"></button>`).join('')}</div>` : ''}
+    <h3>屋根 <span class="small">雨を集める面にもなる</span></h3><div class="mcards">${Object.entries(E.W.ROOFS).filter(([, M]) => !M.home || M.home === G.s.site).map(([k, M]) => matCard('roof', k, M, d.roof === k)).join('')}</div>
+    ${E.W.ROOFS[d.roof].flat ? `<h3>屋根の形</h3><p class="small" style="margin:0">${esc(E.W.ROOFS[d.roof].name)}は平らだけ。軒は出さず、まわりを低い壁（パラペット）で囲んで、木の樋（カナレ）から雨を落とす。雨樋は要らない。</p>` : roofShapeBlock(d)}
     <h3>床</h3><div class="mcards">${Object.entries(E.W.FLOORS).map(([k, M]) => matCard('floor', k, M, d.floor === k)).join('')}</div>
     <h3>そのほか</h3><div class="seg-o">
-      <button class="opt${d.gutter ? ' on' : ''}" data-gutter="1">雨樋${d.gutter ? 'あり' : `をつける（軒${E.W.housePerimeter(d)}m · ${E.W.gutterPrice(E.W.housePerimeter(d)).toFixed(1)}万円。屋根の雨を全部タンクへ）`}</button>
+      ${E.W.ROOFS[d.roof].canales ? '' : gutterBtn(d)}
       <button class="opt${d.stove ? ' on' : ''}" data-stove="1">薪のかまど${d.stove ? 'あり' : 'をつける'}（${E.W.STOVE_PRICE}万円。切った木で料理と暖房、電気が減る）</button>
       ${knownTech('offgrid') ? `<span class="step">屋根の太陽光 <button class="btn ghost" data-pv="-1" aria-label="減らす">−</button><b>${d.pv}枚</b><button class="btn ghost" data-pv="1" aria-label="増やす">＋</button></span><span class="step">蓄電池 <button class="btn ghost" data-batt="-1" aria-label="減らす">−</button><b>${d.batt}台</b><button class="btn ghost" data-batt="1" aria-label="増やす">＋</button></span>` : ''}
       <span class="step">基礎の深さ <button class="btn ghost" data-depth="-1" aria-label="浅く">−</button><b>${(d.eq.depth || E.summarize(s).depth).toFixed(1)}m</b><button class="btn ghost" data-depth="1" aria-label="深く">＋</button></span></div>`;
@@ -827,7 +823,12 @@ function bindHouse(st, el) {
   el.querySelectorAll('[data-fswap]').forEach(b => b.onclick = () => { const [i, t] = b.dataset.fswap.split(':'); st.edit(dd => E.W.draftSwapFurn(dd, +i, t)); st.msg = ''; st.redraw(); });
   const set = (fn) => { st.edit(fn); st.msg = ''; st.redraw(); };
   el.querySelectorAll('[data-wall]').forEach(b => b.onclick = () => set(d => { d.wall = b.dataset.wall; }));
-  el.querySelectorAll('[data-roof]').forEach(b => b.onclick = () => set(d => { d.roof = b.dataset.roof; }));
+  el.querySelectorAll('[data-roof]').forEach(b => b.onclick = () => set(d => {
+    d.roof = b.dataset.roof; const R = E.W.ROOFS[d.roof];
+    if (R.pitched && (d.roofShape || 'flat') === 'flat') { d.roofShape = 'gable'; d.roofDir = d.roofDir === 'ew' ? 'ew' : 'ns'; d.pitch = Math.max(d.pitch || 0.3, 0.5); }   // 瓦は傾けた屋根に
+    if (R.flat) { d.roofShape = 'flat'; d.eaves = 0.16; }   // 土の平屋根：軒を出さず、パラペットで囲む
+  }));
+  el.querySelectorAll('[data-accent]').forEach(b => b.onclick = () => set(d => { d.accent = +b.dataset.accent; }));
   el.querySelectorAll('[data-floor]').forEach(b => b.onclick = () => set(d => { d.floor = b.dataset.floor; }));
   el.querySelectorAll('[data-rshape]').forEach(b => b.onclick = () => set(d => { d.roofShape = b.dataset.rshape; if (d.roofShape === 'gable' && !['ns', 'ew'].includes(d.roofDir)) d.roofDir = 'ns'; if (d.roofShape === 'mono' && !['n', 'e', 's', 'w'].includes(d.roofDir)) d.roofDir = 's'; if (!d.pitch) d.pitch = 0.3; }));
   el.querySelectorAll('[data-rdir]').forEach(b => b.onclick = () => set(d => { d.roofDir = b.dataset.rdir; }));
@@ -892,14 +893,27 @@ function houseYearStats(hm) {
   return { heat, elec: heat / 2.6, hot, peak };
 }
 const dots = (n) => '●'.repeat(n) + '○'.repeat(5 - n);
+function gutterBtn(d) {
+  return `<button class="opt${d.gutter ? ' on' : ''}" data-gutter="1">雨樋${d.gutter ? 'あり' : `をつける（軒${E.W.housePerimeter(d)}m · ${E.W.gutterPrice(E.W.housePerimeter(d)).toFixed(1)}万円。屋根の雨を全部タンクへ）`}</button>`;
+}
+function roofShapeBlock(d) {
+  return `<h3>屋根の形 <span class="small">傾けると雨と雪が1つの向きに落ちる。雨樋とタンクはその軒に</span></h3>
+    <div class="seg-o">${Object.entries(E.W.ROOF_SHAPES).filter(([k]) => !(E.W.ROOFS[d.roof].pitched && k === 'flat')).map(([k, n]) => `<button class="opt${(d.roofShape || 'flat') === k ? ' on' : ''}" data-rshape="${k}">${n}</button>`).join('')}</div>
+    ${(d.roofShape || 'flat') === 'mono' ? `<div class="seg-o"><span class="small">下がる向き</span>${[['n', '北'], ['e', '東'], ['s', '南'], ['w', '西']].map(([k, n]) => `<button class="opt${(d.roofDir || 's') === k ? ' on' : ''}" data-rdir="${k}">${n}へ</button>`).join('')}</div>` : ''}
+    ${(d.roofShape || 'flat') === 'gable' ? `<div class="seg-o"><span class="small">下がる向き</span>${[['ns', '北と南'], ['ew', '東と西']].map(([k, n]) => `<button class="opt${(d.roofDir === 'ew' ? 'ew' : 'ns') === k ? ' on' : ''}" data-rdir="${k}">${n}へ</button>`).join('')}</div>` : ''}
+    ${(d.roofShape || 'flat') !== 'flat' ? `<div class="seg-o"><span class="small">傾き</span>${E.W.PITCHES.map(([p2, n]) => `<button class="opt${(d.pitch || 0.3) === p2 ? ' on' : ''}" data-rpitch="${p2}">${n}（${Math.round(Math.atan(p2) * 180 / Math.PI)}°）</button>`).join('')}</div>` : ''}
+    <div class="seg-o"><span class="step">軒の出 <button class="btn ghost" data-eave="-1" aria-label="短く">−</button><b>${E.W.eavesDepth(d).toFixed(1)}m</b><button class="btn ghost" data-eave="1" aria-label="長く">＋</button></span><span class="small">長いほど屋根が広く雨を集め、夏の日差しと壁の雨を防ぐ（屋根 ${Math.round(E.W.roofCatchArea(d))}m²）</span></div>`;
+}
+function wallMeters(M) { return `<span>地震に強い <em>${dots(Math.round((M.quake ?? 0.7) * 5))}</em></span><span>雨に強い <em>${dots(Math.max(1, Math.round((1 - (M.wet || 0.15)) * 5)))}</em></span>`; }
 function matCard(kind, k, M, on, extra = '') {   // 覚えていない素材は出さない
   if (!knownTech(M.learn)) return '';
+  const rg = E.W.regional(M, G.s.site);
   const unit = kind === 'wall' ? '1m' : kind === 'htool' ? '1つ' : '1m²';
   return `<button class="mcard${on ? ' on' : ''}" data-${kind}="${k}" aria-pressed="${on}">
     <i class="swatch pat-${M.pat || (M.door ? 'door' : 'glass')}" style="--c:${M.color}"></i>
-    <span class="mc-b"><b>${esc(M.name)}</b><span class="note">${esc(M.note)}</span>
+    <span class="mc-b"><b>${esc(M.name)}${M.home ? ' <span class="tag">この土地の工法</span>' : ''}</b><span class="note">${esc(M.note)}</span>
       <span class="meters"><span>断熱 <em>${dots(M.warm || 1)}</em></span>${M.store ? `<span>熱をためる <em>${dots(M.store)}</em></span>` : ''}${M.catch ? `<span>雨を集める <em>${dots(Math.round(M.catch * 5))}</em></span>` : ''}${extra}</span></span>
-    <span class="price">${M.cost}<small>万円/${unit}</small></span></button>`;
+    <span class="price">${rg.cost}<small>万円/${unit}</small></span></button>`;
 }
 
 /* ---------- 右のダッシュボード ---------- */

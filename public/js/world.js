@@ -514,7 +514,7 @@ export function analyze(w, site, persons = 1) {
   if (w.house) {   // 家：雨が落ちる軒（片流れなら下がる側だけ）のそばのタンク
     const hs = w.house, dc = new Set(); for (const o of drainEdges(hs)) dc.add(ck(o.x, o.y));
     const hc = [...dc].map(k => k.split(',').map(Number)), E = eavesDepth(hs), sh = hs.roofShape || 'flat';
-    structs.push({ cells: hc, eave: hs.z + HOUSE_H + (sh === 'flat' ? 0 : -(hs.pitch || 0.3) * E) + 0.01, coef: ROOFS[hs.roof].catch, area: roofCatchArea(hs) * ROOFS[hs.roof].catch, gut: !!hs.gutter });
+    structs.push({ cells: hc, eave: hs.z + HOUSE_H + (sh === 'flat' ? 0 : -(hs.pitch || 0.3) * E) + 0.01, coef: ROOFS[hs.roof].catch, area: roofCatchArea(hs) * ROOFS[hs.roof].catch, gut: !!hs.gutter || !!ROOFS[hs.roof].canales });
   }
   for (const c of comp) {
     const exposed = c.filter(r => !at(w, r.x, r.y, r.z + 1) || BLOCKS[at(w, r.x, r.y, r.z + 1).t].kind === 'pv');
@@ -632,12 +632,24 @@ export const HOUSE_H = 3;
 export const WALLS = {
   board: { name: '板の壁', note: '木の板を張っただけ。安くて、近くの製材所の木。熱は素通り。', u: 1.8, cost: 2.4, unit: '1m', warm: 1, store: 1, local: true, color: '#C9A47A', pat: 'board' },
   ins: { name: '断熱した壁', note: '板と板のあいだに断熱材。寒さも暑さも入りにくい。', u: 0.45, cost: 4.2, unit: '1m', warm: 3, store: 1, color: '#E4CDA3', pat: 'board', learn: 'insulation' },
-  thick: { name: '厚い断熱の壁', note: '断熱材を2倍に。冬の寒い土地向け。', u: 0.2, cost: 6.0, unit: '1m', warm: 5, store: 1, color: '#F1E2C2', pat: 'board', learn: 'insulation' }
+  thick: { name: '厚い断熱の壁', note: '断熱材を2倍に。冬の寒い土地向け。', u: 0.2, cost: 6.0, unit: '1m', warm: 5, store: 1, color: '#F1E2C2', pat: 'board', learn: 'insulation' },
+  /* 土地の工法（home の土地では地元の大工さんの仕事で安く、お金も地域に回る。よその土地では材料を遠くから運ぶので高い）
+     quake：地震への強さ（1＝びくともしない）、wet：雨への弱さ（軒で守らないと傷む）、mass：熱をためる重さ（家の重さの段に足す）、upkeep：壁1mあたり年の手入れ（万円） */
+  bahareque: { name: '竹と土壁（バハレケ）', home: 'med', note: 'グアドゥア竹の骨組みに土を塗り、しっくいで白く仕上げる。軽くしなって地震に強い。雨に弱いので深い軒と石の腰で守る。腰壁（ソカロ）と窓枠は好きな色に。', u: 1.5, cost: 2.0, warm: 2, store: 2, mass: 1, quake: 0.9, wet: 0.8, color: '#F2EEE4', pat: 'bahareque', accent: true },
+  brick: { name: '赤れんが（ラドリージョ）', home: 'med', note: '谷の窯で焼いた赤いれんがを、鉄筋コンクリートの枠で固めて積む。メデジンの町の色。重くて熱をためる。雨に強い。', u: 2.0, cost: 3.2, warm: 1, store: 3, mass: 1, quake: 0.65, wet: 0.05, color: '#B4593B', pat: 'brick' },
+  tapia: { name: '版築（タピア・ピサダ）', home: 'med', note: '板の型枠に土を入れて突き固め、50cmずつ積み上げる。植民地時代の町の壁。とても重く熱をためるが、地震と雨に弱い。', u: 1.1, cost: 2.6, warm: 2, store: 4, mass: 2, quake: 0.25, wet: 0.65, color: '#D2A675', pat: 'tapia' },
+  adobe: { name: '日干しれんが（アドベ）', home: 'taos', note: '土とわらを型に入れて日に干したれんがを積み、泥を塗る。昼の日差しを夜まで溜める。外の泥は毎年塗り直す（手入れの日）。', u: 1.2, cost: 2.4, warm: 2, store: 4, mass: 2, quake: 0.3, wet: 0.55, upkeep: 0.08, color: '#D6AC7C', pat: 'adobe', vigas: true, frame: '#3B8FB2' },
+  strawbale: { name: 'わらのブロックの壁', home: 'taos', learn: 'straw', note: 'わらのブロックを積んで土を塗る。壁そのものが厚い断熱。乾いた土地なら長持ちするが、濡れると腐る。', u: 0.15, cost: 3.6, warm: 5, store: 2, mass: 1, quake: 0.6, wet: 0.9, color: '#DCC394', pat: 'straw' }
 };
+export const ACCENTS = [['#2F8C8C', '青緑'], ['#D9573B', '朱'], ['#E7B53C', '山吹'], ['#3E6FB0', '群青'], ['#6E9A3A', '若草'], ['#7A3E6E', '葡萄']];
+/* 土地の工法の値段：その土地なら地元の値段（お金も地域に）、よその土地なら1.6倍で材料は遠くから */
+export function regional(M, site) { if (!M.home || !site || M.home === site) return { cost: M.cost, local: M.home ? true : !!M.local, away: false }; return { cost: Math.round(M.cost * 1.6 * 10) / 10, local: false, away: true }; }
 export const ROOFS = {
   tin: { name: 'トタン屋根', note: '安くて雨をよく集める。日なたで焼けて、冷えた夜は裏に水滴がつく。', u: 3.0, absorb: 0.7, catch: 0.85, cost: 0.8, warm: 1, store: 1, color: '#8E979C', pat: 'tin' },
   tinins: { name: '断熱したトタン屋根', note: 'トタンの下に断熱材。雨はよく集めたまま、焼けも水滴も止まる。', u: 0.3, absorb: 0.7, catch: 0.85, cost: 1.6, warm: 4, store: 1, color: '#A9B1B5', pat: 'tin', learn: 'insulation' },
-  green: { name: '草屋根', note: '土と草をのせる。夏に涼しく、雨はあまり集まらない。重いので柱を太く。', u: 1.0, absorb: 0.25, catch: 0.35, cost: 2.2, warm: 2, store: 3, local: true, color: '#6FA45F', pat: 'grass' }
+  green: { name: '草屋根', note: '土と草をのせる。夏に涼しく、雨はあまり集まらない。重いので柱を太く。', u: 1.0, absorb: 0.25, catch: 0.35, cost: 2.2, warm: 2, store: 3, local: true, color: '#6FA45F', pat: 'grass' },
+  teja: { name: '素焼きの瓦（テハ）', home: 'med', pitched: true, note: '谷の窯で焼いた半円の瓦を、上向き・下向きに重ねる。日に焼けにくく、雨の音もやわらか。傾けた屋根に（平らなら切妻にする）。重いので地震には少し弱くなる。', u: 2.0, absorb: 0.5, catch: 0.78, cost: 1.8, warm: 2, store: 2, mass: 1, heavy: 0.1, color: '#B9603F', pat: 'teja' },
+  mud: { name: '土の平屋根（ビガとラティージャ）', home: 'taos', flat: true, canales: true, note: '丸太の梁（ビガ）に小枝（ラティージャ）を並べ、土を厚くのせる。まわりを低い壁（パラペット）で囲み、木の樋（カナレ）から雨を落とす。雨樋は要らない。平らな屋根だけ。', u: 0.8, absorb: 0.6, catch: 0.7, cost: 1.5, warm: 3, store: 3, mass: 1, color: '#B48C66', pat: 'mud' }
 };
 export const FLOORS = {
   wood: { name: '木の床', note: '地面から浮かせた板の床。足元が冷えにくい。熱はためない。', u: 0.8, mass: 0, cost: 0.9, warm: 3, store: 1, local: true, color: '#D2B07E', pat: 'board' },
@@ -724,7 +736,7 @@ export const PV_PRICE = 5.5, BATT_PRICE = 15, EAVES_PRICE = 0.6;   // 太陽光1
 export const ROOF_SHAPES = { flat: 'ほぼ平ら', mono: '片流れ', gable: '切妻' };
 export const PITCHES = [[0.15, 'ゆるい'], [0.3, 'ふつう'], [0.5, '急'], [0.8, 'とても急（雪を落とす）']];
 export const EAVE_STEPS = [0.16, 0.5, 0.9, 1.2, 1.5], EAVE_M2 = 1.0;   // 張り出し1m²あたり
-export const eavesDepth = (hs) => !hs ? 0 : typeof hs.eaves === 'number' ? hs.eaves : hs.eaves ? 0.5 : 0.16;
+export const eavesDepth = (hs) => !hs ? 0 : ROOFS[hs.roof]?.flat ? 0.04 : typeof hs.eaves === 'number' ? hs.eaves : hs.eaves ? 0.5 : 0.16;   // 土の平屋根は軒を出さない
 const DV = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
 export function roofBox(hs) { let X0 = 1e9, X1 = -1e9, Y0 = 1e9, Y1 = -1e9; for (const k in hs.cells) { const [x, y] = k.split(',').map(Number); X0 = Math.min(X0, x); X1 = Math.max(X1, x + 1); Y0 = Math.min(Y0, y); Y1 = Math.max(Y1, y + 1); } return { X0, X1, Y0, Y1 }; }
 /* 屋根の上面の、床からの高さ（壁の上が HOUSE_H） */
@@ -843,11 +855,12 @@ export function estimate(w, cur, d) {
   const cellsD = Object.keys(d.cells), cellsC = new Set(Object.keys(cur.cells));
   const newCells = cellsD.filter(k => !cellsC.has(k)), goneCells = [...cellsC].filter(k => !d.cells[k]);
   // 床と屋根：素材が同じなら増えた分だけ、替えたら全部
+  const rg = (M) => regional(M, w.site), Rr = rg(R), Wr = rg(W);
   add(`床（${F.name}）`, d.floor === cur.floor ? newCells.length : cellsD.length, 'm²', F.cost, F.local);
-  add(`屋根（${R.name}）`, d.roof === cur.roof ? newCells.length : cellsD.length, 'm²', R.cost, R.local);
+  add(`屋根（${R.name}${Rr.away ? '・遠くから' : ''}）`, d.roof === cur.roof ? newCells.length : cellsD.length, 'm²', Rr.cost, Rr.local);
   const outD = houseOuterEdges(d), outC = new Set(houseOuterEdges(cur).map(o => o.e));
   const newWalls = outD.filter(o => !outC.has(o.e)).length;
-  add(`壁（${W.name}）`, d.wall === cur.wall ? newWalls : outD.length, 'm', W.cost, W.local);
+  add(`壁（${W.name}${Wr.away ? '・遠くから' : ''}）`, d.wall === cur.wall ? newWalls : outD.length, 'm', Wr.cost, Wr.local);
   for (const t in OPENINGS) { const n = outD.filter(o => d.open[o.e] === t && cur.open[o.e] !== t).length; add(OPENINGS[t].name, n, 'つ', OPENINGS[t].cost, false); }
   add('壊して片づける', goneCells.length, 'm²', 0.4, true);
   // 段をそろえる（掘る・盛る）
@@ -859,7 +872,7 @@ export function estimate(w, cur, d) {
     if (sh(d) !== sh(cur) && (d.roofShape || 'flat') !== 'flat') {
       const p = d.pitch || 0.3, n = Object.keys(d.cells).length; add(`屋根の形を${ROOF_SHAPES[d.roofShape]}に（傾き${Math.round(Math.atan(p) * 180 / Math.PI)}°）`, n, 'm²', ROOFS[d.roof].cost * Math.sqrt(1 + p * p) + 0.4, true);
       const box = roofBox(d); let gw = 0; for (const o of outD) { const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number); const [a, b] = t === 'h' ? [[ex, ey], [ex + 1, ey]] : [[ex, ey], [ex, ey + 1]]; gw += (roofZ(d, ...a, box) + roofZ(d, ...b, box)) / 2 - HOUSE_H; }
-      if (gw > 0.05) add('屋根の下の壁（妻壁）', Math.round(gw * 10) / 10, 'm²', WALLS[d.wall].cost, true);
+      if (gw > 0.05) add('屋根の下の壁（妻壁）', Math.round(gw * 10) / 10, 'm²', Wr.cost, true);
     } }
   add('屋根の太陽光パネル', Math.max(0, d.pv - cur.pv), '枚', PV_PRICE, false);
   add('蓄電池', Math.max(0, d.batt - cur.batt), '台', BATT_PRICE, false);
@@ -942,14 +955,16 @@ export function houseModel(site, hs, n = 1) {
   const ach = 0.7;
   parts.air = 0.33 * V * ach;
   const UA = Object.values(parts).reduce((a, b) => a + b, 0);
-  const massLv = Math.min(3, F.mass + (hs.roof === 'green' ? 1 : 0));
+  const massLv = Math.min(3, F.mass + (hs.roof === 'green' ? 1 : 0) + (Wm.mass || 0) + (R.mass || 0));
+  const rainGuard = Math.min(0.95, Math.max(0, eavesDepth(hs) - 0.16) * 1.4);
   const MASS = [{ eta: 0.5, damp: 0.3, name: '軽い' }, { eta: 0.7, damp: 0.5, name: 'ふつう' }, { eta: 0.85, damp: 0.7, name: '重い' }, { eta: 0.92, damp: 0.82, name: 'とても重い' }];
   return {
     A, V, UA, parts, wallNet: wallA, uWall: Wm.u, roofA: A, uRoof: R.u, absorb: R.absorb,
-    Aw, winFactor: Aw ? winGain / Aw : 0, mass: MASS[massLv], massLv, eavesShade: Math.min(0.8, Math.max(0, eavesDepth(hs) - 0.16) * 0.9), rainGuard: Math.min(0.95, Math.max(0, eavesDepth(hs) - 0.16) * 1.4),
+    Aw, winFactor: Aw ? winGain / Aw : 0, mass: MASS[massLv], massLv, eavesShade: Math.min(0.8, Math.max(0, eavesDepth(hs) - 0.16) * 0.9), rainGuard,
+    quake: Math.max(0, (Wm.quake ?? 0.7) - (R.heavy || 0)), upkeep: (Wm.upkeep || 0) * houseOuterEdges(hs).length,
     ventAch: 2 + 40 * Math.min(0.3, Aw / Math.max(1, A)),
     // 結露：断熱していないトタン屋根の裏（冷えた夜に湿気が水滴になる）と、1枚ガラスの窓（寒い土地）
     condenseProne: hs.roof === 'tin', singleWin: wins ? single / wins : 0,
-    rotRisk: 0, doors, floorZ: hs.z, cells
+    rotRisk: (Wm.wet || 0) * (1 - rainGuard), doors, floorZ: hs.z, cells
   };
 }
