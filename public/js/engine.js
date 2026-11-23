@@ -692,7 +692,7 @@ export function advance(state) {
 function compact(rep) {
   const A = rep.A;
   return { y: rep.year, q: rep.q, net: rep.net, ws: rep.waterSelf, ps: rep.powerSelf, fs: rep.foodSelf, om: rep.om, harvest: rep.harvest, ev: rep.events.map(e => e.kind), phase: rep.phase, money: rep.money,
-    A: { firewood: A.firewood, rain: A.rain, city: A.city, harvest: A.harvest, grid: A.grid, sewer: A.sewer, runoff: A.runoff, recharge: A.recharge, bottled: A.bottled, tankUse: A.tankUse, greyUse: A.greyUse, irrTank: A.irrTank, irrGrey: A.irrGrey, irrPond: A.irrPond, load: A.load, pv: A.pv },
+    A: { firewood: A.firewood, rain: A.rain, city: A.city, harvest: A.harvest, grid: A.grid, sewer: A.sewer, runoff: A.runoff, recharge: A.recharge, bottled: A.bottled, tankUse: A.tankUse, greyUse: A.greyUse, irrTank: A.irrTank, irrGrey: A.irrGrey, irrPond: A.irrPond, load: A.load, pv: A.pv, sold: A.sold, overflow: A.overflow },
     foodBought: rep.foodBought, foodSold: rep.foodSold, foodShared: rep.foodShared, spent: rep.spent };
 }
 
@@ -845,6 +845,54 @@ export function cycles(s) {
       parts: (inLoc + outLoc > 1 ? ['近所の人'] : []).concat(inFar > 0 ? ['遠くの会社（外貨）'] : []), leaks: [['遠くへ払った', outFar, '万円'], ['遠くから稼いだ', inFar, '万円']], note: `お金の流れの${Math.round(mTot ? (inLoc + outLoc) / mTot * 100 : 0)}%が近所の中で回った` }
   ];
 }
+/* ---------- めぐりの形：入口 → 備蓄 → 出口 ----------
+   どの流れも同じ形で見る。入口は「土地（自然）・人（ゆるい〜きっちり）・共有（水道や電力網）」、
+   備蓄は「何日もつか」、出口は「戻す・渡す（ゆるい／きっちり／共有へ）・漏れる」。
+   エネルギーは戻せない（使えば熱として散る）ので、戻すの欄がいつも空になる。数字は直近1年（4季節）の合計 */
+export function flows(s, span = 4) {   // span：直近の何季節で見るか（1年あたりに直す）
+  const last = s.log.slice(-span), k = last.length ? 4 / last.length : 0;
+  const sum = (f) => last.reduce((a, x) => a + (f(x) || 0), 0) * k;
+  const S = summarize(s), n = s.persons.length, nu = nutrients(s);
+  // 水（m³）
+  const wLand = sum(x => x.A.tankUse + x.A.irrTank + x.A.irrPond) / 1000, wReuse = sum(x => x.A.greyUse + x.A.irrGrey) / 1000;
+  const wShared = sum(x => x.A.city) / 1000, wTight = sum(x => x.A.bottled) / 1000;
+  const wUse = wLand + wReuse + wShared + wTight, perDay = wUse / 365 || 0.15 * n;
+  const wRet = sum(x => x.A.recharge) + wReuse, wSewer = sum(x => x.A.sewer) / 1000, wLeak = sum(x => x.A.runoff) + sum(x => x.A.overflow) / 1000;
+  const tankDays = ((s.tank || 0) / 1000 + (s.pond || 0) / 1000 * 0.5) / perDay;
+  // 食べもの（kg）と養分（窒素 kg）
+  const fLand = sum(x => x.harvest), fTight = sum(x => x.foodBought), fUse = fLand + fTight;
+  const fShared = sum(x => x.foodShared), fSold = sum(x => x.foodSold);
+  const Nout = 5.4 * n, back = Math.min(Nout, nu.supply), nGive = (fShared + fSold) * 0.003;
+  const foodDays = (s.food || 0) / (1.2 * n);
+  // エネルギー（kWh）
+  const fire = sum(x => (x.A.firewood || 0) * 400), load = sum(x => x.A.load), grid = sum(x => x.A.grid), pvUsed = Math.min(sum(x => x.A.pv || 0), Math.max(0, load - grid));
+  const eSold = sum(x => x.A.sold), woodSold = sum(x => (x.money?.woodSale || 0) / 0.6 * 1100);
+  const eDays = (((s.batt || 0) / 1000) + (s.world.wood || 0) * 1100) / Math.max(0.5, (load + fire) / 365);
+  // お金（万円）：人とのやりとりを、その場できっちり清算する道具。近い相手か遠い相手か
+  const m = (f) => sum(x => f(x.money || {}));
+  const inFar = m(x => x.income), inLoc = m(x => x.sell + (x.woodSale || 0));
+  const outLoc = m(x => (x.rent || 0) + 0.5 * (x.food || 0) + 0.2 * (x.living || 0) + 0.5 * (x.maint || 0) + 0.5 * (x.repair || 0) + (x.sawdust || 0) + (x.chipper || 0)) + sum(x => x.spent?.local || 0);
+  const outFar = m(x => (x.jobCost || 0) + 0.5 * (x.food || 0) + 0.8 * (x.living || 0) + (x.water || 0) + (x.power || 0) + 0.5 * (x.maint || 0) + (x.replace || 0) + 0.5 * (x.repair || 0) + (x.pumpout || 0)) + sum(x => x.spent?.far || 0);
+  const monthly = (outLoc + outFar) / 12 || 20;
+  return [
+    { id: 'water', name: '水', unit: 'm³', total: wUse,
+      inlet: [['land', '雨（屋根・池）', wLand], ['land2', '排水の使い回し', wReuse], ['shared', '水道', wShared], ['tight', '買い水', wTight]],
+      stock: { label: 'タンクと池', days: tankDays }, outlet: [['ret', '土に戻す・使い回す', wRet], ['shared', '下水へ', wSewer], ['leak', '流れ去る・あふれる', wLeak]],
+      tokyo: '東京では入口も出口も、すべて水道と下水（共有の網）だった' },
+    { id: 'food', name: '食べもの・養分', unit: 'kg', total: fUse,
+      inlet: [['land', '畑・果樹・卵', fLand], ['loose', 'もらった', 0], ['tight', '買った', fTight]],
+      stock: { label: '食料庫', days: foodDays }, outUnit: 'kg N', outlet: [['ret', '堆肥にして畑へ', back], ['loose', '分けた', fShared * 0.003], ['tight', '売った', fSold * 0.003], ['leak', '下水・ごみへ', Math.max(0, Nout - back)]],
+      tokyo: '東京では食べものはすべて買い、し尿と生ごみの養分は処理場と清掃工場へ' },
+    { id: 'energy', name: 'エネルギー', unit: 'kWh', total: load + fire,
+      inlet: [['land', '太陽光', pvUsed], ['land2', '薪', fire], ['shared', '電力網', grid]],
+      stock: { label: '蓄電池と薪', days: eDays }, outlet: [['ret', '戻せない', 0], ['tight', '売った電気・薪', eSold + woodSold], ['leak', '熱として散る', load + fire]],
+      tokyo: '東京では電気はすべて電力網から。エネルギーはどこでも、使えば熱として散って戻らない' },
+    { id: 'money', name: 'お金', unit: '万円', total: (inLoc + inFar + outLoc + outFar) / 2, money: true,
+      inlet: [['near', '近所から（売る）', inLoc], ['far', '遠くから（勤め）', inFar]],
+      stock: { label: '所持金', days: (s.cash || 0) / monthly * 30 }, outlet: [['near', '近所へ払う', outLoc], ['far', '遠くへ払う', outFar]],
+      tokyo: 'お金はやりとりをその場で清算する道具。近くの相手ほど、関係も一緒に残る。東京では5%しか近くで回らなかった' }
+  ];
+}
 export function tokyoCycles() {
   const T = tokyoYear();
   return [
@@ -868,6 +916,17 @@ export function tokyoOrbs() {
 }
 
 /* ---------- 東京の1年（序章） ---------- */
+/* 東京のころの流れ（くらべるため）：入口も出口も、ほとんど共有の網と、買う・払う */
+export function tokyoFlows() {
+  const T = tokyoYear(), loc = T.spend * 0.05;
+  return [
+    { id: 'water', name: '水', unit: 'm³', total: T.flows.water, inlet: [['shared', '水道', T.flows.water]], stock: { label: 'ためていない', days: 0 }, outlet: [['shared', '下水へ', T.flows.sewer]], tokyo: 'ダムから来て、処理場から海へ' },
+    { id: 'food', name: '食べもの・養分', unit: 'kg', total: T.flows.food, inlet: [['tight', '買った', T.flows.food]], stock: { label: '冷蔵庫', days: 3 }, outUnit: 'kg N', outlet: [['leak', '下水・ごみへ', 5.4]], tokyo: 'どこかの畑から。養分は処理場と清掃工場へ' },
+    { id: 'energy', name: 'エネルギー', unit: 'kWh', total: T.flows.power, inlet: [['shared', '電力網', T.flows.power]], stock: { label: 'ためていない', days: 0 }, outlet: [['ret', '戻せない', 0], ['leak', '熱として散る', T.flows.power]], tokyo: 'どこかの発電所から。使えば熱になって散る' },
+    { id: 'money', name: 'お金', unit: '万円', total: T.income, money: true, inlet: [['far', '遠くから（勤め）', T.income]], stock: { label: '所持金', days: 300 / (T.spend / 12) * 30 }, outlet: [['near', '近所へ払う', loc], ['far', '遠くへ払う', T.spend - loc]], tokyo: '会社から入って、家賃と買い物で遠くへ出ていく' }
+  ];
+}
+
 export function tokyoYear() {
   const n = 1, workDays = 5;
   const income = workDays * WAGE * 48;

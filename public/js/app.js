@@ -50,8 +50,7 @@ async function travel(from = E.SITES.tokyo, to = E.SITES.med, after = startGame,
   const toKey = Object.keys(E.SITES).find(k => E.SITES[k] === to);
   if (toKey && toKey !== 'tokyo') G.realP = realPromise(toKey);   // 実データは、メールを読んでいるあいだに裏で取ってくる
   const wait = !!(story && story.go);   // メールがあるときは、出発の地点で止まって［行く］を待つ
-  const body = Array.isArray(story?.body) ? story.body.map(p => `<p>${esc(p)}</p>`).join('') : story ? `<p>${esc(story.body)}</p>` : '';
-  app.innerHTML = `<div class="travel"><div class="cap" id="cap">${wait ? esc(from.name || '') : from.name ? `${esc(from.name)}から、${esc(to.name)}へ` : esc(to.name)}</div>${story ? `<div class="mailcard trip" id="trip"><div class="small">メール · ${esc(story.from)}</div><b>${esc(story.subject)}</b>${body}${wait ? `<div class="go"><button class="btn primary" id="go">${esc(story.go)}</button></div>` : ''}</div>` : ''}<canvas id="tg" aria-hidden="true"></canvas><button class="btn skip" id="skip"${wait ? ' hidden' : ''}>スキップ</button></div>`;
+  app.innerHTML = `<div class="travel"><div class="cap" id="cap">${wait ? esc(from.name || '') : from.name ? `${esc(from.name)}から、${esc(to.name)}へ` : esc(to.name)}</div>${story ? mailHTML(story, { cls: 'trip', id: 'trip', date: '今朝', actions: wait ? `<button class="btn primary" id="go">${esc(story.go)}</button>` : '' }) : ''}<canvas id="tg" aria-hidden="true"></canvas><button class="btn skip" id="skip"${wait ? ' hidden' : ''}>スキップ</button></div>`;
   await loadLand();
   const g = createGlobe(document.getElementById('tg'), { lon: from.lon, lat: from.lat });
   g.label = from.name ? { lon: from.lon, lat: from.lat, text: from.name } : null; g.draw();
@@ -970,33 +969,41 @@ function webSVG(rel) {
   });
   return `<svg class="web" viewBox="-50 0 420 300" role="img" aria-label="関係の網：${nodes.map(x => `${x.name} ${Math.round(x.v * 100)}`).join('、')}">${lines.join('')}${dots.join('')}<circle cx="${cx}" cy="${cy}" r="18" fill="#1F2A2E"/><text x="${cx}" y="${cy + 4}" font-size="11" text-anchor="middle" fill="#FBFAF5">あなた</text></svg>`;
 }
-function cycleSVG(cs) {
-  const W = 420, H = 330, cells = [[105, 85], [315, 85], [105, 245], [315, 245]];
-  const out = cs.map((c, i) => {
-    const [cx, cy] = cells[i], r = 26 + 12 * Math.min(3, Math.log10(1 + c.flow));
-    const cl = Math.max(0, Math.min(1, c.closure)), a0 = -Math.PI / 2, a1 = a0 + cl * 2 * Math.PI;
-    const P = (a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
-    const [x0, y0] = P(a0), [x1, y1] = P(a1);
-    const arc = cl >= 0.999 ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${c.color}" stroke-width="9"/>` : cl > 0.005 ? `<path d="M${x0} ${y0} A${r} ${r} 0 ${cl > 0.5 ? 1 : 0} 1 ${x1} ${y1}" fill="none" stroke="${c.color}" stroke-width="9" stroke-linecap="round"/>` : '';
-    // 閉じていない分は、外へ抜けていく矢印
-    const gap = cl < 0.999 ? `${cl <= 0.005 ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#B9BDB0" stroke-width="3" stroke-dasharray="5 5"/>` : `<path d="M${x1} ${y1} A${r} ${r} 0 ${cl < 0.5 ? 1 : 0} 1 ${x0} ${y0}" fill="none" stroke="#B9BDB0" stroke-width="3" stroke-dasharray="5 5"/>`}<path d="M${cx + r * 0.75} ${cy - r - 4} l22 -14" stroke="#B9BDB0" stroke-width="2.5" marker-end="url(#ca)"/><text x="${cx + r * 0.75 + 24}" y="${cy - r - 18}" font-size="10" fill="#6B7462">遠くへ</text>` : '';
-    return `<g>${gap}${arc}<text x="${cx}" y="${cy - 2}" font-size="14" font-weight="700" text-anchor="middle" fill="#1F2A2E">${c.name}</text><text x="${cx}" y="${cy + 15}" font-size="12" text-anchor="middle" fill="#4A544F">${Math.round(cl * 100)}% 地域で</text><text x="${cx}" y="${cy + r + 20}" font-size="10.5" text-anchor="middle" fill="#6B7462">流れる量 ${Math.round(c.flow).toLocaleString()}${c.unit}/年</text></g>`;
+/* めぐりの形：どの流れも 入口 → 備蓄 → 出口。色で「土地・人（ゆるい／きっちり）・共有・戻す・漏れる」を見分ける */
+const FCOL = { land: '#4E9A5C', land2: '#8CC08A', loose: '#C2B4EC', tight: '#7062C4', shared: '#4F86B8', ret: '#1F9C86', leak: '#BDB8AE', near: '#D08B3A', far: '#8E939C' };
+function flowCards(fs, tokyo = false) {
+  const fmt = (x) => x >= 100 ? Math.round(x).toLocaleString() : x >= 10 ? x.toFixed(0) : x.toFixed(1);
+  const bar = (parts) => { const tot = parts.reduce((a, x) => a + x[2], 0); return tot > 0 ? parts.filter(x => x[2] > 0).map(x => `<i style="flex:${x[2]};background:${FCOL[x[0]]}" title="${esc(x[1])}"></i>`).join('') : '<i class="none"></i>'; };
+  const leg = (parts, unit) => { const tot = parts.reduce((a, x) => a + x[2], 0); return parts.filter(x => x[2] > 0 || x[0] === 'ret').map(x => `<span><i style="background:${FCOL[x[0]]}"></i>${esc(x[1])} <b>${tot ? Math.round(x[2] / tot * 100) : 0}%</b></span>`).join(''); };
+  return fs.map(f => {
+    const d = f.stock.days, stockTxt = f.money ? `${Math.max(0, Math.round(d / 30))}か月分` : d >= 1 ? `${Math.round(d)}日分` : 'ほぼなし';
+    return `<div class="flow"><div class="fl-h"><b>${esc(f.name)}</b><span class="small">1年あたり ${fmt(f.total)}${esc(f.unit)}</span></div>
+      <div class="fl-strip"><div class="fl-col"><span class="k">入口</span><div class="fl-bar">${bar(f.inlet)}</div></div><span class="fl-ar" aria-hidden="true">→</span>
+        <div class="fl-stock"><span class="k">備蓄</span><b>${stockTxt}</b><span>${esc(f.stock.label)}</span></div><span class="fl-ar" aria-hidden="true">→</span>
+        <div class="fl-col"><span class="k">出口</span><div class="fl-bar">${bar(f.outlet)}</div></div></div>
+      <div class="fl-leg"><span class="k">入口</span>${leg(f.inlet)}</div><div class="fl-leg"><span class="k">出口${f.outUnit ? `（${esc(f.outUnit)}）` : ''}</span>${leg(f.outlet)}</div>
+      <p class="small muted">${esc(f.tokyo)}</p></div>`;
   }).join('');
-  return `<svg class="web" viewBox="0 0 ${W} ${H}" role="img" aria-label="4つの輪：${cs.map(c => `${c.name} ${Math.round(c.closure * 100)}%`).join('、')}"><defs><marker id="ca" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L6 3L0 6z" fill="#B9BDB0"/></marker></defs>${out}</svg>`;
 }
-function cycleList(cs) {
-  return cs.map(c => `<div class="note"><b style="color:${c.color}">${c.name}の輪 · 地域で ${Math.round(c.closure * 100)}%</b><span>${esc(c.note)}</span>
-    <span class="meta">担い手：${c.parts.length ? esc(c.parts.join('、')) : 'まだいない'}</span>
-    <span class="meta">${c.leaks.map(([n, v, u]) => `${esc(n)} ${Math.round(v).toLocaleString()}${u}`).join(' · ')}</span></div>`).join('');
+/* 季節の報告用：流れごとに 入口 → 出口 の細い帯と、土地から／戻す の割合 */
+function flowMini(fs) {
+  const share = (parts, keys) => { const t = parts.reduce((a, x) => a + x[2], 0); return t > 0 ? parts.filter(x => keys.includes(x[0])).reduce((a, x) => a + x[2], 0) / t : 0; };
+  const bar = (parts) => { const t = parts.reduce((a, x) => a + x[2], 0); return t > 0 ? parts.filter(x => x[2] > 0).map(x => `<i style="flex:${x[2]};background:${FCOL[x[0]]}"></i>`).join('') : '<i class="none"></i>'; };
+  const short = { water: '水', food: '食べもの', energy: 'エネルギー', money: 'お金' };
+  return fs.map(f => {
+    const a = f.money ? share(f.inlet, ['near']) : share(f.inlet, ['land', 'land2']);
+    const b = f.money ? share(f.outlet, ['near']) : share(f.outlet, ['ret']);
+    const txt = f.money ? `近所から ${pct(a)}・へ ${pct(b)}` : f.id === 'energy' ? `土地から ${pct(a)}` : `土地から ${pct(a)} · 戻す ${pct(b)}`;
+    return `<div class="stat fmini" title="入口 → 出口"><span>${short[f.id]}</span><div class="fm-row"><div class="fl-bar">${bar(f.inlet)}</div><em aria-hidden="true">→</em><div class="fl-bar">${bar(f.outlet)}</div></div><span>${txt}</span></div>`;
+  }).join('');
 }
 function panelWeb() {
-  const rel = E.relations(G.s), cs = E.cycles(G.s);
-  const good = rel.nodes.filter(x => x.good === true && x.v > 0.15).length;
-  return `<div><h2>めぐり</h2><p class="small">暮らしには、水・養分・エネルギー・お金の4つの輪が重なって流れている。色の弧は敷地と地域の中で閉じた割合、点線は遠くへ抜けていく分。お金の輪は消えない。外貨を稼ぐ、設備を更新する、近所と売り買いする。その流れ先が変わるだけ。</p></div>
-    ${cycleSVG(cs)}
-    <div><div class="rows"><span>担い手（輪を回す人と生き物）· この章の目標 ${GOAL}</span><b class="num">${good} / ${GOAL}</b></div><div class="meter"><i style="width:${Math.min(100, good / GOAL * 100)}%"></i></div></div>
-    ${G.s.log.length ? '' : '<p class="small">3か月を過ごすと、輪に暮らしの結果が出ます。</p>'}
-    ${cycleList(cs)}`;
+  const rel = E.relations(G.s), good = rel.nodes.filter(x => x.good === true && x.v > 0.15).length, first = !G.s.log.length;
+  return `<div><h2>めぐり</h2><p class="small">水も食べものもエネルギーもお金も、どれも <b>入口 → 備蓄 → 出口</b> の形で流れている。入口が緑（土地）なほど自分の土地から来て、出口が青緑（戻す）なほど土地へ返している。紫は人とのやりとり（薄いほど貸し借りがゆるく、濃いほどその場できっちり清算する）、青は水道や電力網のような共有の網、灰色は漏れて戻らない分。</p></div>
+    <div class="fl-key">${[['land', '土地'], ['loose', '人・ゆるい'], ['tight', '人・きっちり'], ['shared', '共有の網'], ['ret', '戻す'], ['leak', '漏れる'], ['near', '近所'], ['far', '遠く']].map(([k, n]) => `<span><i style="background:${FCOL[k]}"></i>${n}</span>`).join('')}</div>
+    ${first ? '<p class="small"><b>東京のころ</b>（くらべるため）。3か月を過ごすと、ここがこの土地の暮らしの流れに変わる。</p>' : ''}
+    ${flowCards(first ? E.tokyoFlows() : E.flows(G.s), first)}
+    <div><div class="rows"><span>担い手（流れを回す人と生き物）· この章の目標 ${GOAL}</span><b class="num">${good} / ${GOAL}</b></div><div class="meter"><i style="width:${Math.min(100, good / GOAL * 100)}%"></i></div></div>`;
 }
 function panelBook() {
   const s = G.s, last = s.log[s.log.length - 1], T = E.tokyoYear();
@@ -1075,8 +1082,24 @@ function bindPanel(el) {
   });
   el.querySelectorAll('[data-atlas]').forEach(b => b.onclick = () => atlas(() => game()));
 }
+/* メールの見た目：差出人の丸いアイコン、名前と肩書き、宛先、日付、件名、本文、添付（ノート）、下にボタン */
+function mailHTML(m, o = {}) {
+  const mm = /^(.+?)（(.+)）$/.exec(m.from || ''), name = mm ? mm[1] : m.from, role = mm ? mm[2] : '';
+  const hue = [...(name || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
+  const body = (Array.isArray(m.body) ? m.body : [m.body]).map(p => `<p>${esc(p)}</p>`).join('');
+  return `<div class="mail${o.cls ? ' ' + o.cls : ''}"${o.id ? ` id="${o.id}"` : ''}>
+    <div class="mail-top"><span class="mail-app"><svg viewBox="0 0 16 12" width="14" height="11" aria-hidden="true"><rect x=".5" y=".5" width="15" height="11" rx="1.5" fill="none" stroke="currentColor"/><path d="M1 1.5l7 5 7-5" fill="none" stroke="currentColor"/></svg>受信トレイ</span><span>${esc(o.date || '')}</span></div>
+    <div class="mail-head"><span class="mail-av" style="--h:${hue}">${esc((name || '?').slice(0, 1))}</span>
+      <div class="mail-who"><b>${esc(name)}</b>${role ? `<span>${esc(role)}</span>` : ''}<span class="mail-to">宛先：あなた</span></div></div>
+    <div class="mail-subj">${esc(m.subject)}</div>
+    <div class="mail-body">${body}</div>
+    ${o.attach ? `<div class="mail-att"><svg viewBox="0 0 12 16" width="11" height="14" aria-hidden="true"><path d="M8.5 4v7a2.5 2.5 0 0 1-5 0V3.5a1.6 1.6 0 0 1 3.2 0V10a.7.7 0 0 1-1.4 0V4.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg><div><b>${esc(o.attach.name)}</b>${o.attach.what ? `<span>${esc(o.attach.what)}</span>` : ''}</div></div>` : ''}
+    ${o.actions ? `<div class="mail-act">${o.actions}</div>` : ''}
+  </div>`;
+}
+const mailDate = (s) => s ? `${s.year}年 ${E.SITES[s.site].quarters[s.q].split('・')[0]}` : '';
 function showMail(m, n) {
-  modal(`<div class="small">メール · ${esc(m.from)}</div><h2>${esc(m.subject)}</h2><p style="margin:0">${esc(m.body)}</p>${n ? `<div class="note"><b>ノート：${esc(n.name)}</b><span>${esc(n.what)}</span><span class="meta">${esc(n.cost)}</span></div>` : ''}<button class="btn primary" data-m="ok">ノートに書いた</button>`, (x, c) => c());
+  modal(mailHTML(m, { date: mailDate(G.s), attach: n ? { name: `ノート「${n.name}」`, what: n.what } : null, actions: '<button class="btn primary" data-m="ok">ノートに書いた</button>' }), (x, c) => c());
 }
 
 /* ---------- 季節を進める ---------- */
@@ -1100,7 +1123,7 @@ function wake(before, rep, lessons) {
   const d = document.createElement('div'); d.className = 'wake';
   const evs = rep.events.map(e => ({ e, t: eventText(e) }));
   const relB = E.relations(before).score, relA = E.relations(s).score;
-  const mails = lessons.map(l => { const n = NOTES[l.id]; const m = (LESSON[l.why] || LESSON.intro)(n.name); return `<div class="card mail"><span class="k">メール · ${esc(m.from)}</span><b>${esc(m.subject)}</b><span>${esc(m.body)}</span><span class="k">ノートに「${esc(n.name)}」を書いた → ${MODHINT[l.id] || '地図に置けるようになった'}</span></div>`; }).join('');
+  const mails = lessons.map(l => { const n = NOTES[l.id]; const m = (LESSON[l.why] || LESSON.intro)(n.name); return mailHTML(m, { cls: 'in-card', date: mailDate(before), attach: { name: `ノート「${n.name}」`, what: MODHINT[l.id] || '地図に置けるようになった' } }); }).join('');
   const phase = rep.phase === 'nino' ? 'エルニーニョの年（雨が少ない）' : rep.phase === 'nina' ? 'ラニーニャの年（雨が多い）' : '';
   const goodN = E.relations(s).nodes.filter(x => x.good === true && x.v > 0.15).length;
   const end = goodN >= (G.goal ?? GOAL) && s.flags['done_' + s.site] == null;   // G.goal はテスト用
@@ -1109,11 +1132,8 @@ function wake(before, rep, lessons) {
     <header><h2>${rep.year}年 ${esc(site.quarters[rep.q])}が過ぎた</h2><span class="small">雨 ${Math.round(rep.A.rain)}mm ${phase ? '· ' + phase : ''}</span></header>
     <div class="stats">
       <div class="stat"><span>所持金</span><b>${man(s.cash)}</b><span>${rep.net >= 0 ? '+' : '−'}${Math.abs(rep.net).toFixed(0)}万円</span></div>
-      <div class="stat"><span>水を雨と排水で</span><b>${pct(rep.waterSelf)}</b></div>
-      <div class="stat"><span>電気を太陽で</span><b>${pct(rep.powerSelf)}</b></div>
-      <div class="stat"><span>食べものを畑で</span><b>${pct(rep.foodSelf)}</b><span>収穫 ${Math.round(rep.harvest + rep.treeFood)}kg</span></div>
-      <div class="stat"><span>土の有機物</span><b>${rep.om.toFixed(2)}%</b></div>
-      <div class="stat"><span>地域で回るお金</span><b>${Math.round(E.cycles(s)[3].closure * 100)}%</b><span>東京のとき 5%</span></div>
+      ${flowMini(E.flows(s, 1))}
+      <div class="stat"><span>土の有機物</span><b>${rep.om.toFixed(2)}%</b><span>収穫 ${Math.round(rep.harvest + rep.treeFood)}kg</span></div>
     </div>
     ${mails ? `<div class="cards">${mails}</div>` : ''}
     <div class="cards">${evs.length ? evs.map(({ e, t }) => `<div class="card ${t.tone}"><span class="k">出来事</span><b>${esc(t.title)}</b><span>${esc(t.body)}</span>${choiceHTML(t.choice)}</div>`).join('') : '<div class="card"><b>穏やかな3か月だった</b><span>大きな出来事はなかった。</span></div>'}</div>
@@ -1150,8 +1170,8 @@ function endHTML(rep) {
   const years = (G.s.turn / 4).toFixed(1), site = E.SITES[G.s.site];
   const more = Object.keys(LANDS).some(k => k !== G.s.site);
   const cm = CHAPTER_END[G.s.site] && more ? chapterMail(rep) : null;
-  const mail = cm ? `<div class="card mail"><span class="k">メール · ${esc(cm.from)}</span><b>${esc(cm.subject)}</b>${cm.body.map(p => `<span>${esc(p)}</span>`).join('')}</div>` : '';
-  return mail + `<div class="card good"><b>${esc(site.name)}で、めぐりができた（${years}年）</b><span>東京では、4つの輪はどれも部屋の中で閉じず、遠くへ抜けていた。いまは ${good.length}の相手と豊かに関わっている：${esc(good.join('、'))}。</span><span class="k">${more ? `学んだ技術と、所持金と、週の過ごし方を持って次の土地へ行ける。${cm ? '置いたものはトミーの家に残る。' : '置いたものは持っていけない。'}ここで続けてもいい。` : '地球儀から好きな土地を選ぶ章は準備中。ここで続けられる。'}</span></div>`;
+  const mail = cm ? mailHTML(cm, { cls: 'in-card', date: mailDate(G.s) }) : '';
+  return mail + `<div class="card good"><b>${esc(site.name)}で、めぐりができた（${years}年）</b><span>東京では、水も食べものもエネルギーも、入口は遠くの網、出口は下水とごみだった。いまは ${good.length}の相手と豊かに関わっている：${esc(good.join('、'))}。</span><span class="k">${more ? `学んだ技術と、所持金と、週の過ごし方を持って次の土地へ行ける。${cm ? '置いたものはトミーの家に残る。' : '置いたものは持っていけない。'}ここで続けてもいい。` : '地球儀から好きな土地を選ぶ章は準備中。ここで続けられる。'}</span></div>`;
 }
 const GOAL = 10;
 const MODHINT = { toilet: '家の設定で足せる', saving: '家の設定で足せる', insulation: '3Dで断熱した壁・屋根・床・窓が置けるようになった', bamboo: '3Dで竹と土壁が置けるようになった', earth: '3Dで土嚢・古タイヤの壁が置けるようになった', straw: '3Dでわらの壁が置けるようになった', grey: '3Dの［水］で浄化の穴が掘れるようになった', mulch: '3Dの［畑］で畑を押すと敷ける', terrace: '3Dの［畑］で段差を押すと石垣を積める', deep: '3Dの［家］の設定で基礎を深くできる', catch: '3Dの［家］で柱と屋根の小屋を建て、軒の下にタンクを', pond: '3Dの［水］でため池が掘れるようになった', offgrid: '3Dの［電気］で置けるようになった', hedge: '3Dの［生き物］で置けるようになった', chicken: '3Dの［生き物］で置けるようになった', heap: '3Dの［畑］で置けるようになった', greenhouse: '3Dでガラス屋根が置ける。ガラスで囲った部屋に畑を作ると温室になる' };
@@ -1202,5 +1222,5 @@ async function atlas(back) {
   list(); g.draw();
 }
 
-window.__orb = { G, E, open3D, openHouse, openBuild };   // 自動テスト用
+window.__orb = { G, E, open3D, openHouse, openBuild, showMail, wake };   // 自動テスト用
 title();

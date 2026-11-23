@@ -48,7 +48,7 @@ def run(viewport, tag):
         page.screenshot(path=f'{OUT}/{tag}_1_title.png')
         page.click('#new'); page.wait_for_timeout(1500)
         page.screenshot(path=f'{OUT}/{tag}_2_trip.png'); overflow(page, tag + ' trip')
-        if page.locator('.mailcard.trip').count() != 1: problems.append(f'{tag}: 移動中に友人のメールが出ない')
+        if page.locator('.mail.trip').count() != 1: problems.append(f'{tag}: 移動中に友人のメールが出ない')
         if page.locator('#go').count() != 1: problems.append(f'{tag}: メールに［メデジンに行く］がない')
         if page.locator('#skip').is_visible(): problems.append(f'{tag}: 出発前から［とばす］が出ている')
         page.click('#go'); page.wait_for_timeout(300); page.click('#skip'); page.wait_for_timeout(900)
