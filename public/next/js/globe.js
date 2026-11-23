@@ -48,9 +48,9 @@ export function buildGlobe(rings, pins = [], route = null) {
   // 行き先と出発地の印
   for (const p of pins) {
     const pos = ll(p.lat, p.lon, 1.002), m = new THREE.Mesh(new THREE.SphereGeometry(p.main ? 0.016 : 0.011, 16, 12), new THREE.MeshStandardMaterial({ color: p.color || '#C9873A', roughness: 0.6, emissive: p.color || '#C9873A', emissiveIntensity: 0.35 }));
-    m.position.copy(pos); g.add(m);
+    m.position.copy(pos); m.userData.pin = p; g.add(m);
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.022, 0.028, 32), new THREE.MeshBasicMaterial({ color: p.color || '#C9873A', transparent: true, opacity: 0.6, side: THREE.DoubleSide }));
-    ring.position.copy(ll(p.lat, p.lon, 1.003)); ring.lookAt(ll(p.lat, p.lon, 2)); g.add(ring);
+    ring.position.copy(ll(p.lat, p.lon, 1.003)); ring.lookAt(ll(p.lat, p.lon, 2)); ring.userData.pin = p; g.add(ring);
   }
   // 飛ぶ道：大円にそった弧を、途中で少し持ち上げる
   if (route) {

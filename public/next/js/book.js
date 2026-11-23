@@ -1,7 +1,7 @@
 /* ノートと季節の報告：めぐり・家計簿・予定・天気・ノート、メール、季節が過ぎたときの報告。
    文章と数字は今の版（engine / content）のものをそのまま使い、見た目だけ /next に合わせる */
 import * as E from '/js/engine.js';
-import { NOTES, LESSON, eventText, ATLAS, CHAPTER_END, LANDS } from '/js/content.js';
+import { NOTES, LESSON, eventText, ATLAS, CHAPTER_END, LANDS, CLIMATE } from '/js/content.js';
 
 export const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 export const man = (v) => `${Math.round(v).toLocaleString('ja-JP')}万円`;
@@ -156,4 +156,34 @@ export function reportHTML(s, before, rep, lessons, end) {
     <div class="evs">${evs.length ? evs.map(({ t }) => `<div class="ev ${t.tone || ''}"><span class="k">出来事</span><b>${esc(t.title)}</b><span>${esc(t.body)}</span>${choiceHTML(t.choice, s.flags)}</div>`).join('') : '<div class="ev"><b>穏やかな3か月だった</b><span>大きな出来事はなかった。</span></div>'}</div>
     ${s.cash < 0 ? '<div class="ev bad"><b>お金が足りない</b><span>赤字になった。予定で外貨の仕事を増やすか、しばらく何も建てずに過ごそう。</span></div>' : ''}
     ${endHTML}`;
+}
+
+/* 着いたときの気候：気温の帯と雨、東京とくらべる */
+export function climateHTML(s) {
+  const S = E.SITES[s.site], C = CLIMATE[s.site], T = E.SITES.tokyo; if (!C) return '';
+  const sum = (a) => a.reduce((x, y) => x + y, 0), avg = (a) => sum(a) / a.length, r1 = (x) => Math.round(x * 10) / 10;
+  const lo = Math.min(...S.tmin), hi = Math.max(...S.tmax), rain = Math.round(sum(S.rain)), days = Math.round(sum(S.rainDays));
+  const MO = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
+  // 図：雨（棒）と気温（朝の最低〜昼の最高の帯、平均の線）。点線は東京の平均気温
+  const W2 = 560, H2 = 230, L = 34, R = 40, Tp = 14, B = 26, cw = (W2 - L - R) / 12;
+  const tMin = Math.min(0, Math.floor(Math.min(...S.tmin, ...T.tmin) / 5) * 5), tMax = Math.ceil(Math.max(...S.tmax, ...T.tmax) / 5) * 5, rMax = Math.max(250, Math.ceil(Math.max(...S.rain, ...T.rain) / 50) * 50);
+  const yT = (t) => Tp + (H2 - Tp - B) * (1 - (t - tMin) / (tMax - tMin)), yR = (r) => Tp + (H2 - Tp - B) * (1 - r / rMax), xM = (i) => L + cw * (i + 0.5);
+  const band = [...S.tmax.map((t, i) => `${xM(i)},${yT(t)}`), ...S.tmin.map((_, i) => `${xM(11 - i)},${yT(S.tmin[11 - i])}`)].join(' ');
+  const svg = `<svg class="clim" viewBox="0 0 ${W2} ${H2}" role="img" aria-label="月ごとの気温と雨">
+    ${[...Array((tMax - tMin) / 5 + 1)].map((_, k) => { const t = tMin + k * 5, y = yT(t); return `<line x1="${L}" x2="${W2 - R}" y1="${y}" y2="${y}" class="gl"/><text x="${L - 6}" y="${y + 4}" class="ax" text-anchor="end">${t}℃</text>`; }).join('')}
+    ${[0, rMax / 2, rMax].map(r => `<text x="${W2 - R + 6}" y="${yR(r) + 4}" class="ax rn">${r}mm</text>`).join('')}
+    ${S.rain.map((r, i) => `<rect x="${xM(i) - cw * 0.32}" y="${yR(r)}" width="${cw * 0.64}" height="${yR(0) - yR(r)}" class="rb"><title>${i + 1}月 雨${Math.round(r)}mm</title></rect>`).join('')}
+    <polygon points="${band}" class="tb"/>
+    <polyline points="${S.tmean.map((t, i) => `${xM(i)},${yT(t)}`).join(' ')}" class="tm"/>
+    <polyline points="${T.tmean.map((t, i) => `${xM(i)},${yT(t)}`).join(' ')}" class="tk"/>
+    ${MO.map((m, i) => `<text x="${xM(i)}" y="${H2 - 8}" class="ax" text-anchor="middle">${m}月</text>`).join('')}
+  </svg>
+  <div class="clegend"><span><i class="k-tb"></i>${esc(S.name)}の気温（朝の最低〜昼の最高）</span><span><i class="k-tm"></i>平均</span><span><i class="k-tk"></i>東京の平均</span><span><i class="k-rb"></i>雨（月）</span></div>`;
+  const stats = [['年の平均気温', `${r1(avg(S.tmean))}℃`, `東京 ${r1(avg(T.tmean))}℃`], ['朝の最低〜昼の最高', `${lo.toFixed(0)}〜${hi.toFixed(0)}℃`, `東京 ${Math.min(...T.tmin).toFixed(0)}〜${Math.max(...T.tmax).toFixed(0)}℃`], ['一年の雨', `${rain.toLocaleString()}mm`, `東京 ${Math.round(sum(T.rain)).toLocaleString()}mm`], ['雨の日', `年${days}日`, `東京 年${Math.round(sum(T.rainDays))}日`]];
+  return `<div class="small">${esc(S.sub || '')}・標高${S.elev.toLocaleString()}m</div><h2>${esc(C.title)}</h2><p style="margin:0 0 8px">${esc(C.lead)}</p>
+    <div class="cstats">${stats.map(([k, v2, t]) => `<div><span class="small">${esc(k)}</span><b>${esc(v2)}</b><span class="small">${esc(t)}</span></div>`).join('')}</div>
+    ${svg}
+    <dl class="cpoints">${C.points.map(([k, v2]) => `<dt>${esc(k)}</dt><dd>${esc(v2)}</dd>`).join('')}</dl>
+    <p class="small" style="margin:6px 0 10px">${S.real ? '2014〜2023年の、この区画の実際の気象（Open-Meteo）から作った平年値。' : '実際の気象を取れなかったので、仮の平年値です。'}</p>
+`;
 }

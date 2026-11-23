@@ -9,9 +9,16 @@ import { createView } from './view.js';
 import { createStage } from './stage.js';
 import { buildGlobe, subsolar, ll } from './globe.js';
 import * as BK from './book.js';
+import { ATLAS, NOTES, INVITE, LAND_INVITE } from '/js/content.js';
 
 const W = E.W, $ = (s) => document.querySelector(s);
-const Q = new URLSearchParams(location.search), SITE = Q.get('site') || 'med';
+const Q = new URLSearchParams(location.search);
+// 開き方：proto＝見た目の試作（?shot・?proto）、play＝遊ぶ（?play、?play&new=med で新しく）、それ以外は地球（はじまり・旅・図鑑）
+const MODE = Q.has('globe') || Q.has('travel') ? 'globe' : Q.has('shot') || Q.has('proto') ? 'proto' : Q.has('play') ? 'play' : 'globe';
+const CARRY = 'orbarium-next-carry', ATLAS_READ = 'orbarium-next-atlas';
+let SITE = Q.get('site') || 'med';
+const loadSave = () => { try { const v0 = localStorage.getItem('orbarium-next-1'); return v0 ? E.load(v0) : null; } catch { return null; } };
+const atlasRead = () => { try { return JSON.parse(localStorage.getItem(ATLAS_READ) || '[]'); } catch { return []; } };
 const yen = (n) => `${Math.round(n * 10) / 10}万円`.replace('.0万', '万');
 
 /* その土地で新しく建てるときの工法。断熱したものは「断熱した壁」と「断熱したトタン屋根」 */
@@ -50,16 +57,23 @@ const TOUCH = matchMedia('(pointer: coarse)').matches;
 const HINT_NEAR = TOUCH ? '物を押すと詳しく。作るのは下の道具で。1本指で回す・2本指で寄る' : '物を押すと詳しく。作るのは下の道具で。ドラッグで回す・ホイールで寄る';
 
 async function boot() {
+  // どの土地で、どこから始めるか
+  let saved = null, carry = null;
+  if (MODE === 'play') {
+    if (Q.get('new')) { SITE = Q.get('new'); try { carry = JSON.parse(localStorage.getItem(CARRY) || 'null'); } catch { carry = null; } if (carry && carry.to !== SITE) carry = null; }
+    else { saved = loadSave(); if (!saved) { location.replace('/next/'); return; } SITE = saved.site; }
+  }
   const S = E.SITES[SITE];
   $('#where').textContent = `${S.name} · 土地を読みこみ中…`;
-  // つづき：保存があればそこから（実在の土地のデータも保存に入っている）
-  let saved = null; if (!Q.has('new') && !Q.has('shot')) { try { const v0 = localStorage.getItem(SAVE); saved = v0 ? E.load(v0) : null; } catch { saved = null; } }
-  if (saved && saved.site !== SITE) saved = null;
   let real = null;
   if (!saved) { try { real = await loadRealPlot(S.lat0 ?? S.lat, S.lon0 ?? S.lon); E.applyReal(SITE, real); } catch (e) { console.warn('実データなし', e); } }
-  const s = saved || E.newGame({ site: SITE, seed: 7, real }); s.world.site = SITE;
-  if (!saved) {
-  // 試作の母屋：その土地の工法で建て替えたところから
+  const fresh = !saved;
+  const s = saved || E.newGame({ site: SITE, seed: MODE === 'proto' ? 7 : Math.floor(Math.random() * 1e6), real,
+    ...(carry ? { cash: carry.cash, persons: carry.persons, known: carry.known, learned: carry.learned, year: carry.year, flags: { history: carry.history } } : {}) });
+  s.world.site = SITE;
+  if (carry) { s.q = carry.q; localStorage.removeItem(CARRY); }
+  if (MODE === 'proto') {
+  // 見た目の試作：母屋をその土地の工法で建て替え、畑を少し
   const w0 = s.world, d0 = W.cloneHouse(w0.house);
   Object.assign(d0, LOCAL[SITE] || LOCAL.med);
   let i = 0; for (const o of W.houseOuterEdges(d0)) { if (!d0.open[o.e] && i % 3 === 1) d0.open[o.e] = 'window'; i++; }
@@ -67,7 +81,7 @@ async function boot() {
   const cs = Object.keys(w0.house.cells).map(k => k.split(',').map(Number)), xs = cs.map(c => c[0]), ys = cs.map(c => c[1]);
   try { const bxx = Math.min(...xs) - 1, byy = Math.max(...ys) + 3; W.prefabBeds(s, [bxx, byy], [bxx + 6, byy + 3], 'hire'); } catch { /* 置けなければなし */ }
   }
-  const persist = () => { if (Q.has('shot')) return; try { localStorage.setItem(SAVE, E.save(s)); } catch { /* 保存できない */ } };
+  const persist = () => { if (MODE !== 'play') return; try { localStorage.setItem(SAVE, E.save(s)); } catch { /* 保存できない */ } };
 
   const P = PALETTES[SITE] || PALETTES.med, N = W.N;
   const v = createView($('#c'), { keep: Q.has('shot') });
@@ -642,7 +656,14 @@ async function boot() {
     $('#reportAct').innerHTML = (cm ? `<button id="rNext">${BK.esc(cm.go)}</button>` : '') + `<button class="yes" id="rBack">${cm ? BK.esc(cm.stay) : '土地に戻る'}</button>`;
     $('#report').hidden = false; $('#rBack').focus();
     $('#rBack').onclick = () => { $('#report').hidden = true; };
-    if ($('#rNext')) $('#rNext').onclick = () => { $('#report').hidden = true; toast('次の土地へ行くのは、もうすぐ移します'); };
+    if ($('#rNext')) $('#rNext').onclick = () => {
+      const to = BK.nextLands(s)[0], price = E.SITES[to].plotPrice || 0;
+      if (s.cash < price) { toast(`お金が足りない（土地は${BK.man(price)}）`); return; }
+      if (MODE !== 'play') { toast('試作の画面では、次の土地へは行かない'); return; }
+      localStorage.setItem(CARRY, JSON.stringify({ from: s.site, to, cash: s.cash - price, persons: s.persons, known: s.known, learned: s.learned, year: s.year, q: s.q,
+        history: [...(s.flags.history || []), { site: s.site, years: s.turn / 4, rel: E.relations(s).score }] }));
+      location.href = `/next/?travel=${to}`;
+    };
     $('#reportBody').querySelectorAll('[data-choice]').forEach(b2 => b2.onclick = () => {
       const [k, v2] = b2.dataset.choice.split(':'); if (k === 'surplus') s.flags.surplus = v2; if (k === 'pest') s.flags.pestHand = v2 === 'hand'; persist();
       b2.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b2));
@@ -655,7 +676,7 @@ async function boot() {
   function renderBook() {
     $('#tabs').innerHTML = BK.TABS.map(([k, n]) => `<button data-tab="${k}" class="${G.tab === k ? 'on' : ''}">${n}</button>`).join('');
     const body = $('#sheetBody');
-    body.innerHTML = G.tab === 'web' ? BK.pageWeb(s) : G.tab === 'book' ? BK.pageBook(s) : G.tab === 'plan' ? BK.pagePlan(s) : G.tab === 'sky' ? BK.pageSky(s, G.studied !== s.turn) : BK.pageNote(s, []);
+    body.innerHTML = G.tab === 'web' ? BK.pageWeb(s) : G.tab === 'book' ? BK.pageBook(s) : G.tab === 'plan' ? BK.pagePlan(s) : G.tab === 'sky' ? BK.pageSky(s, G.studied !== s.turn) : BK.pageNote(s, atlasRead()) + (MODE === 'play' ? '<p><a href="/next/?globe=atlas&from=play">地球儀の図鑑を開く</a></p>' : '');
     body.scrollTop = 0;
   }
   $('#bookBtn').onclick = () => openBook();
@@ -681,32 +702,127 @@ async function boot() {
   v.resize(); fitControls();
   v.lookAt(center, mapDist(), 50, 60); setMode('map');
   addEventListener('resize', () => { fitControls(); placeCard(); });
+  if (MODE === 'play') {
+    $('#where').style.cursor = 'pointer'; $('#where').title = 'はじめの画面へ'; $('#where').onclick = () => { location.href = '/next/'; };
+    if (fresh) { persist(); history.replaceState(null, '', '/next/?play'); $('#reportBody').innerHTML = BK.climateHTML(s); $('#reportAct').innerHTML = '<button class="yes" id="rBack">この土地で暮らしを始める</button>'; $('#report').hidden = false; $('#rBack').onclick = () => { $('#report').hidden = true; }; }
+  }
   v.start();
   window.__next = { s, E, v, stage, setHour, G, act, toScreen, select, setTool, flyNear, toMap, center, house: () => s.world.house, traced, setDraft, flowsNow, runSeason, openBook, setSub: (t, k) => { G.sub[t] = k; renderSubs(); setHint(); } };
 }
 
-/* 地球：東京からメデジンへ。昼と夜の境目は今の本物の太陽 */
-async function bootGlobe() {
+/* 地球：はじまり（題名）、旅（招いてくれた人のメールを読んで［行く］→ 飛ぶ）、図鑑（ピンを押して読む）。
+   昼と夜の境目は今の本物の太陽。印は町の単位（細かい位置は出さない） */
+async function bootGlobe(mode = 'title') {
   const rings = await (await fetch('/data/land110.json')).json();
   const v = createView($('#c'), { keep: Q.has('shot') });
   v.setPalette({ ...PALETTES.med, sky: ['#D9DEDB', '#EFEADF'] });
   v.scene.fog = null; v.scene.environmentIntensity = 0.45; v.ao.enabled = false; v.dof.enabled = false; v.sun.castShadow = false;
-  const med = E.SITES.med, taos = E.SITES.taos;
-  const pins = [{ lat: 35.68, lon: 139.69, main: true, color: '#3F6E8C' }, { lat: Math.round(med.lat * 10) / 10, lon: Math.round(med.lon * 10) / 10, main: true }, { lat: Math.round(taos.lat * 10) / 10, lon: Math.round(taos.lon * 10) / 10 }];
-  const globe = buildGlobe(rings, pins, [{ lat: 35.68, lon: 139.69 }, { lat: med.lat, lon: med.lon }]);
+  for (const id of ['#cash', '#undo', '#redo', '#bookBtn', '#cut', '#toMap']) $(id).style.display = 'none';
+  document.querySelector('.sun').style.display = 'none';
+  const round = (x) => Math.round(x * 10) / 10, at = (k) => ({ lat: round(E.SITES[k].lat), lon: round(E.SITES[k].lon), name: E.SITES[k].name });
+  const saved = mode === 'title' || mode === 'atlas' ? loadSave() : null;
+  let carry = null; try { carry = JSON.parse(localStorage.getItem(CARRY) || 'null'); } catch { carry = null; }
+  const toKey = mode === 'travel' ? Q.get('travel') : null, fromKey = mode === 'travel' ? (carry && carry.from) || 'med' : null;
+  // 印と飛ぶ道
+  const home = { ...at('tokyo'), main: true, color: '#3F6E8C' };
+  let pins = [home, { ...at('med'), main: true }, { ...at('taos') }], route = [at('tokyo'), at('med')];
+  if (mode === 'travel') { pins = [{ ...at(fromKey), main: true, color: '#3F6E8C' }, { ...at(toKey), main: true }]; route = [at(fromKey), at(toKey)]; }
+  if (mode === 'atlas') { const read = atlasRead(); pins = ATLAS.map(a => ({ lat: a.lat, lon: a.lon, id: a.id, color: read.includes(a.id) ? '#4F7A52' : '#C9873A' })); if (saved) pins.push({ ...at(saved.site), main: true, color: '#3F6E8C', id: 'me' }); route = null; }
+  const globe = buildGlobe(rings, pins, route);
   v.scene.add(globe);
   const c = v.controls; c.enablePan = false; c.minDistance = 2.4; c.maxDistance = 7; c.minPolarAngle = 0.2; c.maxPolarAngle = Math.PI - 0.2; c.target.set(0, 0, 0); c.rotateSpeed = 0.5;
   v.camera.near = 0.05; v.camera.far = 50; v.camera.fov = 30; v.camera.updateProjectionMatrix();
   const ss = subsolar(new Date()), sd = ll(ss.lat, ss.lon).normalize();
   v.sun.position.copy(sd).multiplyScalar(10); v.sun.target.position.set(0, 0, 0); v.sun.color.set('#FFF1DE'); v.sun.intensity = 3.2;
   globe.userData.atm.material.uniforms.s.value.copy(sd);
-  // 最初は東京の上から（出発地）。地球が画面に収まる距離に
-  const fit = () => { const a = v.camera.aspect || 1, d = 1.3 / Math.tan(THREE.MathUtils.degToRad(v.camera.fov / 2)) / Math.min(1, a); return d; };
-  v.resize(); v.camera.position.copy(ll(28, 160, 1).normalize().multiplyScalar(fit())); c.maxDistance = Math.max(7, fit() * 1.5); c.update();
-  $('#where').textContent = '地球 · いまの太陽'; document.querySelector('.sun').style.display = 'none';
-  for (const id of ['#cash', '#undo', '#redo']) $(id).style.display = 'none';
-  $('#hint').innerHTML = '東京からメデジンへ。<a href="/next/">メデジンに降りる</a> · <a href="/">今の版へ</a>';
-  v.start(); window.__next = { v };
+  const fit = () => { const a = v.camera.aspect || 1; return 1.3 / Math.tan(THREE.MathUtils.degToRad(v.camera.fov / 2)) / Math.min(1, a); };
+  const look = (lat, lon, d = fit()) => { v.camera.position.copy(ll(lat, lon, 1).normalize().multiplyScalar(d)); v.camera.lookAt(0, 0, 0); c.update(); v.req(); };
+  // 縦長の画面：下にカードが来るので、地球を少し上に寄せる
+  const lift = () => { const r = $('#c').getBoundingClientRect(), w = r.width, h = r.height; if (w / h < 0.8) v.camera.setViewOffset(w, h, 0, h * 0.15, w, h); else v.camera.clearViewOffset(); v.camera.updateProjectionMatrix(); v.req(); };
+  v.resize(); lift(); addEventListener('resize', () => setTimeout(lift, 0)); c.maxDistance = Math.max(7, fit() * 1.5);
+  const hint = $('#hint');
+  // 飛ぶ：大円にそって向きを移し、途中で少し引いて、最後に寄る
+  const fly = (A, B, ms, done) => {
+    const a = ll(A.lat, A.lon, 1).normalize(), b = ll(B.lat, B.lon, 1).normalize(), ang = Math.max(1e-4, a.angleTo(b)), d0 = v.camera.position.length(), t0 = performance.now();
+    c.enabled = false; c.autoRotate = false; c.minDistance = 1.2; c.enableDamping = false;
+    const step = () => {
+      const u = Math.min(1, (performance.now() - t0) / ms), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+      const dir = a.clone().multiplyScalar(Math.sin((1 - e) * ang)).add(b.clone().multiplyScalar(Math.sin(e * ang))).divideScalar(Math.sin(ang)).normalize();
+      const dist = u < 0.75 ? d0 * (1 + 0.22 * Math.sin(Math.PI * Math.min(1, e / 0.9))) : d0 * (1 - 0.55 * (u - 0.75) / 0.25);
+      v.camera.position.copy(dir.multiplyScalar(dist)); v.camera.lookAt(0, 0, 0); v.req();
+      if (u < 1) requestAnimationFrame(step); else done();
+    };
+    step();
+  };
+  const fadeTo = (url) => { const f = document.createElement('div'); f.className = 'fade'; document.body.appendChild(f); requestAnimationFrame(() => f.classList.add('on')); setTimeout(() => location.replace(url), 650); };
+  // 旅：出発地の上でメールを読み、［行く］で飛ぶ。着いた土地のデータは、読んでいるあいだに裏で取ってくる
+  const travel = (from, to, mail, url) => {
+    look(E.SITES[from].lat, E.SITES[from].lon);
+    const S2 = E.SITES[to]; loadRealPlot(S2.lat0 ?? S2.lat, S2.lon0 ?? S2.lon).catch(() => null);
+    $('#where').textContent = `${E.SITES[from].name}`;
+    const box = document.createElement('div'); box.className = 'trip';
+    box.innerHTML = BK.mailHTML(mail, { date: '今朝', actions: `<button class="yes" id="go">${BK.esc(mail.go)}</button>` });
+    document.body.appendChild(box); hint.textContent = '';
+    $('#go').onclick = () => { box.remove(); $('#where').textContent = `${E.SITES[from].name}から、${S2.name}へ`; fly(E.SITES[from], S2, 3600, () => { $('#where').textContent = `${S2.name}・標高${S2.elev.toLocaleString()}m`; fadeTo(url); }); };
+  };
+  if (mode === 'travel') {
+    const price = E.SITES[toKey]?.plotPrice || 0;
+    travel(fromKey, toKey, LAND_INVITE[toKey] ? LAND_INVITE[toKey](BK.man(price)) : { from: 'ノート', subject: '次の土地へ', body: [''], go: '行く' }, `/next/?play&new=${toKey}`);
+  } else if (mode === 'atlas') {
+    look(15, -40);
+    $('#where').textContent = '地球儀で学ぶ';
+    const card = document.createElement('div'); card.className = 'atlas-card'; document.body.appendChild(card);
+    const back = Q.get('from') === 'play' && saved ? '/next/?play' : '/next/';
+    const list = () => {
+      const read = atlasRead();
+      card.innerHTML = `<b>世界の知恵</b><p class="small">世界の土地で、人が水・土・生き物とどう関わってきたか。地球儀を回して、印を押す。</p>
+        <div class="list">${ATLAS.map(a => `<button data-a="${a.id}" class="${read.includes(a.id) ? 'done' : ''}">${BK.esc(a.name)} <span class="small">${BK.esc(a.place)}</span></button>`).join('')}</div>
+        <div class="acts"><button id="aback">戻る</button></div>`;
+      card.querySelectorAll('[data-a]').forEach(b => b.onclick = () => open(ATLAS.find(a => a.id === b.dataset.a)));
+      $('#aback').onclick = () => { location.href = back; };
+    };
+    const open = (a) => {
+      look(Math.max(-50, Math.min(50, a.lat)), a.lon, fit() * 0.85);
+      const tech = a.tech && NOTES[a.tech], read = atlasRead(), canLearn = saved && tech && !saved.known.includes(a.tech);
+      card.innerHTML = `<div class="small">${BK.esc(a.place)}</div><b>${BK.esc(a.name)}</b><p>${BK.esc(a.text)}</p>
+        ${tech ? `<div class="note"><b>つながる技術：${BK.esc(tech.name)}</b><span>${BK.esc(tech.what)}</span></div>` : ''}
+        ${canLearn ? `<p class="small">ノートに書くと、${BK.esc(tech.name)}を自分の土地でも試せるようになる。</p>` : ''}
+        <div class="acts"><button class="yes" id="read">${read.includes(a.id) ? '読んだ' : 'ノートに書く'}</button><button id="alist">一覧へ</button></div>`;
+      $('#read').onclick = () => {
+        const r2 = atlasRead(); if (!r2.includes(a.id)) { r2.push(a.id); localStorage.setItem(ATLAS_READ, JSON.stringify(r2)); }
+        if (canLearn) { const ns = E.learn(saved, a.tech, 'atlas'); Object.assign(saved, ns); try { localStorage.setItem('orbarium-next-1', E.save(saved)); } catch { /* 保存できない */ } }
+        list();
+      };
+      $('#alist').onclick = list;
+    };
+    // 印を押す
+    const ray = new THREE.Raycaster(), cv = $('#c'); let downAt = null;
+    cv.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+    cv.addEventListener('pointerup', (e) => {
+      if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
+      const r = cv.getBoundingClientRect(); ray.setFromCamera(new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1), v.camera);
+      const h = ray.intersectObjects(globe.children, false).find(x => x.object.userData.pin); if (h && h.object.userData.pin.id && h.object.userData.pin.id !== 'me') open(ATLAS.find(a => a.id === h.object.userData.pin.id));
+    });
+    hint.textContent = '印を押すと、その土地の知恵が読める';
+    list();
+  } else {
+    // はじまり：ゆっくり回る地球に題名。つづきから／はじめから／図鑑
+    look(28, 160); c.autoRotate = true; c.autoRotateSpeed = 0.35;
+    $('#where').textContent = '地球 · いまの太陽';
+    const card = document.createElement('div'); card.className = 'title-card';
+    card.innerHTML = `<h1>Orbarium</h1><p>本物の土地で、水・食べもの・エネルギー・お金をめぐらせる</p>
+      <div class="btns">${saved ? `<button class="yes" id="cont">つづきから（${saved.year}年・${BK.esc(E.SITES[saved.site].name)}）</button>` : ''}<button class="${saved ? '' : 'yes'}" id="newg">はじめから</button><button id="atl">地球儀で学ぶ</button></div>
+      <p class="src">地形・気候・植生は実在の場所のデータ（標高：AWS Terrain Tiles／気候：Open-Meteo／植生：© ESA WorldCover／建物と道：© OpenStreetMap contributors） · <a href="/">今の版へ</a></p>`;
+    document.body.appendChild(card); hint.textContent = '';
+    if (saved) $('#cont').onclick = () => { location.href = '/next/?play'; };
+    $('#atl').onclick = () => { location.href = '/next/?globe=atlas'; };
+    $('#newg').onclick = () => {
+      if (saved && !confirm('はじめからやり直しますか？（今の暮らしは消える）')) return;
+      card.remove(); localStorage.removeItem(CARRY);
+      travel('tokyo', 'med', INVITE, '/next/?play&new=med');
+    };
+  }
+  v.start(); window.__next = { v, mode };
 }
 
-if (Q.has('globe')) bootGlobe(); else boot();
+if (MODE === 'globe') bootGlobe(Q.get('globe') === 'atlas' ? 'atlas' : Q.get('travel') ? 'travel' : 'title'); else boot();
