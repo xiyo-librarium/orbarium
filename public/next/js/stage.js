@@ -49,8 +49,8 @@ export function createStage(v, s, P) {
     if (sigHouse !== st.sig.house || changed) {
       const g = new THREE.Group();
       const tanks = W.blocksOf(w, 'tank').map(t => ({ x: t.x, y: t.y, z: t.z }));
-      for (const b of bs) { if (st.draft && W.bid(b) === st.draft.hideId) continue; const hg = buildHouse(b, P, st.at, { tanks, cut: st.cut }); hg.userData.pick = { kind: 'building', id: W.bid(b) }; g.add(hg); }
-      if (st.draft && st.draft.d) { const hg = buildHouse(st.draft.d, P, st.at, { tanks, cut: st.cut }); ghostify(hg); hg.userData.pick = { kind: 'draft' }; g.add(hg); }
+      for (const b of bs) { if (st.draft && W.bid(b) === st.draft.hideId) continue; const hg = buildHouse(b, P, st.at, { tanks, cut: st.cut, lat: E.SITES[s.site]?.lat, free: (x, y) => !W.buildingAt(w, x, y) && !Object.keys(w.blocks).some(k => k.startsWith(`${x},${y},`)) }); hg.userData.pick = { kind: 'building', id: W.bid(b) }; g.add(hg); }
+      if (st.draft && st.draft.d) { const hg = buildHouse(st.draft.d, P, st.at, { tanks, cut: st.cut, lat: E.SITES[s.site]?.lat, free: (x, y) => !W.buildingAt(w, x, y) && !Object.keys(w.blocks).some(k => k.startsWith(`${x},${y},`)) }); ghostify(hg); hg.userData.pick = { kind: 'draft' }; g.add(hg); }
       swap('houses', g); st.sig.house = sigHouse;
     }
     if (sigTrees !== st.sig.trees || changed) {

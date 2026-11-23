@@ -186,10 +186,72 @@ export function buildHouse(hs, P, at, opt = {}) {
     const withRidge = (a, b) => { const pts = seg(a, b); if (shape !== 'gable') return pts; const k = ridgeAlongX ? 1 : 0; if ((a[k] - ridgeMid) * (b[k] - ridgeMid) < 0) { pts.push(ridgeAlongX ? [a[0], ridgeMid] : [ridgeMid, a[1]]); pts.sort((p1, p2) => (p1[k] - a[k]) * Math.sign(b[k] - a[k]) - (p2[k] - a[k]) * Math.sign(b[k] - a[k])); } return pts; };
     fascia(withRidge([X0, Y1], [X1, Y1])); fascia(withRidge([X1, Y1], [X1, Y0])); fascia(withRidge([X1, Y0], [X0, Y0])); fascia(withRidge([X0, Y0], [X0, Y1]));
     if (hs.gutter) gutters(X0, X1, Y0, Y1);
+    if (hs.pv) panels(X0, X1, Y0, Y1, p, shape, ridgeAlongX, hs.roof === 'teja' ? 0.2 : tin ? 0.08 : 0.14);
     if (tin || shape === 'flat' || hs.roof !== 'teja') return;
     tiles(X0, X1, Y0, Y1, p, shape, ridgeAlongX);
   }
   // 雨どい：雨が落ちる軒にそって半円の樋。いちばん近いタンクへたてどいを下ろす
+  // 太陽光パネル：赤道を向いた屋根の面から並べる（北半球なら南の面）。入りきらなければ次の面へ。
+  // 平らな屋根は、赤道へ少し傾けた架台に、影がかからないよう列をあけて並べる。1枚 0.2kW（約1m²）
+  function panels(X0, X1, Y0, Y1, p, shape, ridgeAlongX, lift) {
+    const glass = new THREE.MeshStandardMaterial({ color: '#1E2F45', roughness: 0.2, metalness: 0.2, envMapIntensity: 1.3 });
+    const frame = matte({ color: '#B7BBBD', vary: 0.03, freq: 3, rough: 0.5 }), line = matte({ color: '#3A4D66', vary: 0.02, freq: 3, rough: 0.4 });
+    const eq = (opt.lat ?? 6) >= 0 ? [0, 1] : [0, -1], flat = shape === 'flat';
+    let planes = shape === 'gable' ? (ridgeAlongX ? [[0, -1], [0, 1]] : [[-1, 0], [1, 0]]) : shape === 'mono' ? [DV[hs.roofDir || 's']] : [eq];
+    planes = planes.slice().sort((A, B) => (B[0] * eq[0] + B[1] * eq[1]) - (A[0] * eq[0] + A[1] * eq[1]));
+    const PW = 0.86, PL = 1.16, GAP = 0.05, ridge = ridgeAlongX ? (bx.Y0 + bx.Y1) / 2 : (bx.X0 + bx.X1) / 2;
+    const put = (geo, M, mat) => { geo.applyMatrix4(M); add(mat, geo); };
+    // 1枚：中心 (px,py)、高さ h、下りの向き (dx,dy) と傾き tl、横 pw・縦 pl。legs＝足もとの高さを返す関数（架台の脚）
+    const panel = (px, py, h, dx, dy, tl, pw, pl, legs) => {
+      const D = new THREE.Vector3(dx, -tl, dy).normalize(), U = new THREE.Vector3(-dy, 0, dx), N = new THREE.Vector3().crossVectors(D, U);
+      if (N.y < 0) { U.negate(); N.crossVectors(D, U); }
+      const M = new THREE.Matrix4().makeBasis(U, N, D).setPosition(px, h, py);
+      put(new THREE.BoxGeometry(pw, 0.035, pl), M, frame);
+      const gl = new THREE.BoxGeometry(pw - 0.05, 0.02, pl - 0.05); gl.translate(0, 0.012, 0); put(gl, M, glass);
+      const across = pl >= pw;   // セルの区切りは長い辺を3つに
+      for (const t of [-1 / 3, 1 / 3]) { const ln = across ? new THREE.BoxGeometry(pw - 0.06, 0.004, 0.012) : new THREE.BoxGeometry(0.012, 0.004, pl - 0.06); ln.translate(across ? 0 : t * (pw - 0.05), 0.024, across ? t * (pl - 0.05) : 0); put(ln, M, line); }
+      if (!legs) return;
+      const ux = -dy, uy = dx, cosT = 1 / Math.sqrt(1 + tl * tl);
+      for (const k of [-0.42, 0.42]) for (const sgn of [-1, 1]) {   // 4本の脚：パネルの裏から足もとへ
+        const qx = px + dx * k * pl * cosT + ux * sgn * pw * 0.4, qy = py + dy * k * pl * cosT + uy * sgn * pw * 0.4, top = h - k * pl * tl * cosT - 0.02, g0 = legs(qx, qy);
+        if (top - g0 > 0.03) box(frame, qx, qy, (top + g0) / 2, 0.04, 0.04, top - g0);
+      }
+    };
+    let left = hs.pv;
+    for (const [dx, dy] of planes) {
+      if (left <= 0) break;
+      const ux = -dy, uy = dx, cs = [[X0, Y0], [X1, Y1], [X0, Y1], [X1, Y0]];
+      const us = cs.map(([a, b]) => a * ux + b * uy), ws = cs.map(([a, b]) => a * dx + b * dy), mg = flat ? 0.2 : 0.3;
+      const uMin = Math.min(...us) + mg, uMax = Math.max(...us) - mg, wMin = (shape === 'gable' ? ridge * (dx + dy) : Math.min(...ws)) + 0.25, wMax = Math.max(...ws) - mg;
+      // 並べ方：縦置き・横置き、平らな屋根は列のあけ方も。全部乗る並べ方のうち最初のもの、なければいちばん多く乗るもの
+      const tl = flat ? 0.22 : p, opts = [];
+      for (const [pw, pl] of [[PW, PL], [PL, PW]]) for (const rg of flat ? [0.5, 0.3, 0.12] : [GAP]) {
+        const step = flat ? pl * 0.98 + rg : pl + GAP, cols = Math.max(0, Math.floor((uMax - uMin + GAP) / (pw + GAP))), rows = Math.max(0, Math.floor((wMax - wMin + rg) / step));
+        opts.push({ pw, pl, rg, step, cols, rows, cap: cols * rows });
+      }
+      const L = opts.find(o => o.cap >= left) || opts.slice().sort((a, b) => b.cap - a.cap)[0]; if (!L.cap) continue;
+      const m = Math.min(left, L.cap), rUsed = Math.ceil(m / L.cols), w0 = (wMin + wMax) / 2 - (rUsed * L.step - L.rg) / 2;
+      for (let r = 0; r < rUsed && left > 0; r++) {
+        const inRow = Math.min(L.cols, m - r * L.cols), u0 = (uMin + uMax) / 2 - (inRow * (L.pw + GAP) - GAP) / 2;
+        for (let c = 0; c < inRow && left > 0; c++) {
+          const u = u0 + c * (L.pw + GAP) + L.pw / 2, w2 = w0 + r * L.step + L.pl / 2, px = u * ux + w2 * dx, py = u * uy + w2 * dy;
+          if (![[-1, -1], [1, -1], [-1, 1], [1, 1]].every(([a1, b1]) => inRoof(px + (ux * a1 * L.pw / 2 + dx * b1 * L.pl / 2) * 1.1, py + (uy * a1 * L.pw / 2 + dy * b1 * L.pl / 2) * 1.1, 0))) continue;   // 4すみが屋根の上（L字の家の欠けた所には置かない）
+          if (flat) panel(px, py, RZ(px, py) + 0.3, dx, dy, tl, L.pw, L.pl, (qx, qy) => RZ(qx, qy));
+          else panel(px, py, RZ(px, py) + lift, dx, dy, p, L.pw, L.pl, null);
+          left--;
+        }
+      }
+    }
+    // 屋根に乗りきらない分は、赤道側の地面に架台で並べる（傾けて、列は影がかからないようあける）
+    if (left > 0) {
+      const [ex, ey] = eq, ux = -ey, uy = ex, tl = 0.55, base = ey > 0 ? Y1 + 1.0 : Y0 - 1.0, cx0 = (bx.X0 + bx.X1) / 2, perRow = Math.max(3, Math.round((bx.X1 - bx.X0 + 2) / (PW + GAP)));
+      for (let r = 0, k = 0; left > 0 && r < 8; r++) for (let c = 0; c < perRow && left > 0; c++, k++) {
+        const u = (c - (perRow - 1) / 2) * (PW + GAP), w2 = r * (PL + 1.3) + PL / 2, px = cx0 + u * ux + ex * 0 + 0, py = base + ey * w2 + uy * u * 0;
+        const qx = cx0 + u, qy = base + ey * w2; if (opt.free && !opt.free(Math.floor(qx), Math.floor(qy))) continue;
+        panel(qx, qy, at(qx, qy) + 0.75, ex, ey, tl, PW, PL, (x2, y2) => at(x2, y2)); left--;
+      }
+    }
+  }
   // 計算の側と同じ決まり：雨が落ちる軒の家のマスから1マス以内、入口が軒より低いタンクに、この屋根の雨が入る
   function gutters(X0, X1, Y0, Y1) {
     const gm = matte({ color: '#8E918A', vary: 0.05, freq: 3, rough: 0.55 }), o = 0.08, rr = 0.06;

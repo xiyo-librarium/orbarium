@@ -640,9 +640,13 @@ async function boot() {
       : bb.tanks ? `<div class="flow warn">タンクには軒から落ちる分だけ（年 <b>${got}m³</b>）。屋根全体なら <b>${m3}m³</b>。</div>`
       : `<div class="flow warn">屋根で年 <b>${m3}m³</b> の雨を受けるが、タンクがないので地面へ流れる。［水］で軒のそばにタンクを置く。</div>`;
     const pi = W.PITCHES.findIndex(([p]) => Math.abs(p - (b.pitch || 0.3)) < 0.01), ei = W.EAVE_STEPS.findIndex(e => Math.abs(e - W.eavesDepth(b)) < 0.01);
-    const roofRow = R.flat ? `<div class="row"><span>屋根</span><div>${R.name}・平ら</div></div>`
-      : `<div class="row"><span>屋根の傾き</span><div class="step"><button data-act="pitch:-1">−</button><b>${W.PITCHES[Math.max(0, pi)][1]}</b><button data-act="pitch:1">＋</button></div></div>
-         <div class="row"><span>軒の出</span><div class="step"><button data-act="eaves:-1">−</button><b>${W.eavesDepth(b).toFixed(1)}m</b><button data-act="eaves:1">＋</button></div></div>`;
+    const sh = b.roofShape || 'flat', shapes = Object.entries(W.ROOF_SHAPES).filter(([k]) => !(R.pitched && k === 'flat')).map(([k, n]) => [k, k === 'flat' ? '平ら' : n]);
+    const shapeRow = R.flat ? '' : `<div class="row"><span>屋根の形</span>${seg('shape', shapes, sh)}</div>`
+      + (sh === 'mono' ? `<div class="row"><span>下がる向き</span>${seg('rdir', [['n', '北'], ['e', '東'], ['s', '南'], ['w', '西']], b.roofDir || 's')}</div>` : '')
+      + (sh === 'gable' ? `<div class="row"><span>下がる向き</span>${seg('rdir', [['ns', '北と南'], ['ew', '東と西']], b.roofDir === 'ew' ? 'ew' : 'ns')}</div>` : '');
+    const eavesRow = `<div class="row"><span>軒の出</span><div class="step"><button data-act="eaves:-1">−</button><b>${W.eavesDepth(b).toFixed(1)}m</b><button data-act="eaves:1">＋</button></div></div>`;
+    const pitchRow = `<div class="row"><span>屋根の傾き</span><div class="step"><button data-act="pitch:-1">−</button><b>${W.PITCHES[Math.max(0, pi)][1]}</b><button data-act="pitch:1">＋</button></div></div>`;
+    const roofRow = R.flat ? `<div class="row"><span>屋根</span><div>${R.name}・平ら</div></div>` : shapeRow + (sh === 'flat' ? '' : pitchRow) + eavesRow;
     const furnOf = (g) => b.furn?.find(f => W.FURN[f.t].group === g)?.t;
     const step = (k, label, val) => `<div class="row"><span>${label}</span><div class="step"><button data-act="${k}:-1">−</button><b>${val}</b><button data-act="${k}:1">＋</button></div></div>`;
     const power = id !== 'main' ? '' : (knows('offgrid') ? step('pv', '太陽光', `${b.pv || 0}枚（${((b.pv || 0) * W.BLOCKS.pv.kw).toFixed(1)}kW）`) + step('batt', '蓄電池', `${b.batt || 0}台（${(b.batt || 0) * W.BLOCKS.batt.kwh}kWh）`) : '')
@@ -719,8 +723,15 @@ async function boot() {
     if (!p || p.kind !== 'building') return;
     const b = W.buildingById(w, p.id), d = W.cloneHouse(b);
     if (k === 'use') { act(() => { d.use = a; return W.buildBuilding(s, d); }, `使い道を「${W.USES[a].name}」に`); return; }
-    if (k === 'method') { const L = LOCAL[SITE] || LOCAL.med; act(() => { if (a === 'ins') Object.assign(d, INSUL); else Object.assign(d, { wall: L.wall, roof: L.roof, finish: L.finish }); return W.buildBuilding(s, d); }, a === 'ins' ? '断熱した壁と屋根に' : 'この土地の工法に'); return; }
+    if (k === 'method') { const L = LOCAL[SITE] || LOCAL.med; act(() => { if (a === 'ins') Object.assign(d, INSUL); else Object.assign(d, { wall: L.wall, roof: L.roof, finish: L.finish });
+        const R2 = W.ROOFS[d.roof];   // 瓦は傾けた屋根に、土の屋根は平らに（今の版と同じ）
+        if (R2.pitched && (d.roofShape || 'flat') === 'flat') { d.roofShape = L.roofShape && L.roofShape !== 'flat' ? L.roofShape : 'gable'; d.roofDir = L.roofDir || 'ns'; d.pitch = Math.max(d.pitch || 0.3, L.pitch || 0.5); d.eaves = L.eaves ?? d.eaves; }
+        if (R2.flat) { d.roofShape = 'flat'; d.eaves = 0.16; }
+        return W.buildBuilding(s, d); }, a === 'ins' ? '断熱した壁と屋根に' : 'この土地の工法に'); return; }
     if (k === 'pitch') { const i = W.PITCHES.findIndex(([q]) => Math.abs(q - (b.pitch || 0.3)) < 0.01), j = Math.max(0, Math.min(W.PITCHES.length - 1, (i < 0 ? 1 : i) + +a)); if (j === i) return; act(() => { d.pitch = W.PITCHES[j][0]; d.roofShape = d.roofShape && d.roofShape !== 'flat' ? d.roofShape : 'gable'; return W.buildBuilding(s, d); }, `屋根を${W.PITCHES[j][1]}傾きに`); return; }
+    if (k === 'shape') { if ((b.roofShape || 'flat') === a) return; const eqSide = (site().lat ?? 6) >= 0 ? 's' : 'n';
+      act(() => { d.roofShape = a; if (a === 'gable' && !['ns', 'ew'].includes(d.roofDir)) d.roofDir = 'ns'; if (a === 'mono' && !['n', 'e', 's', 'w'].includes(d.roofDir)) d.roofDir = eqSide; if (a !== 'flat') d.pitch = d.pitch || 0.3; return W.buildBuilding(s, d); }, `屋根を${W.ROOF_SHAPES[a]}に`); return; }
+    if (k === 'rdir') { act(() => { d.roofDir = a; return W.buildBuilding(s, d); }, (b.roofShape === 'gable' ? (a === 'ew' ? '東と西へ' : '北と南へ') : `${{ n: '北', e: '東', s: '南', w: '西' }[a]}へ`) + '下がる屋根に'); return; }
     if (k === 'eaves') { const i = W.EAVE_STEPS.findIndex(q => Math.abs(q - W.eavesDepth(b)) < 0.01), j = Math.max(0, Math.min(W.EAVE_STEPS.length - 1, (i < 0 ? 1 : i) + +a)); if (j === i) return; act(() => { d.eaves = W.EAVE_STEPS[j]; return W.buildBuilding(s, d); }, `軒を${W.EAVE_STEPS[j]}mに`); return; }
     if (k === 'pv' || k === 'batt' || k === 'deep') {
       act(() => {
