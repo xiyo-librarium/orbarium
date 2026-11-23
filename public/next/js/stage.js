@@ -30,7 +30,8 @@ export function createStage(v, s, P) {
     const bedLevel = bedLevelOf(lw);
     const sigLand = JSON.stringify([Array.from(lw.H), bedLevel, w.H0 ? Array.from(w.H0).length : 0, [...blockedCell].sort(), bs.map(b => [Object.keys(b.cells), b.z])]);
     const sigHouse = JSON.stringify([bs, W.blocksOf(w, 'tank').map(t => [t.x, t.y, t.z]), st.cut, st.draft && st.draft.d && [st.draft.d, st.draft.hideId]]);
-    const sigBlocks = JSON.stringify(w.blocks) + sigLand.length;
+    const fed = W.blocksOf(w, 'tank').length ? W.analyze(w, E.SITES[s.site], s.persons.length).fedKeys : [];   // 雨が入るタンク（水の窓を青く、つながりの管を描く）
+    const sigBlocks = JSON.stringify(w.blocks) + sigLand.length + fed.join(' ') + JSON.stringify(bs.map(b => Object.keys(b.cells)));
     const cutCells = new Set(st.draft ? st.draft.cut : []);
     const sigTrees = JSON.stringify([w.veg, [...blockedCell].sort(), bs.map(b => [Object.keys(b.cells), b.z]), [...cutCells], st.draft && st.draft.d && Object.keys(st.draft.d.cells)]);
     let changed = false;
@@ -61,7 +62,7 @@ export function createStage(v, s, P) {
       const tg = buildTrees([...W.vegObjects(w), ...planted(w)], st.at, P, { skip: (t) => !t.planted && (!!W.buildingAt(w, t.cx, t.cy) || blockedCell.has(`${t.cx},${t.cy}`) || nearHouse(t) || cutCells.has(`${t.cx},${t.cy}`) || nearDraft(t)) });
       tg.userData.pick = { kind: 'trees' }; swap('trees', tg); st.sig.trees = sigTrees;
     }
-    if (sigBlocks !== st.sig.blocks || changed) { swap('blocks', buildBlocks(w, st.landObj, P)); st.sig.blocks = sigBlocks; }
+    if (sigBlocks !== st.sig.blocks || changed) { swap('blocks', buildBlocks(w, st.landObj, P, { fed })); st.sig.blocks = sigBlocks; }
     // 下書きの置き物（畑・木・小屋・池…）：白い模型で
     const sigGhost = JSON.stringify(st.draft && st.draft.blocks ? [Object.keys(st.draft.blocks), st.draft.real] : null) + sigLand;
     if (sigGhost !== st.sig.ghost) {
@@ -96,7 +97,7 @@ export function createStage(v, s, P) {
 
 /* 畑とタンク（この試作では形だけ）。
    畑は段々：上の面はその段の高さで平ら（少し盛り上がる）、ふちに板。下り側は段差の土の壁（石垣があれば石） */
-export function buildBlocks(w, land, P) {
+export function buildBlocks(w, land, P, bo = {}) {
   const at = land.at, g = new THREE.Group();
   const leaf = matte({ color: '#ffffff', vary: 0.15, freq: 5, bump: 0.6, bumpFreq: 8, rough: 0.85, spec: 0.4 }); leaf.emissive = new THREE.Color('#25331C'); leaf.emissiveIntensity = 0.4;
   const plants = [], tanks = [], beds = [], heaps = [], coops = [], ponds = [], media = [], reeds = [], pumps = [];
@@ -161,13 +162,35 @@ export function buildBlocks(w, land, P) {
   if (plants.length) { const geo = new THREE.IcosahedronGeometry(0.14, 2), m = new THREE.InstancedMesh(geo, leaf, plants.length), mt = new THREE.Matrix4(), c = new THREE.Color();
     plants.forEach(([x, y, z, r], i) => { mt.makeScale(1, 0.75, 1).setPosition(x, y, z); m.setMatrixAt(i, mt); m.setColorAt(i, c.set(r > 0.5 ? '#6E9A45' : '#7FA550')); }); m.castShadow = true; m.receiveShadow = true; g.add(m); }
   const tankMat = matte({ color: '#B4B6A6', vary: 0.06, freq: 2, rough: 0.7 }), lidMat = matte({ color: '#8E9286', vary: 0.06, freq: 3 });
-  for (const t of tanks) {   // タンク：円筒にふたと帯。押せるように場所を覚えておく
-    const [x, y, z] = t.p, m = new THREE.Group();
+  // タンク：円筒にふたと帯。外を向いた面に水の窓（雨が入るタンクは青く水が見え、入らないタンクは空）。
+  // 雨が入るタンクどうしがとなり合っていれば、足もとを管でつなぐ（低い方へ流れる）
+  const fedSet = new Set(bo.fed || []), bsAll = W.buildings(w), tankKey = (t) => `${t.x},${t.y},${t.z}`;
+  const outward = (t) => {   // いちばん近い建物から外への向き（縦横どちらか）
+    let best = null; for (const b of bsAll) for (const k in b.cells) { const [cx, cy] = k.split(',').map(Number), d = Math.hypot(cx - t.x, cy - t.y); if (!best || d < best.d) best = { d, dx: t.x - cx, dy: t.y - cy }; }
+    if (!best) return [0, 1]; return Math.abs(best.dx) >= Math.abs(best.dy) ? [Math.sign(best.dx) || 1, 0] : [0, Math.sign(best.dy) || 1];
+  };
+  const glassBg = matte({ color: '#E4E3D8', vary: 0.02, freq: 3, rough: 0.4 }), water = new THREE.MeshStandardMaterial({ color: '#4F8DB8', roughness: 0.3, emissive: '#1F4A66', emissiveIntensity: 0.25 }), pipeMat = matte({ color: '#8E918A', vary: 0.05, freq: 3, rough: 0.55 });
+  const tankAt = new Map(tanks.map(t => [`${t.x},${t.y}`, t]));
+  for (const t of tanks) {
+    const [x, y, z] = t.p, m = new THREE.Group(), [ox, oy] = outward(t), fedT = fedSet.has(tankKey(t)), ang = Math.atan2(ox, oy);
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.52, 1.2, 28), tankMat); body.position.y = 0.6;
     const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.08, 28), lidMat); lid.position.y = 1.24;
     const band = new THREE.Mesh(new THREE.TorusGeometry(0.515, 0.02, 6, 32), lidMat); band.rotation.x = Math.PI / 2; band.position.y = 0.45;
-    m.add(body, lid, band); m.position.set(x, y, z); m.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+    const win = new THREE.Group(); win.rotation.y = ang;
+    const bg = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.92, 0.03), glassBg); bg.position.set(0, 0.62, 0.535); win.add(bg);
+    if (fedT) { const wv = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.66, 0.03), water); wv.position.set(0, 0.5, 0.55); win.add(wv); }
+    m.add(body, lid, band, win); m.position.set(x, y, z); m.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
     m.userData.pick = { kind: 'tank', x: t.x, y: t.y, z: t.z }; g.add(m);
+    // となりのタンクへ（東と南だけ見れば、組は一度ずつ）
+    for (const [dx, dy] of [[1, 0], [0, 1]]) {
+      const u = tankAt.get(`${t.x + dx},${t.y + dy}`); if (!u || !fedT || !fedSet.has(tankKey(u)) || Math.abs(u.z - t.z) > 3) continue;
+      // t.p は [東西, 高さ, 南北]。管は外を向いた側（並びに直角）を通す
+      const [px, py] = dx ? [0, oy || 1] : [ox || 1, 0], off = 0.62, h1 = t.p[1] + 0.16, h2 = u.p[1] + 0.16;
+      const P3 = (q, k, h) => new THREE.Vector3(q.p[0] + px * k, h, q.p[2] + py * k);
+      const seg = (p1, p2) => { const d = p2.clone().sub(p1), L = d.length(); if (L < 0.02) return; const gg = new THREE.CylinderGeometry(0.045, 0.045, L, 10); gg.translate(0, L / 2, 0);
+        gg.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize())); gg.translate(p1.x, p1.y, p1.z); const mm = new THREE.Mesh(gg, pipeMat); mm.castShadow = true; g.add(mm); };
+      seg(P3(t, 0.42, h1), P3(t, off, h1)); seg(P3(t, off, h1), P3(u, off, h2)); seg(P3(u, off, h2), P3(u, 0.42, h2));
+    }
   }
   const wood = matte({ color: P.wood, vary: 0.2, freq: 4, bump: 0.4, bumpFreq: 9 }), tin = matte({ color: '#9AA09F', vary: 0.08, freq: 2, rough: 0.6 });
   const boxAt = (arr, mat, cx, cy, cz, sx, sy, sz, rx = 0) => { const gg = new THREE.BoxGeometry(sx, sz, sy); if (rx) gg.rotateX(rx); gg.translate(cx, cz, cy); arr.push(gg); };

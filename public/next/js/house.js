@@ -190,25 +190,62 @@ export function buildHouse(hs, P, at, opt = {}) {
     tiles(X0, X1, Y0, Y1, p, shape, ridgeAlongX);
   }
   // 雨どい：雨が落ちる軒にそって半円の樋。いちばん近いタンクへたてどいを下ろす
+  // 計算の側と同じ決まり：雨が落ちる軒の家のマスから1マス以内、入口が軒より低いタンクに、この屋根の雨が入る
   function gutters(X0, X1, Y0, Y1) {
     const gm = matte({ color: '#8E918A', vary: 0.05, freq: 3, rough: 0.55 }), o = 0.08, rr = 0.06;
     const pipe = (a, b, r) => { const d = b.clone().sub(a), L = d.length(); if (L < 0.02) return; const g = new THREE.CylinderGeometry(r, r, L, 10); g.translate(0, L / 2, 0);
-      g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize())); g.translate(a.x, a.y, a.z); add(gm, g); };
-    for (const dir of drains) {
+      g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize())); g.translate(a.x, a.y, a.z); add(gm, g);
+      const j = new THREE.SphereGeometry(r * 1.15, 10, 8); j.translate(b.x, b.y, b.z); add(gm, j); };   // 継ぎ目は丸く
+    const V = (x, y, h) => new THREE.Vector3(x, h, y);
+    const sh = hs.roofShape || 'flat', eaveZ = z + H + (sh === 'flat' ? 0 : -(hs.pitch || 0.3) * E) + 0.01;
+    const dcells = edges.filter(e => drains.includes(e.dir)).map(e => [e.x, e.y]);
+    const direct = (opt.tanks || []).filter(t => t.z < eaveZ && dcells.some(([x, y]) => Math.max(Math.abs(x - t.x), Math.abs(y - t.y)) <= 1));
+    // 軒ごとの樋（端から端へ）
+    const runs = drains.map(dir => {
       const [nx, ny] = DV[dir], A = dir === 'n' ? [X0, Y0] : dir === 's' ? [X0, Y1] : dir === 'w' ? [X0, Y0] : [X1, Y0], B = dir === 'n' ? [X1, Y0] : dir === 's' ? [X1, Y1] : dir === 'w' ? [X0, Y1] : [X1, Y1];
-      const zA = RZ(A[0], A[1]) - 0.17, zB = RZ(B[0], B[1]) - 0.17;
-      const a = new THREE.Vector3(A[0] + nx * o, zA, A[1] + ny * o), b = new THREE.Vector3(B[0] + nx * o, zB, B[1] + ny * o);
-      pipe(a, b, rr);
-      // たてどい：この軒のそばのタンクへ（なければ軒の端から地面へ）
-      const tk = (opt.tanks || []).map(t => ({ t, d: Math.abs((t.x + 0.5 - a.x) * ny - (t.y + 0.5 - a.z) * nx) })).filter(q => q.d < 1.8).sort((p, q) => p.d - q.d)[0];
-      const L = Math.max(0.3, Math.hypot(b.x - a.x, b.z - a.z)), u = (pt) => Math.max(0.15 / L, Math.min(1 - 0.15 / L, ((pt[0] - a.x) * (b.x - a.x) + (pt[1] - a.z) * (b.z - a.z)) / (L * L)));
-      if (tk) {
-        const k = u([tk.t.x + 0.5, tk.t.y + 0.5]), top = new THREE.Vector3().lerpVectors(a, b, k), tz = tk.t.z + 1.32;
-        const bot = new THREE.Vector3(top.x, tz + 0.25, top.z), into = new THREE.Vector3(tk.t.x + 0.5, tz, tk.t.y + 0.5);
-        pipe(top, bot, 0.04); pipe(bot, into, 0.04);
-      } else if (!opt.tanks?.length) {
-        const top = a.clone().lerp(b, 0.04), g0 = at(top.x, top.z); pipe(top, new THREE.Vector3(top.x, g0, top.z), 0.04);
-      }
+      const a = V(A[0] + nx * o, A[1] + ny * o, RZ(A[0], A[1]) - 0.17), b = V(B[0] + nx * o, B[1] + ny * o, RZ(B[0], B[1]) - 0.17);
+      pipe(a, b, rr); return { dir, a, b, tanks: [] };
+    });
+    const onRun = (r, px, py) => { const dx = r.b.x - r.a.x, dy = r.b.z - r.a.z, L2 = dx * dx + dy * dy || 1, L = Math.sqrt(L2), m = 0.15 / L;
+      const u = Math.max(m, Math.min(1 - m, ((px - r.a.x) * dx + (py - r.a.z) * dy) / L2)); return new THREE.Vector3().lerpVectors(r.a, r.b, u); };
+    const dist2 = (q, px, py) => (q.x - px) ** 2 + (q.z - py) ** 2;
+    // タンクごとに、いちばん近い軒の樋からたてどいを下ろす（雨が入るタンクには全部）
+    const far = [];
+    for (const t of direct) {
+      const cx = t.x + 0.5, cy = t.y + 0.5; let best = null;
+      for (const r of runs) { const q = onRun(r, cx, cy), d = dist2(q, cx, cy); if (!best || d < best.d) best = { r, q, d }; }
+      best.r.tanks.push(t);
+      if (Math.sqrt(best.d) > 0.95) { far.push({ t, q: best.q }); continue; }   // 樋から遠いタンク：地面の管で回す（下で）
+      const tz = t.z + 1.32, bot = V(best.q.x, best.q.z, tz + 0.22), into = V(cx + (best.q.x - cx) * 0.35, cy + (best.q.z - cy) * 0.35, tz);
+      pipe(best.q, bot, 0.04); pipe(bot, into, 0.04);
+    }
+    // タンクのない軒：角でたてどいを下ろし、地面にそって家のまわりを回り、いちばん近いタンクへ（タンクがなければ地面へ）
+    const R = [bx.X0 - 0.28, bx.X1 + 0.28, bx.Y0 - 0.28, bx.Y1 + 0.28];
+    const around = (p, q) => {   // 家を囲む四角の上を、短い向きに回る道
+      const per = 2 * (R[1] - R[0]) + 2 * (R[3] - R[2]);
+      const pos = (x, y) => { const cx2 = Math.max(R[0], Math.min(R[1], x)), cy2 = Math.max(R[2], Math.min(R[3], y));
+        const ds = [[Math.abs(cy2 - R[2]), 0], [Math.abs(cx2 - R[1]), 1], [Math.abs(cy2 - R[3]), 2], [Math.abs(cx2 - R[0]), 3]].sort((m1, m2) => m1[0] - m2[0])[0][1];
+        const W1 = R[1] - R[0], H1 = R[3] - R[2];
+        return ds === 0 ? cx2 - R[0] : ds === 1 ? W1 + (cy2 - R[2]) : ds === 2 ? W1 + H1 + (R[1] - cx2) : 2 * W1 + H1 + (R[3] - cy2); };
+      const ptAt = (sv) => { const W1 = R[1] - R[0], H1 = R[3] - R[2]; sv = ((sv % per) + per) % per;
+        return sv <= W1 ? [R[0] + sv, R[2]] : sv <= W1 + H1 ? [R[1], R[2] + sv - W1] : sv <= 2 * W1 + H1 ? [R[1] - (sv - W1 - H1), R[3]] : [R[0], R[3] - (sv - 2 * W1 - H1)]; };
+      let s0 = pos(p[0], p[1]), s1 = pos(q[0], q[1]), fwd = ((s1 - s0) % per + per) % per; const dirS = fwd <= per / 2 ? 1 : -1, len = dirS > 0 ? fwd : per - fwd;
+      const pts = [p, ptAt(s0)]; for (let k = 0.5; k < len; k += 0.5) pts.push(ptAt(s0 + dirS * k)); pts.push(ptAt(s1), q); return pts;
+    };
+    const groundTo = (top, tgt) => {   // たてどいを地面まで下ろし、家のまわりを地面にそってタンクの足もとへ
+      const g0 = at(top.x, top.z) + 0.07; pipe(top, V(top.x, top.z, g0), 0.04); if (!tgt) return;
+      const cx = tgt.x + 0.5, cy = tgt.y + 0.5, path = around([top.x, top.z], [cx, cy]);
+      const last = path[path.length - 2], dl = Math.hypot(cx - last[0], cy - last[1]) || 1; path[path.length - 1] = [cx + (last[0] - cx) / dl * 0.55, cy + (last[1] - cy) / dl * 0.55];
+      let prev = V(top.x, top.z, g0);
+      for (const [x2, y2] of path.slice(1)) { const nx2 = V(x2, y2, at(x2, y2) + 0.07); if (nx2.distanceTo(prev) > 0.05) { pipe(prev, nx2, 0.04); prev = nx2; } }
+    };
+    { const byQ = new Map(); for (const f of far) { const k = `${f.q.x.toFixed(1)},${f.q.z.toFixed(1)}`, d = dist2(f.q, f.t.x + 0.5, f.t.y + 0.5); if (!byQ.has(k) || d < byQ.get(k).d) byQ.set(k, { ...f, d }); }
+      for (const f of byQ.values()) groundTo(f.q, f.t); }   // 同じ角から出る管は1本（となりのタンクは足もとの管でつながる）
+    for (const r of runs) {
+      if (r.tanks.length) continue;
+      const tgt = direct.length ? direct.map(t => ({ t, d: Math.min(dist2(r.a, t.x + 0.5, t.y + 0.5), dist2(r.b, t.x + 0.5, t.y + 0.5)) })).sort((m1, m2) => m1.d - m2.d)[0].t : null;
+      const top = tgt ? (dist2(r.a, tgt.x + 0.5, tgt.y + 0.5) < dist2(r.b, tgt.x + 0.5, tgt.y + 0.5) ? r.a.clone().lerp(r.b, 0.04) : r.b.clone().lerp(r.a, 0.04)) : r.a.clone().lerp(r.b, 0.04);
+      groundTo(top, tgt);
     }
   }
   function tiles(X0, X1, Y0, Y1, p, shape, ridgeAlongX) {

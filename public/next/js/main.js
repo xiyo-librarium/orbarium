@@ -554,6 +554,21 @@ async function boot() {
   canvas.addEventListener('pointerup', fup, { capture: true }); canvas.addEventListener('pointercancel', fup, { capture: true });
 
   /* ---------- 水：タンク ---------- */
+  // 雨が入らない理由を、そのタンクの場所から具体的に
+  const DIRN = { n: '北', s: '南', e: '東', w: '西' };
+  function tankWhy(t, A) {
+    const w = s.world, K = (o) => `${o.x},${o.y},${o.z}`, cheb = (x, y) => Math.max(Math.abs(x - t.x), Math.abs(y - t.y));
+    for (const b of W.buildings(w)) {
+      const cells = Object.keys(b.cells).map(k => k.split(',').map(Number)); if (!cells.some(([x, y]) => cheb(x, y) <= 1)) continue;
+      const sh = b.roofShape || 'flat', eave = b.z + W.HOUSE_H + (sh === 'flat' ? 0 : -(b.pitch || 0.3) * W.eavesDepth(b)) + 0.01;
+      if (t.z >= eave) return 'タンクの入口が軒より高い（建物より高い地面にある）。もっと低い所に置く。';
+      if (!W.drainEdges(b).some(o => cheb(o.x, o.y) <= 1)) return `この壁の上は屋根の三角の側（妻側）で、雨が落ちてこない。雨は${W.drainDirs(b).map(d => DIRN[d]).join('と')}の軒へ流れる。そちらの軒の下か、雨の入るタンクのとなりに置く。`;
+    }
+    const nb = W.blocksOf(w, 'tank').filter(o => Math.abs(o.x - t.x) + Math.abs(o.y - t.y) === 1 && Math.abs(o.z - t.z) <= 3), fedNb = nb.filter(o => A.fedKeys.includes(K(o)));
+    if (fedNb.length && fedNb.every(o => o.z < t.z)) return 'となりのタンクより地面が高い。水は低い方へしか流れないので、同じ高さか低い所に置く。';
+    if (fedNb.length) return 'となりのタンクの屋根に雨どいがない。雨どいがあれば、となり合うタンクに水が回る。';
+    return '建物の軒から1mより遠い。軒の下（雨が落ちる側）か、雨の入るタンクのとなりに置く。';
+  }
   const site = () => E.SITES[SITE];
   const catchM3 = () => Math.round(W.analyze(s.world, site(), s.persons.length).roofCatch * rainY / 1000);
   function placeTank(p, n) {
@@ -564,9 +579,14 @@ async function boot() {
       g = new THREE.Vector3(p.point.x, 0, p.point.z);
     } else g = stage.groundAt(n) || p?.point;
     if (!g) return;
-    const { x, y } = cellOf(g), w = s.world, before = catchM3(), A = flowsNow();
+    const { x, y } = cellOf(g), w = s.world, before = catchM3(), A = flowsNow(), z0 = W.h(w, x, y);
     act(() => { const err = W.put(s, x, y, W.h(w, x, y), 'tank', 'hire'); if (err) return err; return autoGutter(); },
-      (spent) => { const d = catchM3() - before; return d > 0 ? `タンクを置いた。屋根の雨が年 +${d}m³ 集まる（−${yen(spent)}）${flowText(A, yearFlows(s))}` : `タンクを置いた（−${yen(spent)}）。雨が入らない：建物の軒から1m以内に`; });
+      (spent) => {
+        const d = catchM3() - before, A2 = W.analyze(s.world, site(), s.persons.length), t = W.blocksOf(s.world, 'tank').find(o => o.x === x && o.y === y && o.z === z0);
+        if (d > 0) return `タンクを置いた。屋根の雨が年 +${d}m³ 集まる（−${yen(spent)}）${flowText(A, yearFlows(s))}`;
+        if (t && A2.fedKeys.includes(`${t.x},${t.y},${t.z}`)) return `タンクを置いた（−${yen(spent)}）。雨が入る。屋根の雨はもう集まっているので、ためられる量が1m³ふえる（雨の多い季節にあふれにくい）`;
+        return `タンクを置いた（−${yen(spent)}）。雨が入らない：${t ? tankWhy(t, A2) : ''}`;
+      });
   }
 
   /* ---------- 消す ---------- */
@@ -646,8 +666,8 @@ async function boot() {
     else if (p.kind === 'tank') {
       const A = W.analyze(w, site(), s.persons.length), fed = A.fedKeys.includes(`${p.x},${p.y},${p.z}`);
       html = `<h3>雨水タンク<button class="x" data-act="close" aria-label="閉じる">×</button></h3><p class="sub">1m³（1,000L）</p>
-        ${fed ? `<div class="flow">屋根の雨が入る。敷地のタンク全部で、屋根から年 <b>${Math.round(A.roofCatch * rainY / 1000)}m³</b> 集まる。</div>` : `<div class="flow warn">雨が入らない。建物の軒から1m以内に置くと、雨どいがついて屋根の雨が集まる。</div>`}
-        <p class="note">［消す］で外せる。</p>`;
+        ${fed ? `<div class="flow">屋根の雨が入る（水の窓が青い）。敷地のタンク全部で、屋根から年 <b>${Math.round(A.roofCatch * rainY / 1000)}m³</b> 集まる。</div>` : `<div class="flow warn">雨が入らない（水の窓が空）。${tankWhy(p, A)}</div>`}
+        <p class="note">雨どいのある軒のそばのタンクには、それぞれたてどいが下りる。となり合うタンクは足もとの管でつながり、水は同じ高さか低い方へ回る。［消す］で外せる。</p>`;
     } else if (p.kind === 'tree') {
       const c = W.CUT[p.t.planted ? p.t.kind : p.t.kind] || {}, name = p.t.planted ? (p.t.kind === 'hedge' ? '生け垣' : '果樹') : c.name || '木';
       const what = p.t.planted ? (p.t.kind === 'hedge' ? '風よけと目かくし。刈った枝葉は堆肥に。' : '実がなる。落ち葉は堆肥に、根は斜面の土を止める。') : '根が斜面の土と雨を止め、落ち葉が土を肥やす。日かげも作る。';
