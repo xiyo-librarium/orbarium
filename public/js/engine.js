@@ -343,7 +343,7 @@ export function summarize(s) {
     ghArea: A.ghBeds, gArea: A.gArea, mulchArea: A.mulch, terraceArea: A.risers ? A.gArea * A.stoneRisers / A.risers : A.gArea,
     bareRisers: bare, risers: A.risers, tankCap: A.tankCap, tankGrav: A.tankGrav, pondGrav: A.pondGrav, pumps: A.pumps,
     filter: A.filter ? { ...A.filter, m: B.filterModel(A.filter.spec, grey) } : null,
-    heap: A.heap, pvKw: A.pvKw, battKwh: A.battKwh, trees: A.trees, coops: A.coops,
+    heap: A.heap, pvKw: A.pvKw, pvF: A.pvF, battKwh: A.battKwh, trees: A.trees, coops: A.coops,
     pondCap: A.pondCap, pondArea: A.pondArea, pondCatch: A.pondCatch, hedgeLen: A.hedge, wallLen: A.wallArea * 2 + A.greenRoof * 0.5, wallArea: A.wallArea, wallBedShare: A.wallBedShare,
     pending: W.pendingDays(w), diag: [...A.diag, ...cd], compost: C
   };
@@ -530,7 +530,7 @@ export function advance(state) {
     }
     const load = 2 + cook + 0.6 * n + heatKwh / cop;
     A.heatElec += heatKwh / cop;
-    const pv = S.pvKw * d.psh * 0.75;
+    const pv = S.pvKw * d.psh * 0.75 * (S.pvF ? S.pvF[d.m] : 1);   // 屋根の向きと傾き（月ごと）
     const dayL = load * 0.4, night = load * 0.6;
     const direct = Math.min(pv, dayL), sur = pv - direct;
     const room = S.battKwh - batt;

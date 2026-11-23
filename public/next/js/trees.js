@@ -134,9 +134,12 @@ export function buildTrees(list, at, P, opt = {}) {
     }
 
     if (t.kind === 'hedge') {
-      // 生け垣：刈りこんだ低い茂み。となりの株とつながるよう、少し横に広い
-      const c = leafOf(P.pine), n = 2;
-      for (let i = 0; i < n; i++) { const a = r(5 + i) * 6.28, d = i ? 0.22 : 0; blob(base.clone().add(new THREE.Vector3(Math.cos(a) * d, t.h * (i ? 0.62 : 0.48), Math.sin(a) * d)), [0.66, t.h * (i ? 0.42 : 0.52), 0.66], c, i ? 1.04 : 0.94); }
+      // 生け垣：刈りこんだ低い茂み。となりも生け垣なら、あいだを茂みでつないで一本の垣根に（列の上は平らに刈る）
+      const c = leafOf(P.pine), nb = t.nb || {}, row = nb.e || nb.w || nb.n || nb.s, hh = row ? t.h * 0.92 : t.h;
+      if (!row) { for (let i = 0; i < 2; i++) { const a = r(5 + i) * 6.28, d = i ? 0.22 : 0; blob(base.clone().add(new THREE.Vector3(Math.cos(a) * d, t.h * (i ? 0.62 : 0.48), Math.sin(a) * d)), [0.66, t.h * (i ? 0.42 : 0.52), 0.66], c, i ? 1.08 : 1); } continue; }
+      const alongX = (nb.e || nb.w) && !(nb.n || nb.s), alongY = (nb.n || nb.s) && !(nb.e || nb.w), sx = alongY ? 0.5 : 0.6, sz = alongX ? 0.5 : 0.6;
+      blob(base.clone().add(new THREE.Vector3(0, hh * 0.5, 0)), [sx, hh * 0.5, sz], c, 1);
+      for (const [k, dx, dz] of [['e', 0.5, 0], ['s', 0, 0.5]]) if (nb[k]) blob(base.clone().add(new THREE.Vector3(dx, hh * 0.5 + (r(7 + dx * 3) - 0.5) * 0.06, dz)), [dx ? 0.55 : sx, hh * 0.49, dz ? 0.55 : sz], c, 1.03);
       continue;
     }
     // 広葉樹：形を 4 つから選ぶ（丸い・横に広い・縦に長い・二股）。植えた果樹は丸く小さく、実がなる

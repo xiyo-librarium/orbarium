@@ -273,3 +273,5 @@ body.replaying .bottom, body.replaying .card, body.replaying .pick { opacity: 0;
 @media (max-width: 640px) { .wx { top: 112px; } .wx-top { gap: 8px; font-size: 13px; flex-wrap: wrap; } .wx-date { min-width: 0; } }
 .wx-icon[data-k="snow"] { color: #6C8FA8; }
 .wx-dim { position: fixed; inset: 0; z-index: 3; pointer-events: none; background: #46535A; opacity: 0; mix-blend-mode: multiply; }
+.card .pvf { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--sub); margin-top: -4px; }
+.card .pvf b { font-size: 13px; color: var(--ink); } .card .pvf b.up { color: var(--good); } .card .pvf b.down { color: var(--bad); }

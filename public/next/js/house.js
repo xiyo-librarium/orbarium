@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { matte, hash } from './look.js';
-import { HOUSE_H, roofZ, roofBox, eavesDepth, houseOuterEdges, drainDirs, ACCENTS, WALLS, furnCells, FDIR as W_FDIR } from '/js/world.js';
+import { HOUSE_H, roofZ, roofBox, eavesDepth, houseOuterEdges, drainDirs, ACCENTS, WALLS, furnCells, FDIR as W_FDIR, pvLayout } from '/js/world.js';
 
 const T = 0.2;   // 壁の厚さ
 const DV = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] };
@@ -39,10 +39,13 @@ export function buildHouse(hs, P, at, opt = {}) {
   for (const [x, y] of cells) box(floorMat, x + 0.5, y + 0.5, z - 0.05, 1, 1, 0.1);
 
   // 壁：辺ごと。窓は 0.9〜2.2m、扉は 0〜2.1m
-  const edges = houseOuterEdges(hs);
+  const edges = houseOuterEdges(hs), edgeDir = new Map(edges.map(o => [o.e, o.dir]));
+  // 同じ壁の線で、となりの辺も同じ開口か（窓がつづけば横長の窓、扉がならべば両開き）
+  const sameNb = (t, ex, ey, dir, op, k) => { const key = t === 'h' ? `h:${ex + k},${ey}` : `v:${ex},${ey + k}`, o2 = hs.open[key];
+    if (edgeDir.get(key) !== dir || !o2) return false; return op === 'door' ? o2 === 'door' : o2 !== 'door'; };
   for (const o of edges) {
     const [t, r] = o.e.split(':'), [ex, ey] = r.split(',').map(Number), along = t === 'h';
-    const [nx, ny] = DV[o.dir], op = hs.open[o.e];
+    const [nx, ny] = DV[o.dir], op = hs.open[o.e], lo = !!op && sameNb(t, ex, ey, o.dir, op, -1), hi = !!op && sameNb(t, ex, ey, o.dir, op, 1);
     const cx = along ? ex + 0.5 : ex, cy = along ? ey : ey + 0.5, sx = along ? 1 : T, sy = along ? T : 1;
     const piece = (z0, z1) => box(wallMat, cx, cy, z + (z0 + z1) / 2, sx, sy, z1 - z0);
     if (cut) {   // 壁を下げた見え方：腰の高さで切る。扉は開口だけ、窓は窓台まで
@@ -50,8 +53,8 @@ export function buildHouse(hs, P, at, opt = {}) {
       else if (op === 'window' || op === 'window2') { piece(0, 0.9); box(accentMat, cx + nx * 0.06, cy + ny * 0.06, z + 0.935, along ? 0.96 : T + 0.16, along ? T + 0.16 : 0.96, 0.07); }
       else piece(0, CUT);
     }
-    else if (op === 'door') { piece(2.1, H); door(cx, cy, along, nx, ny); }
-    else if (op === 'window' || op === 'window2') { piece(0, 0.9); piece(2.2, H); win(cx, cy, along, nx, ny, op); }
+    else if (op === 'door') { piece(2.1, H); door(cx, cy, along, nx, ny, lo, hi); }
+    else if (op === 'window' || op === 'window2') { piece(0, 0.9); piece(2.2, H); win(cx, cy, along, nx, ny, op, lo, hi); }
     else piece(0, H);
     // 腰壁（ソカロ）：外側に 3cm 出た色の帯と、上の白い線
     if (M.accent && op !== 'door') {
@@ -72,23 +75,30 @@ export function buildHouse(hs, P, at, opt = {}) {
     if (along) g.translate(p0[0], z, p0[1]); else { g.rotateY(-Math.PI / 2); g.translate(p0[0], z, p0[1]); }
     add(wallMat, g);
   }
-  function win(cx, cy, along, nx, ny, op) {
-    const L = 0.88, fw = 0.06, z0 = z + 0.9, z1 = z + 2.2, d = T + 0.03, mid = (z0 + z1) / 2, ux = along ? 1 : 0, uy = along ? 0 : 1;
+  // 窓：となりも窓なら枠を端までのばし、つなぎ目は細い桟1本（ひと続きの横長の窓）。となりが壁なら、すき間を壁で埋める
+  function win(cx, cy, along, nx, ny, op, lo = false, hi = false) {
+    const fw = 0.06, z0 = z + 0.9, z1 = z + 2.2, d = T + 0.03, mid = (z0 + z1) / 2, ux = along ? 1 : 0, uy = along ? 0 : 1;
     const fb = (du, dzc, w, hgt, dep, mat = accentMat, out = 0) => box(mat, cx + ux * du + nx * out, cy + uy * du + ny * out, dzc, along ? w : dep, along ? dep : w, hgt);
-    fb(-L / 2 + fw / 2, mid, fw, z1 - z0, d); fb(L / 2 - fw / 2, mid, fw, z1 - z0, d);   // 縦の枠
-    fb(0, z1 - fw / 2, L, fw, d);                                                          // 上の枠
-    fb(0, z0 + 0.035, L + 0.08, 0.07, T + 0.16, accentMat, 0.06);                          // 窓台（外へ出す）
-    fb(0, mid, L - 2 * fw, z1 - z0 - fw - 0.07, 0.02, glassMat, -0.02);                   // ガラス（少し奥）
-    fb(0, mid, 0.035, z1 - z0 - fw - 0.07, 0.05, accentMat, 0.01);                         // 縦の桟
-    for (const f of op === 'window2' ? [0.36, 0.64] : [0.58]) fb(0, z0 + 0.07 + (z1 - z0 - fw - 0.07) * f, L - 2 * fw, 0.035, 0.05, accentMat, 0.01);
-    fb(-L / 2 + fw + 0.12, mid, 0.2, z1 - z0 - fw - 0.12, 0.02, trimMat, -0.07);          // 中のカーテン
+    const a = lo ? -0.5 : -0.44, b = hi ? 0.5 : 0.44, c = (a + b) / 2, Lw = b - a;
+    if (!lo) { fb(a + fw / 2, mid, fw, z1 - z0, d); fb(-0.47, mid, 0.06, z1 - z0, T, wallMat); } else fb(-0.5, mid, 0.05, z1 - z0, d);   // 縦の枠（つなぎ目は細く、こちらだけが描く）
+    if (!hi) { fb(b - fw / 2, mid, fw, z1 - z0, d); fb(0.47, mid, 0.06, z1 - z0, T, wallMat); }
+    fb(c, z1 - fw / 2, Lw, fw, d);                                                                       // 上の枠
+    const sa = lo ? -0.5 : -0.48, sb = hi ? 0.5 : 0.48; fb((sa + sb) / 2, z0 + 0.035, sb - sa, 0.07, T + 0.16, accentMat, 0.06);   // 窓台（つづけば一本）
+    const ga = lo ? -0.5 : a + fw, gb = hi ? 0.5 : b - fw;
+    fb((ga + gb) / 2, mid, gb - ga, z1 - z0 - fw - 0.07, 0.02, glassMat, -0.02);                           // ガラス（少し奥）
+    fb(0, mid, 0.035, z1 - z0 - fw - 0.07, 0.05, accentMat, 0.01);                                        // 縦の桟
+    for (const f of op === 'window2' ? [0.36, 0.64] : [0.58]) fb((ga + gb) / 2, z0 + 0.07 + (z1 - z0 - fw - 0.07) * f, gb - ga, 0.035, 0.05, accentMat, 0.01);
+    if (!lo) fb(a + fw + 0.12, mid, 0.2, z1 - z0 - fw - 0.12, 0.02, trimMat, -0.07);                      // 中のカーテン（窓の列の端に）
+    if (!hi && lo) fb(b - fw - 0.12, mid, 0.2, z1 - z0 - fw - 0.12, 0.02, trimMat, -0.07);
   }
-  function door(cx, cy, along, nx, ny) {
+  // 扉：となりも扉なら、あいだの柱をなくして両開きに（取っ手は合わせ目の側）
+  function door(cx, cy, along, nx, ny, lo = false, hi = false) {
     const ux = along ? 1 : 0, uy = along ? 0 : 1, fb = (du, dzc, w, hgt, dep, mat, out = 0) => box(mat, cx + ux * du + nx * out, cy + uy * du + ny * out, dzc, along ? w : dep, along ? dep : w, hgt);
-    fb(-0.45, z + 1.05, 0.07, 2.1, T + 0.04, woodMat); fb(0.45, z + 1.05, 0.07, 2.1, T + 0.04, woodMat); fb(0, z + 2.06, 0.97, 0.08, T + 0.04, woodMat);
-    for (let k = 0; k < 5; k++) fb(-0.33 + k * 0.165, z + 1.01, 0.155, 2.0, 0.05, accentMat, 0.02);   // 縦の板
-    fb(0, z + 0.45, 0.82, 0.08, 0.04, accentMat, 0.05); fb(0, z + 1.6, 0.82, 0.08, 0.04, accentMat, 0.05);
-    fb(0.3, z + 1.0, 0.04, 0.04, 0.04, matte({ color: '#2A2522' }), 0.08);
+    if (!lo) fb(-0.45, z + 1.05, 0.07, 2.1, T + 0.04, woodMat); if (!hi) fb(0.45, z + 1.05, 0.07, 2.1, T + 0.04, woodMat);
+    const la = lo ? -0.5 : -0.485, lb = hi ? 0.5 : 0.485; fb((la + lb) / 2, z + 2.06, lb - la, 0.08, T + 0.04, woodMat);
+    const pa = lo ? -0.47 : -0.33, n = lo || hi ? 6 : 5; for (let k = 0; k < n; k++) fb(pa + k * 0.155 + (hi && !lo ? 0.02 : 0), z + 1.01, 0.145, 2.0, 0.05, accentMat, 0.02);   // 縦の板
+    fb(0, z + 0.45, lo || hi ? 0.94 : 0.82, 0.08, 0.04, accentMat, 0.05); fb(0, z + 1.6, lo || hi ? 0.94 : 0.82, 0.08, 0.04, accentMat, 0.05);
+    fb(lo ? -0.38 : hi ? 0.38 : 0.3, z + 1.0, 0.04, 0.04, 0.04, matte({ color: '#2A2522' }), 0.08);
     doorStep(cx, cy, along, nx, ny);
   }
   function doorStep(cx, cy, along, nx, ny) { box(mortarMat, cx + nx * 0.55, cy + ny * 0.55, Math.min(z, at(cx + nx * 0.55, cy + ny * 0.55)) + 0.02, along ? 0.8 : 0.5, along ? 0.5 : 0.8, 0.12); }   // 踏み石
@@ -220,28 +230,21 @@ export function buildHouse(hs, P, at, opt = {}) {
         if (top - g0 > 0.03) box(frame, qx, qy, (top + g0) / 2, 0.04, 0.04, top - g0);
       }
     };
-    let left = hs.pv;
-    for (const [dx, dy] of planes) {
-      if (left <= 0) break;
-      const ux = -dy, uy = dx, cs = [[X0, Y0], [X1, Y1], [X0, Y1], [X1, Y0]];
+    // 並べ方は計算の側（world.pvLayout）と同じ：どの面に何枚か、縦置きか横置きか
+    const layout = pvLayout(hs, opt.lat ?? 6); let left = layout.filter(q => q.ground).reduce((a, q) => a + q.n, 0);
+    for (const q of layout) {
+      if (q.ground) continue;
+      const { dx, dy, L } = q, ux = -dy, uy = dx, cs = [[X0, Y0], [X1, Y1], [X0, Y1], [X1, Y0]];
       const us = cs.map(([a, b]) => a * ux + b * uy), ws = cs.map(([a, b]) => a * dx + b * dy), mg = flat ? 0.2 : 0.3;
       const uMin = Math.min(...us) + mg, uMax = Math.max(...us) - mg, wMin = (shape === 'gable' ? ridge * (dx + dy) : Math.min(...ws)) + 0.25, wMax = Math.max(...ws) - mg;
-      // 並べ方：縦置き・横置き、平らな屋根は列のあけ方も。全部乗る並べ方のうち最初のもの、なければいちばん多く乗るもの
-      const tl = flat ? 0.22 : p, opts = [];
-      for (const [pw, pl] of [[PW, PL], [PL, PW]]) for (const rg of flat ? [0.5, 0.3, 0.12] : [GAP]) {
-        const step = flat ? pl * 0.98 + rg : pl + GAP, cols = Math.max(0, Math.floor((uMax - uMin + GAP) / (pw + GAP))), rows = Math.max(0, Math.floor((wMax - wMin + rg) / step));
-        opts.push({ pw, pl, rg, step, cols, rows, cap: cols * rows });
-      }
-      const L = opts.find(o => o.cap >= left) || opts.slice().sort((a, b) => b.cap - a.cap)[0]; if (!L.cap) continue;
-      const m = Math.min(left, L.cap), rUsed = Math.ceil(m / L.cols), w0 = (wMin + wMax) / 2 - (rUsed * L.step - L.rg) / 2;
-      for (let r = 0; r < rUsed && left > 0; r++) {
+      const tl = flat ? 0.22 : p, m = q.n, rUsed = Math.ceil(m / L.cols), w0 = (wMin + wMax) / 2 - (rUsed * L.step - L.rg) / 2;
+      for (let r = 0; r < rUsed; r++) {
         const inRow = Math.min(L.cols, m - r * L.cols), u0 = (uMin + uMax) / 2 - (inRow * (L.pw + GAP) - GAP) / 2;
-        for (let c = 0; c < inRow && left > 0; c++) {
+        for (let c = 0; c < inRow; c++) {
           const u = u0 + c * (L.pw + GAP) + L.pw / 2, w2 = w0 + r * L.step + L.pl / 2, px = u * ux + w2 * dx, py = u * uy + w2 * dy;
-          if (![[-1, -1], [1, -1], [-1, 1], [1, 1]].every(([a1, b1]) => inRoof(px + (ux * a1 * L.pw / 2 + dx * b1 * L.pl / 2) * 1.1, py + (uy * a1 * L.pw / 2 + dy * b1 * L.pl / 2) * 1.1, 0))) continue;   // 4すみが屋根の上（L字の家の欠けた所には置かない）
+          if (![[-1, -1], [1, -1], [-1, 1], [1, 1]].every(([a1, b1]) => inRoof(px + (ux * a1 * L.pw / 2 + dx * b1 * L.pl / 2) * 1.1, py + (uy * a1 * L.pw / 2 + dy * b1 * L.pl / 2) * 1.1, 0))) continue;   // L字の家の欠けた所
           if (flat) panel(px, py, RZ(px, py) + 0.3, dx, dy, tl, L.pw, L.pl, (qx, qy) => RZ(qx, qy));
           else panel(px, py, RZ(px, py) + lift, dx, dy, p, L.pw, L.pl, null);
-          left--;
         }
       }
     }

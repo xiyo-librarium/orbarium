@@ -18,8 +18,8 @@ export function createStage(v, s, P) {
     g.traverse(o => { if (!o.isMesh) return; (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); o.material = gm; if (o.isInstancedMesh) o.instanceColor = null; }); };
   const ray = new THREE.Raycaster();
   // 植えた果樹と生け垣（置いた物）。土地の木と同じ描き方で、少し小さく
-  const planted = (w) => { const out = []; for (const k in w.blocks) { const t = w.blocks[k].t; if (t !== 'tree' && t !== 'hedge') continue; const [x, y, z] = k.split(',').map(Number);
-    out.push(t === 'tree' ? { kind: 'fruit', planted: true, cx: x, cy: y, x: x + 0.5, y: y + 0.5, h: 3.2 + hash(x, y, 1) * 0.8, r: 1.0 + hash(x, y, 2) * 0.3, s: hash(x, y, 3) } : { kind: 'hedge', planted: true, cx: x, cy: y, x: x + 0.5, y: y + 0.5, h: 1.3, r: 0.6, s: hash(x, y, 3) }); } return out; };
+  const planted = (w) => { const out = [], hedges = new Set(Object.keys(w.blocks).filter(k => w.blocks[k].t === 'hedge').map(k => k.split(',').slice(0, 2).join(','))); for (const k in w.blocks) { const t = w.blocks[k].t; if (t !== 'tree' && t !== 'hedge') continue; const [x, y, z] = k.split(',').map(Number);
+    out.push(t === 'tree' ? { kind: 'fruit', planted: true, cx: x, cy: y, x: x + 0.5, y: y + 0.5, h: 3.2 + hash(x, y, 1) * 0.8, r: 1.0 + hash(x, y, 2) * 0.3, s: hash(x, y, 3) } : { kind: 'hedge', planted: true, cx: x, cy: y, x: x + 0.5, y: y + 0.5, h: 1.3, r: 0.6, s: hash(x, y, 3), nb: { e: hedges.has(`${x + 1},${y}`), w: hedges.has(`${x - 1},${y}`), s: hedges.has(`${x},${y + 1}`), n: hedges.has(`${x},${y - 1}`) } }); } return out; };
   const bedLevelOf = (w) => { const o = {}; for (const k in w.blocks) if (BLOCKS[w.blocks[k].t]?.kind === 'bed') { const [x, y, z] = k.split(',').map(Number); o[`${x},${y}`] = z; } return o; };
   const swap = (key, obj) => { if (st[key]) { v.scene.remove(st[key]); dispose(st[key]); } st[key] = obj; if (obj) v.scene.add(obj); };
 
@@ -102,11 +102,12 @@ export function createStage(v, s, P) {
 export function buildBlocks(w, land, P, bo = {}) {
   const at = land.at, g = new THREE.Group();
   const leaf = matte({ color: '#ffffff', vary: 0.15, freq: 5, bump: 0.6, bumpFreq: 8, rough: 0.85, spec: 0.4 }); leaf.emissive = new THREE.Color('#25331C'); leaf.emissiveIntensity = 0.4;
-  const plants = [], tanks = [], beds = [], heaps = [], coops = [], ponds = [], media = [], reeds = [], pumps = [];
+  const plants = [], tanks = [], beds = [], heaps = [], coops = [], ponds = [], media = [], reeds = [], pumps = [], batts = [];
   for (const k in w.blocks) {
     const [x, y, z] = k.split(',').map(Number), b = w.blocks[k], D = BLOCKS[b.t]; if (!D) continue;
     if (D.kind === 'bed') beds.push({ x, y, z, stone: !!(b.s || (w.stone && w.stone[`${x},${y}`])), mulch: !!b.m, cover: !!b.g });
     else if (D.kind === 'tank') tanks.push({ p: [x + 0.5, z, y + 0.5], x, y, z });
+    else if (D.kind === 'batt') batts.push({ x, y, z });
     else if (D.kind === 'heap') heaps.push({ x, y, z });
     else if (D.kind === 'coop') coops.push({ x, y, z });
     else if (D.kind === 'pond') ponds.push({ x, y, z });
@@ -194,6 +195,20 @@ export function buildBlocks(w, land, P, bo = {}) {
       seg(P3(t, 0.42, h1), P3(t, off, h1)); seg(P3(t, off, h1), P3(u, off, h2)); seg(P3(u, off, h2), P3(u, 0.42, h2));
     }
   }
+  // 蓄電池：家の中の壁ぎわに立てる箱（表に小さな緑の灯りと、通気の筋）。壁のない所なら真ん中に
+  { const cab = matte({ color: '#3B4245', vary: 0.04, freq: 4, rough: 0.55 }), face = matte({ color: '#4C5558', vary: 0.03, freq: 4, rough: 0.5 }), led = new THREE.MeshBasicMaterial({ color: '#7CF08A' });
+    for (const bt of batts) {
+      const bd = W.buildingAt(w, bt.x, bt.y), inB = (x, y) => bd && W.buildingAt(w, x, y) === bd;
+      const side = [[0, -1], [1, 0], [0, 1], [-1, 0]].find(([dx, dy]) => !inB(bt.x + dx, bt.y + dy)) || [0, 0];
+      const m = new THREE.Group(), body = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.95, 0.34), cab); body.position.y = 0.475;
+      const fr = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.8, 0.02), face); fr.position.set(0, 0.5, -0.175);
+      const lt = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.02), led); lt.position.set(0.18, 0.82, -0.19);
+      m.add(body, fr, lt); for (let k = 0; k < 4; k++) { const v2 = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.015, 0.012), cab); v2.position.set(-0.04, 0.22 + k * 0.05, -0.19); m.add(v2); }
+      const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.12, 6), cab); cable.position.set(0.2, 1.0, 0.1); m.add(cable);   // 壁へ入る線
+      m.rotation.y = Math.atan2(side[0], side[1]);   // 正面（-z）を部屋の内側へ（壁の反対）
+      const off = side[0] || side[1] ? 0.5 - 0.1 - 0.17 - 0.03 : 0; m.position.set(bt.x + 0.5 + side[0] * off, bt.z, bt.y + 0.5 + side[1] * off);
+      m.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } }); m.userData.pick = { kind: 'batt', x: bt.x, y: bt.y, z: bt.z }; g.add(m);
+    } }
   const wood = matte({ color: P.wood, vary: 0.2, freq: 4, bump: 0.4, bumpFreq: 9 }), tin = matte({ color: '#9AA09F', vary: 0.08, freq: 2, rough: 0.6 });
   const boxAt = (arr, mat, cx, cy, cz, sx, sy, sz, rx = 0) => { const gg = new THREE.BoxGeometry(sx, sz, sy); if (rx) gg.rotateX(rx); gg.translate(cx, cz, cy); arr.push(gg); };
   const mesh = (geos, mat) => { const m = new THREE.Mesh(mergeGeometries(geos.map(x => { const n2 = x.index ? x.toNonIndexed() : x; if (n2.getAttribute('uv')) n2.deleteAttribute('uv'); return n2; })), mat); m.castShadow = m.receiveShadow = true; return m; };

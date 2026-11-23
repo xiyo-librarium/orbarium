@@ -601,7 +601,9 @@ export function analyze(w, site, persons = 1) {
     groups, house, gh, ghBeds, roofComps, roofCatch, roofLost, byBuilding, tanks: tanks.length, fedTanks: fed.length, fedKeys: [...fedTanks], tankCap: fed.length * 1000, tankBase,
     beds: beds.length, gArea, bedMaxZ, risers, stoneRisers, wallArea, wallBedShare, mulch: beds.filter(b => b.b.m).length, bedSet,
     tankGrav, pondGrav, pumps, ponds: ponds.length, pondCap: ponds.length * 1000, pondArea: new Set(ponds.map(p => `${p.x},${p.y}`)).size, pondCatch, pondTop,
-    filter, pvKw: (count('pv') + (w.house?.pv || 0)) * BLOCKS.pv.kw, battKwh: (count('batt') + (w.house?.batt || 0)) * BLOCKS.batt.kwh, heap: count('heap'), coops: count('coop'), trees: count('tree'), hedge: count('hedge'),
+    filter, pvF: (() => { const lat = site?.lat ?? 6, nb = count('pv'), nh = w.house?.pv || 0; if (!nb && !nh) return null; const fh = nh ? pvFactorOf(w.house, lat) : null, fb = pvFactor(lat, 0, lat >= 0 ? 1 : -1, 0.4);   // 屋根の向き・傾きで変わる、月ごとの比
+      return Array.from({ length: 12 }, (_, m) => ((fh ? fh[m] * nh : 0) + fb[m] * nb) / (nh + nb)); })(),
+    pvKw: (count('pv') + (w.house?.pv || 0)) * BLOCKS.pv.kw, battKwh: (count('batt') + (w.house?.batt || 0)) * BLOCKS.batt.kwh, heap: count('heap'), coops: count('coop'), trees: count('tree'), hedge: count('hedge'),
     greenRoof: roofs.filter(r => r.b.t === 'roof_green').length, diag
   };
 }
@@ -753,6 +755,56 @@ export function autoFurnish(d, items = ['shower', 'toilet', 'bed', 'table']) {
   return d;
 }
 export const houseHas = (hs, t) => !!hs?.furn?.some(f => f.t === t);
+/* 太陽光パネルの並べ方：赤道を向いた屋根の面から順に、入るだけ（縦置き・横置きのうち多く乗る方）。
+   平らな屋根は赤道へ少し傾けた架台に列をあけて。乗りきらない分は赤道側の地面の架台（傾き 0.55）。
+   返す面は { dx, dy（下りの向き：x 東・y 南）, tilt（傾きの比）, n（枚数）, ground } */
+export const PV_W = 0.86, PV_L = 1.16;
+export function pvLayout(hs, lat = 6) {
+  let left = hs.pv || 0; const out = []; if (!left) return out;
+  const E = eavesDepth(hs), bx = roofBox(hs), X0 = bx.X0 - E, X1 = bx.X1 + E, Y0 = bx.Y0 - E, Y1 = bx.Y1 + E, shape = hs.roofShape || 'flat', flat = shape === 'flat';
+  const eq = lat >= 0 ? [0, 1] : [0, -1], ridgeAlongX = shape === 'gable' && hs.roofDir !== 'ew', ridge = ridgeAlongX ? (bx.Y0 + bx.Y1) / 2 : (bx.X0 + bx.X1) / 2;
+  let planes = shape === 'gable' ? (ridgeAlongX ? [[0, -1], [0, 1]] : [[-1, 0], [1, 0]]) : shape === 'mono' ? [{ n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] }[hs.roofDir || 's']] : [eq];
+  planes = planes.slice().sort((A, B) => (B[0] * eq[0] + B[1] * eq[1]) - (A[0] * eq[0] + A[1] * eq[1]));
+  const p = flat ? 0.22 : (hs.pitch || 0.3), GAP = 0.05;
+  for (const [dx, dy] of planes) {
+    if (left <= 0) break;
+    const ux = -dy, uy = dx, cs = [[X0, Y0], [X1, Y1], [X0, Y1], [X1, Y0]], us = cs.map(([a, b]) => a * ux + b * uy), ws = cs.map(([a, b]) => a * dx + b * dy), mg = flat ? 0.2 : 0.3;
+    const uLen = Math.max(...us) - Math.min(...us) - 2 * mg, wLen = Math.max(...ws) - mg - ((shape === 'gable' ? ridge * (dx + dy) : Math.min(...ws)) + 0.25);
+    const opts = [];
+    for (const [pw, pl] of [[PV_W, PV_L], [PV_L, PV_W]]) for (const rg of flat ? [0.5, 0.3, 0.12] : [GAP]) {
+      const step = flat ? pl * 0.98 + rg : pl + GAP, cols = Math.max(0, Math.floor((uLen + GAP) / (pw + GAP))), rows = Math.max(0, Math.floor((wLen + rg) / step));
+      opts.push({ pw, pl, rg, step, cols, rows, cap: cols * rows });
+    }
+    const L = opts.find(o => o.cap >= left) || opts.slice().sort((a, b) => b.cap - a.cap)[0]; if (!L.cap) continue;
+    const n = Math.min(left, L.cap); out.push({ dx, dy, tilt: p, n, L }); left -= n;
+  }
+  if (left > 0) out.push({ dx: eq[0], dy: eq[1], tilt: 0.55, n: left, ground: true });
+  return out;
+}
+/* その向きと傾きの面が受ける日射の、水平な面に対する比（月ごと 12個）。直達はその月の15日の太陽の動きから、
+   散乱（全体の35%とみる）は空の見える割合 (1+cosβ)/2 で */
+const pvCache = new Map();
+export function pvFactor(lat, dx, dy, tilt) {
+  const key = [Math.round(lat * 10), dx, dy, Math.round(tilt * 100)].join(','); if (pvCache.has(key)) return pvCache.get(key);
+  const b = Math.atan(tilt), n = [dx * Math.sin(b), dy * Math.sin(b), Math.cos(b)], phi = lat * Math.PI / 180, out = [];
+  for (let m = 0; m < 12; m++) {
+    const doy = m * 30.44 + 15, dec = 23.44 * Math.PI / 180 * Math.sin(2 * Math.PI * (284 + doy) / 365);
+    let tl = 0, hz = 0;
+    for (let h = 4; h <= 20; h += 0.25) {
+      const H = (h - 12) * 15 * Math.PI / 180, E = -Math.cos(dec) * Math.sin(H), N = Math.sin(dec) * Math.cos(phi) - Math.cos(dec) * Math.cos(H) * Math.sin(phi), U = Math.sin(dec) * Math.sin(phi) + Math.cos(dec) * Math.cos(H) * Math.cos(phi);
+      if (U <= 0) continue; const sv = [E, -N, U];   // x 東・y 南・上
+      tl += Math.max(0, n[0] * sv[0] + n[1] * sv[1] + n[2] * sv[2]); hz += U;
+    }
+    out.push(0.65 * (hz > 0 ? tl / hz : 1) + 0.35 * (1 + Math.cos(b)) / 2);
+  }
+  pvCache.set(key, out); return out;
+}
+/* 建物のパネル全体の、月ごとの平均の比（パネルの枚数で重みづけ） */
+export function pvFactorOf(hs, lat) {
+  const L = pvLayout(hs, lat), tot = L.reduce((a, q) => a + q.n, 0); if (!tot) return null;
+  const f = new Array(12).fill(0); for (const q of L) { const g = pvFactor(lat, q.dx, q.dy, q.tilt); for (let m = 0; m < 12; m++) f[m] += g[m] * q.n / tot; }
+  return f;
+}
 export const PV_PRICE = 5.5, BATT_PRICE = 15, EAVES_PRICE = 0.6;   // 太陽光1枚・蓄電池1台・庇は外周1mあたり
 /* 屋根の形と軒の出。
    形：flat＝ほぼ平ら（どの軒からも雨が落ちる）／mono＝片流れ（roofDir の方へ下がり、雨はその軒だけに集まる）／

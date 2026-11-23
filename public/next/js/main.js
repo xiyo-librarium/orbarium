@@ -82,6 +82,11 @@ async function boot() {
   const cs = Object.keys(w0.house.cells).map(k => k.split(',').map(Number)), xs = cs.map(c => c[0]), ys = cs.map(c => c[1]);
   try { const bxx = Math.min(...xs) - 1, byy = Math.max(...ys) + 3; W.prefabBeds(s, [bxx, byy], [bxx + 6, byy + 3], 'hire'); } catch { /* 置けなければなし */ }
   }
+  // 前の作りの「蓄電池の台数」は、家の中の壁ぎわの箱に置きかえる（扉の前と家具の上は避ける）
+  for (const b of W.buildings(s.world)) { let n = b.batt || 0; if (!n) continue;
+    const furn = new Set((b.furn || []).flatMap(f => W.furnCells(f).map(c => c.join(','))));
+    for (const k of Object.keys(b.cells).sort()) { if (!n) break; const [x, y] = k.split(',').map(Number); if (furn.has(k) || Object.keys(s.world.blocks).some(q => q.startsWith(`${x},${y},`))) continue; s.world.blocks[`${x},${y},${b.z}`] = { t: 'batt', at: s.turn }; n--; }
+    b.batt = n; }
   const persist = () => { if (MODE !== 'play' || G.edit) return; try { localStorage.setItem(SAVE, E.save(s)); } catch { /* 保存できない */ } };
 
   const P = PALETTES[SITE] || PALETTES.med, N = W.N;
@@ -565,7 +570,8 @@ async function boot() {
     const c = floorCell(e, FD.z); if (!c) return;
     const b = bOf(FD.id), f = b.furn[FD.i], g = { ...f, x: c.x - FD.dx, y: c.y - FD.dy };
     if (FD.to && FD.to.x === g.x && FD.to.y === g.y) return;
-    const why = W.furnProblem(b, g, FD.i); FD.to = { x: g.x, y: g.y, why };
+    const battHere = W.furnCells(g).some(([x, y]) => W.blocksOf(s.world, 'batt').some(q => q.x === x && q.y === y));
+    const why = W.furnProblem(b, g, FD.i) || (battHere ? '蓄電池がある' : null); FD.to = { x: g.x, y: g.y, why };
     showFoot(W.furnCells(g), b.z, why ? fmBad : fmOk);
     if (why) tip(why, e.clientX, e.clientY); else $('#tip').hidden = true;
   }, { capture: true });
@@ -581,6 +587,15 @@ async function boot() {
   };
   canvas.addEventListener('pointerup', fup, { capture: true }); canvas.addEventListener('pointercancel', fup, { capture: true });
 
+  /* ---------- 蓄電池を置く：家の中の床（家具と扉の前はあける） ---------- */
+  function placeBatt(p) {
+    const P0 = G.placing, b = W.buildingById(s.world, P0.id); G.placing = null; setHint();
+    if (!b || !p || p.kind !== 'building' || W.bid(b) !== p.id) { toast('置くのをやめた'); return; }
+    const c = cellOf(p.point); if (!b.cells[`${c.x},${c.y}`]) { toast('家の中の床に'); return; }
+    if ((b.furn || []).some(f => W.furnCells(f).some(([x, y]) => x === c.x && y === c.y))) { toast('家具がある'); return; }
+    if (Object.keys(s.world.blocks).some(k => k.startsWith(`${c.x},${c.y},`))) { toast('もう何か置いてある'); return; }
+    act(() => W.put(s, c.x, c.y, b.z, 'batt', 'hire'), '蓄電池を置いた');
+  }
   /* ---------- 水：タンク ---------- */
   // 雨が入らない理由を、そのタンクの場所から具体的に
   const DIRN = { n: '北', s: '南', e: '東', w: '西' };
@@ -622,6 +637,7 @@ async function boot() {
     const w = s.world; if (!p) return;
     if (p.kind === 'building') { if (p.id === 'main') { toast('母屋は消せない'); return; } act(() => W.removeBuilding(s, p.id), '建物を壊した'); return; }
     if (p.kind === 'tank') { act(() => W.remove(s, p.x, p.y, p.z), 'タンクを外した'); return; }
+    if (p.kind === 'batt') { act(() => W.remove(s, p.x, p.y, p.z), '蓄電池を外した'); return; }
     if (p.kind === 'beds') { const { x, y } = cellOf(p.point); const z = Object.keys(w.blocks).map(k => k.split(',').map(Number)).find(([bx, by, bz]) => bx === x && by === y && w.blocks[`${bx},${by},${bz}`].t === 'bed'); if (!z) return; act(() => W.remove(s, x, y, z[2]), '畑を1マス外した'); return; }
     if (p.kind === 'trees') { const t = treeNear(p.point); if (!t) return; act(() => W.cutTree(s, t.cx, t.cy), `${t.planted ? (t.kind === 'hedge' ? '生け垣' : '果樹') : W.CUT[t.kind]?.name || '木'}を切った。薪にとっておく`); return; }
     if (['heap', 'coop', 'pond', 'filter'].includes(p.kind)) {
@@ -638,7 +654,7 @@ async function boot() {
   /* ---------- 押した物の横のカード ---------- */
   const card = $('#card');
   const blocksAtCell = (w, x, y, kinds) => Object.keys(w.blocks).filter(k => { const [bx, by] = k.split(',').map(Number); return bx === x && by === y && kinds.includes(W.BLOCKS[w.blocks[k].t].kind); });
-  function selExists(sel) { const w = s.world; if (sel.kind === 'building') return !!W.buildingById(w, sel.id); if (sel.kind === 'tank') return !!w.blocks[`${sel.x},${sel.y},${sel.z}`];
+  function selExists(sel) { const w = s.world; if (sel.kind === 'building') return !!W.buildingById(w, sel.id); if (sel.kind === 'tank' || sel.kind === 'batt') return !!w.blocks[`${sel.x},${sel.y},${sel.z}`];
     if (sel.kind === 'tree') return [...W.vegObjects(w), ...plantedOf(w)].some(t => t.cx === sel.t.cx && t.cy === sel.t.cy);
     if (sel.kind === 'beds') return W.blocksOf(w, 'bed').length > 0;
     if (['heap', 'coop', 'pond', 'filter'].includes(sel.kind)) { const q = cellOf(sel.point); return blocksAtCell(w, q.x, q.y, sel.kind === 'filter' ? ['media', 'plant'] : [sel.kind]).length > 0; }
@@ -653,10 +669,18 @@ async function boot() {
     const w = s.world;
     if (p.kind === 'building') { const b = W.buildingById(w, p.id), bx = W.roofBox(b); return new THREE.Vector3((bx.X0 + bx.X1) / 2, b.z + W.HOUSE_H, (bx.Y0 + bx.Y1) / 2); }
     if (p.kind === 'tank') return new THREE.Vector3(p.x + 0.5, p.z + 1.3, p.y + 0.5);
+    if (p.kind === 'batt') return new THREE.Vector3(p.x + 0.5, p.z + 1.0, p.y + 0.5);
     if (p.kind === 'tree') return new THREE.Vector3(p.t.x, stage.at(p.t.x, p.t.y) + p.t.h * 0.7, p.t.y);
     return p.point.clone();
   }
   const seg = (act0, items, cur) => `<div class="seg">${items.map(([k, label, dis]) => `<button data-act="${act0}:${k}" class="${k === cur ? 'on' : ''}" ${dis ? 'disabled title="まだ知らない"' : ''}>${label}</button>`).join('')}</div>`;
+  // 太陽光：載っている面の向きと傾きで、平らに置くのと比べて年に何倍か（面ごとの枚数も）
+  const battsIn = (b) => W.blocksOf(s.world, 'batt').filter(q => b.cells[`${q.x},${q.y}`]);
+  function pvRow(b) {
+    if (!b.pv) return ''; const lat = site().lat ?? 6, f = W.pvFactorOf(b, lat), avg = f.reduce((a, x) => a + x, 0) / 12, L = W.pvLayout(b, lat);
+    const dirN = (q) => q.ground ? '地面' : (b.roofShape || 'flat') === 'flat' ? '平屋根' : { '0,-1': '北', '0,1': '南', '-1,0': '西', '1,0': '東' }[`${q.dx},${q.dy}`] + 'の面';
+    return `<div class="row" title="平らに置くのと比べた、年の発電"><span></span><div class="pvf"><b class="${avg >= 1.02 ? 'up' : avg < 0.92 ? 'down' : ''}">×${avg.toFixed(2)}</b><span>${L.map(q => `${dirN(q)} ${q.n}`).join('・')}</span></div></div>`;
+  }
   function buildingCard(b) {
     const w = s.world, id = W.bid(b), n = Object.keys(b.cells).length, bx = W.roofBox(b);
     const use = id === 'main' ? 'live' : (b.use || 'store'), U = W.USES[use];
@@ -678,7 +702,7 @@ async function boot() {
     const roofRow = R.flat ? `<div class="row"><span>屋根</span><div>${R.name}・平ら</div></div>` : shapeRow + (sh === 'flat' ? '' : pitchRow) + eavesRow;
     const furnOf = (g) => b.furn?.find(f => W.FURN[f.t].group === g)?.t;
     const step = (k, label, val) => `<div class="row"><span>${label}</span><div class="step"><button data-act="${k}:-1">−</button><b>${val}</b><button data-act="${k}:1">＋</button></div></div>`;
-    const power = id !== 'main' ? '' : (knows('offgrid') ? step('pv', '太陽光', `${b.pv || 0}枚（${((b.pv || 0) * W.BLOCKS.pv.kw).toFixed(1)}kW）`) + step('batt', '蓄電池', `${b.batt || 0}台（${(b.batt || 0) * W.BLOCKS.batt.kwh}kWh）`) : '')
+    const power = id !== 'main' ? '' : (knows('offgrid') ? step('pv', '太陽光', `${b.pv || 0}枚（${((b.pv || 0) * W.BLOCKS.pv.kw).toFixed(1)}kW）`) + pvRow(b) + `<div class="row"><span>蓄電池</span><div class="step"><b>${battsIn(b).length}台（${battsIn(b).length * W.BLOCKS.batt.kwh}kWh）</b><button class="wide" data-act="placebatt">＋ 置く</button></div></div>` : '')
       + (knows('deep') ? step('deep', '基礎', `${(b.eq?.depth || 0.3).toFixed(1)}m`) : '');
     const fixtures = use !== 'live' ? '' : `
       <div class="row"><span>トイレ</span>${seg('furn:toilet', [['toilet', '水洗'], ['ctoilet', 'コンポスト', !knows(W.FURN.ctoilet.learn)]], furnOf('toilet'))}</div>
@@ -698,7 +722,10 @@ async function boot() {
     const p = G.sel, w = s.world; if (!p) return;
     let html = '';
     if (p.kind === 'building') html = buildingCard(bOf(p.id));
-    else if (p.kind === 'tank') {
+    else if (p.kind === 'batt') {
+      html = `<h3>蓄電池<button class="x" data-act="close" aria-label="閉じる">×</button></h3><p class="sub">${W.BLOCKS.batt.kwh}kWh · 寿命 約${W.BLOCKS.batt.life}年</p>
+        <div class="flow">昼の太陽の電気をためて、夜と停電のときに使う。</div><div class="row"><span></span><div><button class="wide" data-act="rmbatt">外す</button></div></div>`;
+    } else if (p.kind === 'tank') {
       const A = W.analyze(w, site(), s.persons.length), fed = A.fedKeys.includes(`${p.x},${p.y},${p.z}`);
       html = `<h3>雨水タンク<button class="x" data-act="close" aria-label="閉じる">×</button></h3><p class="sub">1m³（1,000L）</p>
         ${fed ? `<div class="flow">屋根の雨が入る（水の窓が青い）。敷地のタンク全部で、屋根から年 <b>${Math.round(A.roofCatch * rainY / 1000)}m³</b> 集まる。</div>` : `<div class="flow warn">雨が入らない（水の窓が空）。${tankWhy(p, A)}</div>`}
@@ -750,6 +777,9 @@ async function boot() {
     const [k, a, c] = bt.dataset.act.split(':'), w = s.world, p = G.sel;
     if (k === 'inside') { const on = !stage.cut, id = p.id; setCut(on); if (on) { const b0 = W.buildingById(w, id), bx = W.roofBox(b0); select(null); v.flyTo(new THREE.Vector3((bx.X0 + bx.X1) / 2, b0.z, (bx.Y0 + bx.Y1) / 2), Math.max(9, (bx.X1 - bx.X0 + bx.Y1 - bx.Y0) * 1.1), 52, 700); } else renderCard(); return; }
     if (k === 'close') { select(null); return; }
+    if (k === 'placebatt') { const id = p.id, b0 = W.buildingById(w, id), bx = W.roofBox(b0); G.placing = { t: 'batt', id }; select(null); setCut(true);
+      v.flyTo(new THREE.Vector3((bx.X0 + bx.X1) / 2, b0.z, (bx.Y0 + bx.Y1) / 2), Math.max(9, (bx.X1 - bx.X0 + bx.Y1 - bx.Y0) * 1.1), 52, 700); $('#hint').textContent = '蓄電池を置く床を押す（壁ぎわに立つ）'; return; }
+    if (k === 'rmbatt' && p.kind === 'batt') { act(() => W.remove(s, p.x, p.y, p.z), '蓄電池を外した'); select(null); return; }
     if (k === 'rno') { $('#draftNo').click(); return; }
     if (k === 'ryes') { $('#draftYes').click(); return; }
     if (k === 'cut' && p && p.kind === 'tree') { const t = p.t; act(() => W.cutTree(s, t.cx, t.cy), '切った。薪とチップにとっておく'); return; }
@@ -815,6 +845,7 @@ async function boot() {
     const n = ndcOf(e), p = stage.pick(n);
     if (Q.has('debug')) console.log('tap', G.mode, G.tool, p && p.kind, p && p.id, p && p.point && [p.point.x.toFixed(2), p.point.y.toFixed(2), p.point.z.toFixed(2)].join(','));
     if (G.mode === 'map') { const g = stage.groundAt(n) || p?.point; if (g) flyNear(g); return; }
+    if (G.placing) { placeBatt(p); return; }
     if (G.tool === 'house') { if (p && p.kind === 'draft') draftWallTap(p); else if (p && p.kind === 'building') wallTap(p); else { closePick(); selectFurn(null); if (!G.draft) toast('地面をなぞって床を描く'); } return; }
     if (p && p.kind === 'draft') { toast('下書き：［建てる］か［やめる］を押す'); return; }
     if (!G.tool && p && p.kind === 'building') { wallTap(p); return; }
