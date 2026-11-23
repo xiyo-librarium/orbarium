@@ -169,6 +169,42 @@ export function buildStone(s, x, y) {
   const price = a * STONE_PRICE; if (price > s.cash + 1e-9) return 'お金が足りない';
   s.cash -= price; spend(w, price, 0); w.stone = w.stone || {}; w.stone[k] = 1; return null;
 }
+/* 雨樋：屋根（家・小屋・堆肥小屋）の軒にとい、角にたてどい。ないと、軒から落ちる雨の一部しかタンクに入らない */
+export const GUTTER_PRICE = 0.35, DOWNPIPE_PRICE = 0.8;
+export function housePerimeter(hs) { return hs ? houseOuterEdges(hs).length : 0; }
+/* 屋根のまとまり（小屋の屋根ブロック、堆肥小屋の区画）。そのマスを含むものを返す */
+export function roofStructAt(w, x, y) {
+  let seed = null;
+  for (const k in w.blocks) { const [bx, by, bz] = k.split(',').map(Number); if (bx !== x || by !== y) continue; const kind = BLOCKS[w.blocks[k].t].kind; if (kind === 'roof' || kind === 'heap') { seed = { x: bx, y: by, z: bz, kind }; break; } }
+  if (!seed) return null;
+  const same = (b) => b && BLOCKS[b.t].kind === seed.kind, out = [], seen = new Set([K(seed.x, seed.y, seed.z)]), st = [seed];
+  while (st.length) {
+    const q = st.pop(); out.push(q);
+    const nb = seed.kind === 'heap' ? [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]] : [].concat(...[-1, 0, 1].map(dx => [].concat(...[-1, 0, 1].map(dy => [-1, 0, 1].map(dz => [dx, dy, dz])))));
+    for (const [dx, dy, dz] of nb) { const k = K(q.x + dx, q.y + dy, q.z + dz); if (!seen.has(k) && same(w.blocks[k])) { seen.add(k); st.push({ x: q.x + dx, y: q.y + dy, z: q.z + dz, kind: seed.kind }); } }
+  }
+  const cells = new Set(out.map(b => ck(b.x, b.y)));
+  let per = 0; for (const b of out) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (!cells.has(ck(b.x + dx, b.y + dy))) per++;
+  return { kind: seed.kind, blocks: out, perimeter: per, gut: out.every(b => w.blocks[K(b.x, b.y, b.z)].gut) };
+}
+export function gutterPrice(per) { return per * GUTTER_PRICE + DOWNPIPE_PRICE; }
+export function buildGutter(s, x, y) {
+  const w = s.world, r = roofStructAt(w, x, y); if (!r) return '屋根を押す（小屋か堆肥小屋。家は［家］の素材から）';
+  if (r.gut) return 'もう雨樋がある';
+  const price = gutterPrice(r.perimeter); if (price > s.cash + 1e-9) return 'お金が足りない';
+  s.cash -= price; spend(w, price, 0); for (const b of r.blocks) w.blocks[K(b.x, b.y, b.z)].gut = 1; return null;
+}
+/* 動かせる設備（タンク・ポンプ・太陽光・ニワトリ小屋・沈殿槽）。手間賃だけ */
+export const MOVABLE = ['tank', 'pump', 'pv', 'coop', 'settle'], MOVE_PRICE = 0.3;
+export function moveBlock(s, from, to) {
+  const w = s.world, kf = K(...from), b = w.blocks[kf]; if (!b) return '何もない';
+  if (!MOVABLE.includes(BLOCKS[b.t].kind)) return 'これは動かせない';
+  if (at(w, from[0], from[1], from[2] + 1)) return '上に何かある（先に上のものを動かす）';
+  if (MOVE_PRICE > s.cash + 1e-9) return 'お金が足りない';
+  delete w.blocks[kf];
+  const why = canPut(w, to[0], to[1], to[2], b.t); if (why) { w.blocks[kf] = b; return why; }
+  w.blocks[K(...to)] = b; s.cash -= MOVE_PRICE; spend(w, MOVE_PRICE, 0); return null;
+}
 const treeWhy = (w, x, y) => { const o = vegAt(w, x, y); return o ? (o.kind === 'shrub' ? 'やぶがある（先に［木を切る］で刈る）' : '木がある（先に［木を切る］）') : null; };
 export function put(s, x, y, z, t, mode, extra = {}) {
   const w = s.world, d = BLOCKS[t];
@@ -470,26 +506,38 @@ export function analyze(w, site, persons = 1) {
     while (st.length) { const q = st.pop(); c.push(q); for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) { const k = K(q.x + dx, q.y + dy, q.z + dz); if (roofSet.has(k) && !seenR.has(k)) { seenR.add(k); st.push(roofSet.get(k)); } } }
     comp.push(c);
   }
-  const fedTanks = new Set(); let roofCatch = 0, roofLost = 0;
-  if (w.house) {
-    const hs = w.house, hc = Object.keys(hs.cells).map(k => k.split(',').map(Number));
-    const area = hc.length * ROOFS[hs.roof].catch;
-    const my = tanks.filter(t => t.z < hs.z + 3 && hc.some(([x, y]) => Math.max(Math.abs(x - t.x), Math.abs(y - t.y)) <= 1));
-    my.forEach(t => fedTanks.add(K(t.x, t.y, t.z)));
-    if (my.length) roofCatch += area; else roofLost += area;
-  }
-  const roofComps = comp.map(c => {
+  // 屋根のまとまりごとに：軒から1m以内で入口が軒より低いタンクに雨が入る。雨樋があれば屋根全部の雨が入り、
+  // そのタンクにつないだタンク（となり・上下）にも回る。雨樋がなければ、軒から落ちる雨（タンク1つあたり屋根1.5m²ぶん）だけ
+  const fedTanks = new Set(); let roofCatch = 0, roofLost = 0, noGutter = 0;
+  const tankAt = new Map(tanks.map(t => [K(t.x, t.y, t.z), t]));
+  const structs = [];
+  if (w.house) { const hs = w.house, hc = Object.keys(hs.cells).map(k => k.split(',').map(Number)); structs.push({ cells: hc, eave: hs.z + HOUSE_H, coef: ROOFS[hs.roof].catch, area: hc.length * ROOFS[hs.roof].catch, gut: !!hs.gutter }); }
+  for (const c of comp) {
     const exposed = c.filter(r => !at(w, r.x, r.y, r.z + 1) || BLOCKS[at(w, r.x, r.y, r.z + 1).t].kind === 'pv');
-    const area = exposed.reduce((a, r) => a + BLOCKS[r.b.t].catch, 0);
-    const minZ = Math.min(...c.map(r => r.z));
-    const my = tanks.filter(t => t.z < minZ && c.some(r => Math.max(Math.abs(r.x - t.x), Math.abs(r.y - t.y)) <= 1));
-    my.forEach(t => fedTanks.add(K(t.x, t.y, t.z)));
-    if (my.length) roofCatch += area; else roofLost += area;
-    return { n: c.length, area, tanks: my.length };
-  });
+    structs.push({ cells: c.map(r => [r.x, r.y]), eave: Math.min(...c.map(r => r.z)), coef: 0.85, area: exposed.reduce((a, r) => a + BLOCKS[r.b.t].catch, 0), gut: c.every(r => r.b.gut), comp: c });
+  }
+  { const heaps = blocksOf(w, 'heap'), seenH = new Set();
+    for (const hp of heaps) { const k0 = K(hp.x, hp.y, hp.z); if (seenH.has(k0)) continue; const c = [], st = [hp]; seenH.add(k0);
+      while (st.length) { const q = st.pop(); c.push(q); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const k = K(q.x + dx, q.y + dy, q.z), o = w.blocks[k]; if (o && BLOCKS[o.t].kind === 'heap' && !seenH.has(k)) { seenH.add(k); st.push({ x: q.x + dx, y: q.y + dy, z: q.z, b: o }); } } }
+      structs.push({ cells: c.map(r => [r.x, r.y]), eave: c[0].z + 2.2, coef: 0.85, area: c.length * 1.1 * 0.85, gut: c.every(r => r.b.gut), heap: true }); } }
+  const roofComps = [];
+  for (const st0 of structs) {
+    const direct = tanks.filter(t => t.z < st0.eave && st0.cells.some(([x, y]) => Math.max(Math.abs(x - t.x), Math.abs(y - t.y)) <= 1));
+    let got = 0;
+    if (st0.gut && direct.length) {
+      const q = [...direct], seen = new Set(direct.map(t => K(t.x, t.y, t.z)));
+      // 水は下へしか流れない：となりのタンクは同じ高さか低い所、上下に積んだものは下のタンクへ
+      const nbs = [[0, 0, -1]]; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (let dz = 0; dz >= -3; dz--) nbs.push([dx, dy, dz]);
+      while (q.length) { const t = q.pop(); for (const [dx, dy, dz] of nbs) { const k = K(t.x + dx, t.y + dy, t.z + dz); if (tankAt.has(k) && !seen.has(k)) { seen.add(k); q.push(tankAt.get(k)); } } }
+      seen.forEach(k => fedTanks.add(k)); got = st0.area;
+    } else if (direct.length) { direct.forEach(t => fedTanks.add(K(t.x, t.y, t.z))); got = Math.min(st0.area, direct.length * 1.5 * st0.coef); noGutter += st0.area - got; }
+    roofCatch += got; if (!direct.length) roofLost += st0.area;
+    if (st0.comp) roofComps.push({ n: st0.comp.length, area: st0.area, tanks: direct.length });
+  }
   if (roofLost > 0.5) diag.push({ lv: 'warn', text: `屋根${Math.round(roofLost)}m²ぶんの雨がタンクに入っていない（タンクは屋根の軒から1m以内に。入口が軒より低ければ、家より高い所でもよい）` });
+  if (noGutter > 0.5) diag.push({ lv: 'warn', text: `雨樋がないので、屋根${Math.round(noGutter / 0.85)}m²ぶんの雨が軒から地面に落ちている（［水］の［雨樋］、家は素材の「雨樋」）` });
   const unfed = tanks.filter(t => !fedTanks.has(K(t.x, t.y, t.z)));
-  if (unfed.length) diag.push({ lv: 'warn', text: `雨の入らないタンクが${unfed.length}つある（屋根の軒から1m以内へ）` });
+  if (unfed.length) diag.push({ lv: 'warn', text: `雨の入らないタンクが${unfed.length}つある（屋根の軒から1m以内か、雨樋のある屋根のタンクのとなり・上へ）` });
   const fed = tanks.filter(t => fedTanks.has(K(t.x, t.y, t.z)));
   const tankBase = fed.length ? Math.min(...fed.map(t => t.z)) : null;
   // 畑
@@ -603,8 +651,18 @@ export const FURN = {
   shower: { name: 'シャワー', group: 'shower', note: '1回40Lほど。使った水は排水になる。', d: 1, cost: 0, color: '#CFE3EE' },
   shower2: { name: '節水シャワー', group: 'shower', note: '浴び心地はそのままで、水は半分くらい。', d: 1, cost: 8, color: '#A9D0E6', learn: 'saving' },
   bed: { name: 'ベッド', group: 'bed', note: '1人用。', d: 2, cost: 0, color: '#F4F1E8' },
-  table: { name: 'テーブルと椅子', group: 'table', note: '食べる・書く・人を呼ぶ。', d: 2, cost: 0, color: '#B98B58' }
+  table: { name: 'テーブルと椅子', group: 'table', note: '食べる・書く・人を呼ぶ。', d: 2, cost: 0, color: '#B98B58' },
+  stove: { name: '薪のかまど', group: 'stove', note: '土とレンガのかまど。煙突で煙を屋根の上へ。切った木で料理と暖房。', d: 1, cost: 0, color: '#B5654A' }
 };
+/* かまどを置く：外壁ぞいの空いた床（扉の前は避ける）。置けなければ理由を返す */
+export function placeStove(d) {
+  if (d.furn.some(f => f.t === 'stove')) return null;
+  const outer = new Set(); for (const o of houseOuterEdges(d)) { const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number); outer.add(t === 'h' ? (o.dir === 'n' ? ck(ex, ey) : ck(ex, ey - 1)) : (o.dir === 'w' ? ck(ex, ey) : ck(ex - 1, ey))); }
+  const cells = Object.keys(d.cells).sort((a, b) => (outer.has(b) ? 1 : 0) - (outer.has(a) ? 1 : 0));
+  for (const k of cells) { const [x, y] = k.split(',').map(Number); for (let r = 0; r < 4; r++) { const f = { t: 'stove', x, y, r }; if (!furnProblem(d, f)) { d.furn.push(f); return null; } } }
+  return 'かまどを置く床が空いていない（床を広げるか、家具を動かす）';
+}
+export function removeStove(d) { d.furn = d.furn.filter(f => f.t !== 'stove'); }
 /* 家具の向き r：0＝頭（奥）が北で南へのびる、1＝頭が西で東へ、2＝頭が南で北へ、3＝頭が東で西へ。(x,y) は頭のマス */
 export const FDIR = [[0, 1], [1, 0], [0, -1], [-1, 0]];
 export const furnCells = (f) => { if (FURN[f.t].d === 1) return [[f.x, f.y]]; const [dx, dy] = FDIR[(f.r || 0) % 4]; return [[f.x, f.y], [f.x + dx, f.y + dy]]; };
@@ -769,6 +827,7 @@ export function estimate(w, cur, d) {
   add('屋根の太陽光パネル', Math.max(0, d.pv - cur.pv), '枚', PV_PRICE, false);
   add('蓄電池', Math.max(0, d.batt - cur.batt), '台', BATT_PRICE, false);
   if (d.stove && !cur.stove) add('薪のかまど（煙突つき）', 1, 'つ', STOVE_PRICE, true);
+  if (d.gutter) { const p0 = cur.gutter ? housePerimeter(cur) : 0, p1 = housePerimeter(d); if (p1 > p0) add('雨樋（軒どい）', p1 - p0, 'm', GUTTER_PRICE, true); if (!cur.gutter) add('雨樋（たてどい）', 1, 'つ', DOWNPIPE_PRICE, true); }
   for (const f of d.furn) if (FURN[f.t].cost && !houseHas(cur, f.t)) add(`${FURN[f.t].name}に替える`, 1, '', FURN[f.t].cost, false);
   if (d.eq.depth > cur.eq.depth) add('基礎を深く', Math.round((d.eq.depth - cur.eq.depth) / 0.3), '段', Math.max(1, cellsD.length * 0.6), true);
   const total = lines.reduce((a, l) => a + l.cost, 0), local = lines.reduce((a, l) => a + l.local, 0);

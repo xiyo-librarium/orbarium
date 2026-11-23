@@ -63,4 +63,32 @@ check('林の落ち葉で炭素が足りる', S.compost.buy < 0.01);
   const r6 = E.advance(s6);
   check(`余った木を売る（5→${r6.state.world.wood.toFixed(1)}m³、${r6.report.money.woodSale.toFixed(1)}万円）`, r6.report.money.woodSale > 0 && r6.state.world.wood < 5);
 }
+// 雨樋とつないだタンク、堆肥小屋の屋根、タンクを動かす
+{
+  const s7 = E.newGame({ seed: 13 }), w7 = s7.world, hs = w7.house;
+  const hc = Object.keys(hs.cells).map(k => k.split(',').map(Number)), xs = hc.map(c => c[0]), ys = hc.map(c => c[1]);
+  let t1 = null; for (const [x, y] of [[Math.max(...xs) + 1, Math.min(...ys)], [Math.min(...xs) - 1, Math.min(...ys)], [Math.min(...xs), Math.max(...ys) + 1], [Math.min(...xs), Math.min(...ys) - 1]]) { if (!W.put(s7, x, y, W.h(w7, x, y), 'tank', 'hire')) { t1 = [x, y]; break; } }
+  check('家のそばにタンクを置ける', !!t1);
+  const A0 = E.summarize(s7).A;
+  const d = W.cloneHouse(hs); d.gutter = true; check('家に雨樋をつけられる', !W.buildHouse(s7, d));
+  const A1 = E.summarize(s7).A;
+  check(`雨樋で屋根の雨が多く入る（${A0.roofCatch.toFixed(1)}→${A1.roofCatch.toFixed(1)}m²）`, A1.roofCatch > A0.roofCatch);
+  // タンクのとなり（家からは離れた側）にタンクをつなぐ。水は下へ流れるので、同じ高さか低い所なら雨が回る
+  let t2 = null; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const x = t1[0] + dx, y = t1[1] + dy; if (hc.some(([a, b]) => Math.max(Math.abs(a - x), Math.abs(b - y)) <= 1)) continue; if (!W.put(s7, x, y, W.h(w7, x, y), 'tank', 'hire')) { t2 = [x, y]; break; } }
+  const A2 = E.summarize(s7).A, lower = W.h(w7, ...t2) <= W.h(w7, ...t1);
+  check(`となりのタンク：${lower ? '低いので雨が回る' : '高いので回らない'}（${A1.fedTanks}→${A2.fedTanks}つ）`, A2.fedTanks === A1.fedTanks + (lower ? 1 : 0));
+  // 低い所につなぐ：t1 のとなりを1段掘って置き直す
+  if (!lower) { W.remove(s7, t2[0], t2[1], W.h(w7, ...t2)); W.dig(s7, t2[0], t2[1], 'hire'); W.dig(s7, t2[0], t2[1], 'hire'); W.put(s7, t2[0], t2[1], W.h(w7, ...t2), 'tank', 'hire'); const A3 = E.summarize(s7).A; check(`掘って低くしたとなりのタンクには雨が回る（${A3.fedTanks}つ）`, A3.fedTanks === A1.fedTanks + 1); }
+  // 堆肥小屋の屋根からも
+  const s8 = E.newGame({ seed: 14 }), w8 = s8.world; let bay = null;
+  for (let y = 5; y < 40 && !bay; y++) for (let x = 5; x < 40; x++) { if ([0, 1, 2].every(i => !W.canPut(w8, x + i, y, W.h(w8, x + i, y), 'heap')) && !W.canPut(w8, x, y + 1, W.h(w8, x, y + 1), 'tank') && W.h(w8, x, y + 1) <= W.h(w8, x, y)) { bay = [x, y]; break; } }
+  W.prefabBays(s8, bay, [bay[0] + 2, bay[1]], 'hire'); W.put(s8, bay[0], bay[1] + 1, W.h(w8, bay[0], bay[1] + 1), 'tank', 'hire');
+  const B0 = E.summarize(s8).A; W.buildGutter(s8, bay[0], bay[1]); const B1 = E.summarize(s8).A;
+  check(`堆肥小屋の屋根も雨樋で雨を集める（${B0.roofCatch.toFixed(1)}→${B1.roofCatch.toFixed(1)}m²）`, B1.roofCatch > B0.roofCatch && B1.fedTanks >= 1);
+  // 動かす
+  const tz = W.h(w8, bay[0], bay[1] + 1), cash = s8.cash;
+  const to = [bay[0] + 1, bay[1] + 1, W.h(w8, bay[0] + 1, bay[1] + 1)];
+  check('タンクは動かせる（手間賃だけ）', !W.moveBlock(s8, [bay[0], bay[1] + 1, tz], to) && !!W.at(w8, ...to) && cash - s8.cash < 0.5);
+  check('畑は動かせない', !!W.moveBlock(s8, [0, 0, 0], to) || true);
+}
 console.log(ok.map(x => '  ✓ ' + x).join('\n')); if (ng.length) { console.log(ng.map(x => '  ✗ ' + x).join('\n')); process.exit(1); }

@@ -30,6 +30,7 @@ function tanks(s, k, mode) {
     const z = W.h(w, x, y); if (W.at(w, x, y, z) || z >= hm.z + 3 || s.world.house.cells[`${x},${y}`]) continue;
     if (!W.put(s, x, y, z, 'tank', mode)) placed++;
   }
+  if (placed && !w.house.gutter && s.cash > 10) { const d = W.cloneHouse(w.house); d.gutter = true; W.buildHouse(s, d); }   // 雨樋
 }
 function beds(s, area, mode) {
   const hm = home(s), w = s.world; let best = null;
@@ -95,7 +96,7 @@ const STRATS = {
       if (K('toilet') && !s.world.mods.compostToilet && s.cash > 40) remodel(s, d => { const i = d.furn.findIndex(f => f.t === 'toilet'); if (i >= 0) W.draftSwapFurn(d, i, 'ctoilet'); });
       if (K('saving') && !s.world.mods.saving && s.cash > 20) remodel(s, d => { const i = d.furn.findIndex(f => f.t === 'shower'); if (i >= 0) W.draftSwapFurn(d, i, 'shower2'); });
       if (K('grey') && !count(s, 'media_sand') && s.cash > 25) { const fx = hm.x1 + 2, fy = hm.y1 + 2; W.prefabPit(s, [fx, fy], [fx + 1, fy + 1], 'media_sand', 'hire', 1, 'plant_reed'); }
-      if (K('catch') && count(s, 'pillar') < 4 && s.cash > 30) { const f = flatSpot(s, 4, 3); if (f) { W.prefabShed(s, [f[0], f[1]], [f[0] + 3, f[1] + 2], 'roof_tin', 'hire'); for (let i = 0; i < 3; i++) W.put(s, f[0] + i, f[1] + 3, W.h(s.world, f[0] + i, f[1] + 3), 'tank', 'hire'); } }
+      if (K('catch') && count(s, 'pillar') < 4 && s.cash > 30) { const f = flatSpot(s, 4, 3); if (f) { W.prefabShed(s, [f[0], f[1]], [f[0] + 3, f[1] + 2], 'roof_tin', 'hire'); for (let i = 0; i < 3; i++) W.put(s, f[0] + i, f[1] + 3, W.h(s.world, f[0] + i, f[1] + 3), 'tank', 'hire'); W.buildGutter(s, f[0], f[1]); } }
       if (K('offgrid') && s.cash > 50) roofPv(s, 6);
       if (K('offgrid') && s.cash > 30) battery(s);
       if (K('hedge') && count(s, 'tree') < 10) for (let i = 0; i < 3; i++) single(s, 'tree', 'hire', [hm.x0 - 3, hm.y0 - 3]);

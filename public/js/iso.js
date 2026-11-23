@@ -326,6 +326,22 @@ export function createView(canvas, world, opt = {}) {
     }
     const hs = v.house || world.house, base = v.base;
     if (hs) drawHouse(list, hs, base, x0, x1, y0, y1, floorLv);
+    // 小屋・堆肥小屋の雨樋：まとまりの外の辺に、とい。そばのタンクへたてどい
+    if (!v.top) {
+      const inV = (x, y) => x >= x0 - 1 && x <= x1 + 1 && y >= y0 - 1 && y <= y1 + 1, gutCells = new Map();
+      for (const k in world.blocks) {
+        const b = world.blocks[k]; if (!b.gut) continue; const kind = BLOCKS[b.t].kind; if (kind !== 'roof' && kind !== 'heap') continue;
+        const [x, y, z] = k.split(',').map(Number); if (!inV(x, y)) continue;
+        const zz = kind === 'heap' ? z + 2.17 : z + 0.0, off = kind === 'heap' ? 0.08 : 0.02;
+        const same = (xx, yy) => { for (const k2 in world.blocks) { const [bx, by, bz] = k2.split(',').map(Number); if (bx === xx && by === yy && Math.abs(bz - z) <= 1 && BLOCKS[world.blocks[k2].t].kind === kind) return true; } return false; };
+        if (!same(x, y - 1)) rbox(list, x - off, y - off - 0.1, x + 1 + off, y - off, zz, 0.1, '#A9B2B7', { type: 'block', x, y, z, b }, 1);
+        if (!same(x, y + 1)) rbox(list, x - off, y + 1 + off, x + 1 + off, y + 1 + off + 0.1, zz, 0.1, '#A9B2B7', { type: 'block', x, y, z, b }, 1);
+        if (!same(x - 1, y)) rbox(list, x - off - 0.1, y - off, x - off, y + 1 + off, zz, 0.1, '#A9B2B7', { type: 'block', x, y, z, b }, 1);
+        if (!same(x + 1, y)) rbox(list, x + 1 + off, y - off, x + 1 + off + 0.1, y + 1 + off, zz, 0.1, '#A9B2B7', { type: 'block', x, y, z, b }, 1);
+        const key = kind + ':' + zz; if (!gutCells.has(key)) gutCells.set(key, { z: zz + 0.05, cells: [] }); gutCells.get(key).cells.push([x, y]);
+      }
+      for (const { z, cells } of gutCells.values()) downpipes(list, cells, z, (x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1);
+    }
     if (v.rect) {
       const { xa, xb, ya, yb, ok } = v.rect, z = hs ? hs.z : 0;
       for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) rbox(list, x + 0.04, y + 0.04, x + 0.96, y + 0.96, Math.max(z, h(world, x, y)) + 0.02, 0.06, v.rect.mode === 'remove' ? '#D9534F' : ok(x, y) ? '#4C7BD9' : '#B9BDB8', { type: 'ghost' }, 0.55);
@@ -591,6 +607,37 @@ export function createView(canvas, world, opt = {}) {
         rbox(list, ...rect, z + HOUSE_H + 0.06, 0.14, R.color, { type: 'roof', x: o.x, y: o.y, decor: roofDecor(hs.roof, o.x, o.y) }, 1);
       }
       for (let i = 0; i < Math.min(hs.pv || 0, cells.length); i++) { const [x, y] = cells[i]; rbox(list, x + 0.08, y + 0.08, x + 0.92, y + 0.92, z + HOUSE_H + 0.2, 0.06, '#30476B', { type: 'roof', x, y }, 1); }
+      // かまどの煙突：屋根から出る鉄の煙突と笠。木がとってあれば、うすい煙
+      const sf = (hs.furn || []).find(f => f.t === 'stove');
+      if (sf) {
+        const [px, py] = flueXY(sf), zt = z + HOUSE_H + 0.2, d0 = project(px, py, zt, geom())[2] + 0.6;
+        cylinder(list, px, py, zt, 0.07, 0.95, '#4A4A4A', { type: 'roof', x: sf.x, y: sf.y }, d0);
+        cylinder(list, px, py, zt + 0.95, 0.13, 0.06, '#3C3C3C', { type: 'roof', x: sf.x, y: sf.y }, d0 + 0.001);
+        if ((world.wood || 0) > 0.05) list.push({ depth: d0 + 0.002, draw: (cx, pc) => { if (pc) return; const g = geom(); [[0.05, 1.25, 0.13], [0.16, 1.55, 0.18], [0.3, 1.9, 0.24]].forEach(([dx, dz, r], i) => { const c = project(px + dx, py - dx * 0.5, zt + dz, g); cx.globalAlpha = 0.28 - i * 0.07; cx.fillStyle = '#F4F2EE'; cx.beginPath(); cx.arc(c[0], c[1], r * g.tw * 0.72, 0, 7); cx.fill(); }); cx.globalAlpha = 1; } });
+      }
+      if (hs.gutter) {   // 雨樋：軒先にとい
+        const E3 = (hs.eaves ? 0.5 : 0.16) + 0.02, X = E3 + 0.1;
+        for (const o of houseOuterEdges(hs)) {
+          if (!inView(o.x, o.y)) continue;
+          const [, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number);
+          const rr = o.dir === 'n' ? [ex - X, ey - E3 - 0.1, ex + 1 + X, ey - E3] : o.dir === 's' ? [ex - X, ey + E3, ex + 1 + X, ey + E3 + 0.1] : o.dir === 'w' ? [ex - E3 - 0.1, ey - X, ex - E3, ey + 1 + X] : [ex + E3, ey - X, ex + E3 + 0.1, ey + 1 + X];
+          rbox(list, ...rr, z + HOUSE_H + 0.03, 0.1, '#A9B2B7', { type: 'roof', x: o.x, y: o.y }, 1);
+        }
+      }
+    }
+    if (hs.gutter && !v.top) downpipes(list, Object.keys(hs.cells).map(k => k.split(',').map(Number)), z + HOUSE_H + 0.06, inView);
+  }
+  function flueXY(f) { const [fx, fy] = FDIR[(f.r || 0) % 4], sx = -fy, sy = fx, ox = f.x + 0.5 - fx * 0.5, oy = f.y + 0.5 - fy * 0.5; return [ox + fx * 0.2 + sx * -0.25, oy + fy * 0.2 + sy * -0.25]; }
+  /* たてどい：雨樋のある屋根の軒から、そばのタンクの上へ */
+  function downpipes(list, cells, eaveZ, inView) {
+    const cs = new Set(cells.map(([x, y]) => x + ',' + y)), g = geom();
+    for (const k in world.blocks) {
+      const b = world.blocks[k]; if (BLOCKS[b.t].kind !== 'tank') continue;
+      const [tx, ty, tz] = k.split(',').map(Number); if (!inView(tx, ty) || tz >= eaveZ - 1 || at(world, tx, ty, tz + 1)) continue;
+      let dir = null; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) if (cs.has(`${tx + dx},${ty + dy}`)) { dir = [dx, dy]; break; }
+      if (!dir) continue;
+      const px = tx + 0.5 + dir[0] * 0.36, py = ty + 0.5 + dir[1] * 0.36, z0 = tz + 1;
+      cylinder(list, px, py, z0, 0.045, eaveZ - z0, '#A9B2B7', { type: 'block', x: tx, y: ty, z: tz, b }, project(px, py, z0, g)[2] + 0.3);
     }
   }
   const faceAt = (p, fx, fy) => [p[0][0] + (p[1][0] - p[0][0]) * fx + (p[3][0] - p[0][0]) * fy, p[0][1] + (p[1][1] - p[0][1]) * fx + (p[3][1] - p[0][1]) * fy];   // 面の中の位置（側面なら fx：横、fy：下→上。上面なら fx：x、fy：y）
@@ -854,6 +901,14 @@ export function createView(canvas, world, opt = {}) {
       R(0.04, 0.96, -0.47, -0.43, b + 0.06, 1.9, '#D9ECF5', { al: Math.min(alpha, 0.32) });
       const towel = f.t === 'shower2' ? '#9FC7A8' : '#E8A79C';   // ガラスの上に掛けたタオル（外・上・内の3枚）
       R(0.3, 0.62, -0.5, -0.47, b + 1.66, 0.3, towel); R(0.3, 0.62, -0.5, -0.4, b + 1.96, 0.03, towel); R(0.3, 0.62, -0.43, -0.4, b + 1.7, 0.26, towel);
+    } else if (f.t === 'stove') {   // 薪のかまど：レンガと土の台、鉄の天板に鍋とやかん、焚き口、天井へ抜ける煙突
+      R(0.12, 0.9, -0.42, 0.42, b, 0.76, '#B5654A', { decor: (cx, pt) => { for (const k of [0.33, 0.66]) ln(cx, pt(0, k), pt(1, k), 'rgba(80,35,20,.25)'); } });
+      R(0.1, 0.92, -0.44, 0.44, b + 0.76, 0.05, '#34302D', { decor: (cx, pt) => { for (const [a, c] of [[0.35, 0.3], [0.68, 0.3]]) { const q = pt(a, c), e = pt(a, c + 0.22), rr = Math.hypot(e[0] - q[0], e[1] - q[1]); cx.strokeStyle = 'rgba(150,140,130,.6)'; cx.lineWidth = 1.2 * v.dpr; cx.beginPath(); cx.ellipse(q[0], q[1], rr, rr * 0.55, 0, 0, 7); cx.stroke(); } } });
+      Cy(0.35, 0.13, b + 0.81, 0.13, 0.16, '#4B4642', { top: '#5A544F', lid: '#3A3633' });
+      Cy(0.66, 0.15, b + 0.81, 0.09, 0.12, '#8A6A3A', { top: '#9B7A48' });
+      R(0.9, 0.93, -0.16, 0.16, b + 0.12, 0.26, '#2A2522');
+      R(0.905, 0.935, -0.1, 0.1, b + 0.16, 0.12, '#F08A3C');
+      Cy(0.2, -0.25, b + 0.81, 0.07, HOUSE_H - 0.91, '#4A4A4A');
     } else if (f.t === 'bed') {
       const wood = '#A07850', woodD = '#7E5C3C';
       for (const [a, c] of [[0.1, -0.42], [0.1, 0.42], [L - 0.06, -0.42], [L - 0.06, 0.42]]) leg(a, c, 0.12, woodD);
