@@ -70,7 +70,8 @@ export function eventText(e) {
     case 'haul': return { title: `水を運んでもらった ${e.m3.toFixed(1)}m³`, body: `水道がない土地なので、1m³あたり5,000円。${Math.round(e.cost)}万円。`, tone: 'bad' };
     case 'condensation': return { title: '家の中に結露', body: `冷えた壁に水滴がつく夜が${e.days}日あった。カビと錆の手入れに${e.repair}万円。`, tone: 'bad' };
     case 'rot': return { title: '壁が雨で傷んだ', body: `雨に打たれて壁が傷み、直すのに${e.repair}万円。`, tone: 'bad' };
-    case 'clog': return { title: 'バイオフィルターが詰まった', body: `層が詰まり、排水があふれて下水へ流れた。掃除に${e.repair}万円。前処理や植物で詰まりにくくなる。`, tone: 'bad' };
+    case 'clog': return { title: 'バイオフィルターが詰まった', body: `層が詰まり、排水があふれて下水へ流れた。掃除に${e.repair}万円。広くするか、植物で詰まりにくくなる。`, tone: 'bad' };
+    case 'overload': return { title: '排水の庭のまわりが栄養過多', body: `排水は1日${e.grey}L、排水の庭がこせるのは${e.cap}L。こしきれない栄養が土にしみ、藻とハエが増えた。庭を${e.need}m²ほどに広げるか、節水を。`, tone: 'bad' };
     case 'overheat': return { title: `家の中が暑すぎる日 ${e.days}日`, body: '昼の室温が32℃を超えた。屋根と壁が日射で焼けている。', tone: 'bad' };
     case 'built': return { title: `${e.names.join('・')}ができた`, body: '自分の手で作り上げた。', tone: 'good' };
     case 'stalled': return { title: '工事が止まっている', body: `${e.names.join('・')}は、予定に「作業」の日がないので進まない。`, tone: 'bad' };

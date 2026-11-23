@@ -587,7 +587,7 @@ export function analyze(w, site, persons = 1) {
     const top = Math.max(...media.map(m => m.z)) + 1, bottom = Math.min(...media.map(m => m.z));
     const depth = Math.min(1, media.length / cols.size) * 0.8;
     const area = cols.size;
-    const spec = { w: area, h: 1, depth, media: mediaT, plants: plantT, pre: settles.length ? 'settle' : 'none', out: w.mods.out || 'garden' };
+    const spec = { w: area, h: 1, depth, media: mediaT, plants: plantT, pre: 'settle', out: w.mods.out || 'garden' };
     const houseFloor = house ? house.m.floorZ : null;
     const inGrav = houseFloor != null && houseFloor >= top - 0;
     const outGrav = beds.length ? beds.filter(b => bottom - b.z >= 0).length / beds.length : 0;

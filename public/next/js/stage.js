@@ -102,7 +102,7 @@ export function createStage(v, s, P) {
 export function buildBlocks(w, land, P, bo = {}) {
   const at = land.at, g = new THREE.Group();
   const leaf = matte({ color: '#ffffff', vary: 0.15, freq: 5, bump: 0.6, bumpFreq: 8, rough: 0.85, spec: 0.4 }); leaf.emissive = new THREE.Color('#25331C'); leaf.emissiveIntensity = 0.4;
-  const plants = [], tanks = [], beds = [], heaps = [], coops = [], ponds = [], media = [], reeds = [], pumps = [], batts = [];
+  const plants = [], tanks = [], beds = [], heaps = [], coops = [], ponds = [], media = [], reeds = [], pumps = [], batts = [], settles = [];
   for (const k in w.blocks) {
     const [x, y, z] = k.split(',').map(Number), b = w.blocks[k], D = BLOCKS[b.t]; if (!D) continue;
     if (D.kind === 'bed') beds.push({ x, y, z, stone: !!(b.s || (w.stone && w.stone[`${x},${y}`])), mulch: !!b.m, cover: !!b.g });
@@ -114,6 +114,7 @@ export function buildBlocks(w, land, P, bo = {}) {
     else if (D.kind === 'media') media.push({ x, y, z, t: D.media });
     else if (D.kind === 'plant') reeds.push({ x, y, z, t: D.plant });
     else if (D.kind === 'pump') pumps.push({ x, y, z });
+    else if (D.kind === 'settle') settles.push({ x, y, z });
   }
   const pickAt = (m, kind, extra = {}) => { m.userData.pick = { kind, ...extra }; return m; };
   if (beds.length) {
@@ -272,6 +273,13 @@ export function buildBlocks(w, land, P, bo = {}) {
     const geos = [], pm = matte({ color: '#3A5F86', vary: 0.08, freq: 3, rough: 0.5 });
     for (const q of pumps) { boxAt(geos, null, q.x + 0.5, q.y + 0.5, q.z + 0.22, 0.45, 0.35, 0.44); boxAt(geos, null, q.x + 0.5, q.y + 0.5, q.z + 0.6, 0.06, 0.06, 0.4); boxAt(geos, null, q.x + 0.72, q.y + 0.5, q.z + 0.78, 0.5, 0.06, 0.06); }
     g.add(pickAt(mesh(geos, pm), 'pump'));
+  }
+  if (settles.length) {   // 沈殿槽：コンクリートの四角い槽にふた、入る管と出る管
+    const geos = [], lid = [], cm = matte({ color: '#B7B4AA', vary: 0.1, freq: 4, bump: 0.3, bumpFreq: 9, rough: 0.9 }), lm = matte({ color: '#8E8B83', vary: 0.08, freq: 4 });
+    for (const q of settles) { const cx = q.x + 0.5, cy = q.y + 0.5, z0 = at(cx, cy);
+      boxAt(geos, null, cx, cy, z0 + 0.2, 0.86, 0.86, 0.44); boxAt(lid, null, cx, cy, z0 + 0.45, 0.7, 0.7, 0.06); boxAt(lid, null, cx - 0.12, cy, z0 + 0.5, 0.18, 0.06, 0.04);
+      boxAt(geos, null, cx - 0.52, cy, z0 + 0.3, 0.2, 0.1, 0.1); boxAt(geos, null, cx + 0.52, cy, z0 + 0.22, 0.2, 0.1, 0.1); }
+    const gg = new THREE.Group(); gg.add(mesh(geos, cm), mesh(lid, lm)); g.add(pickAt(gg, 'settle'));
   }
   return g;
 }

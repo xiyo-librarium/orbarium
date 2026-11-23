@@ -622,6 +622,9 @@ export function advance(state) {
   if (HM && A.condDays > 30) { const rp = 3; repair += rp; if (s.flags.condYear !== s.year) { events.push({ kind: 'condensation', days: A.condDays, repair: rp }); s.flags.condYear = s.year; } }
   if (HM && HM.rotRisk > 0.2 && A.rain > 250 && r() < HM.rotRisk * 0.45) { const rp = Math.max(2, Math.round(houseCost * 0.04)); repair += rp; events.push({ kind: 'rot', repair: rp }); }
   if (clogged) { repair += 2; events.push({ kind: 'clog', repair: 2 }); }
+  // 排水の庭が排水の量に対して小さい：こしきれない栄養が土にしみ、栄養過多（藻・におい・ハエ）。1年に1回知らせる
+  if (F && F.m.load > 1.05 && s.flags.overYear !== s.year) { const greyL = 0.9 * (s.world.mods.saving ? 65 : 130) * s.persons.length;
+    events.push({ kind: 'overload', grey: Math.round(greyL), cap: Math.round(F.m.capWarm), need: Math.ceil(F.m.area * F.m.load * 1.1) }); s.flags.overYear = s.year; }
   // 地震：壁と屋根の強さで傷みが変わる（竹と土壁はしなって耐え、版築や重い瓦は傷む）
   if (S.house && HM && (site.quake || 0) > 0 && r() < site.quake * qFrac) {
     const weak = 1 - (HM.quake ?? 0.7), rp = Math.round(houseCost * 0.35 * weak);
@@ -766,6 +769,7 @@ export function relations(s) {
     { id: 'neighbors', name: '近所の人', v: clamp(localYen / 40), good: true, why: localYen > 0.5 ? `この1年、近所とのやりとり ${Math.round(localYen)}万円（野菜を売る・工事を頼む・材料を買う）` : 'まだ付き合いは薄い' },
     { id: 'friend', name: 'トミー', v: s.site === 'med' ? 0.5 : 0.2, good: true, why: s.site === 'med' ? '山の斜面の家を貸してくれた' : '世界のどこかから時々メールが来る' },
     { id: 'river', name: '下流の川', v: clamp((sewer * 0.6 + runoff * 0.15) / 40), good: false, why: `下水 ${sewer.toFixed(0)}m³・畑から流れた雨 ${runoff.toFixed(0)}m³` },
+    { id: 'overload', name: '栄養のあふれ', v: S.filter ? clamp((S.filter.m.load - 1) * 0.8) : 0, good: false, why: S.filter && S.filter.m.load > 1 ? `排水の庭が小さく、こしきれない栄養が土にしみている（${Math.round(S.filter.m.load * 100)}%）` : '排水の庭は足りている' },
     { id: 'ground', name: '地下の水', v: clamp(recharge / 150), good: true, why: `畑から地下へ浸みた水 ${recharge.toFixed(0)}m³` },
     { id: 'money', name: 'お金', v: clamp(1 - (ws + ps + fs) / 3), good: null, why: '買って済ませている割合' }
   ];
