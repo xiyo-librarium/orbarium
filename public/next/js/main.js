@@ -13,6 +13,7 @@ import { ATLAS, NOTES, INVITE, LAND_INVITE } from '/js/content.js';
 
 const W = E.W, $ = (s) => document.querySelector(s);
 const Q = new URLSearchParams(location.search);
+const BASE = location.pathname.startsWith('/next') ? '/next/' : '/';   // 本番は /、前の置き場所 /next/ でも動く
 // 開き方：proto＝見た目の試作（?shot・?proto）、play＝遊ぶ（?play、?play&new=med で新しく）、それ以外は地球（はじまり・旅・図鑑）
 const MODE = Q.has('globe') || Q.has('travel') ? 'globe' : Q.has('shot') || Q.has('proto') ? 'proto' : Q.has('play') ? 'play' : 'globe';
 const CARRY = 'orbarium-next-carry', ATLAS_READ = 'orbarium-next-atlas';
@@ -62,7 +63,7 @@ async function boot() {
   let saved = null, carry = null;
   if (MODE === 'play') {
     if (Q.get('new')) { SITE = Q.get('new'); try { carry = JSON.parse(localStorage.getItem(CARRY) || 'null'); } catch { carry = null; } if (carry && carry.to !== SITE) carry = null; }
-    else { saved = loadSave(); if (!saved) { location.replace('/next/'); return; } SITE = saved.site; }
+    else { saved = loadSave(); if (!saved) { location.replace(BASE); return; } SITE = saved.site; }
   }
   const S = E.SITES[SITE];
   $('#where').textContent = `${S.name} · 土地を読みこみ中…`;
@@ -212,7 +213,7 @@ async function boot() {
   }
   function setHint() {
     const h = $('#hint');
-    if (G.mode === 'map') { h.innerHTML = `寄りたい所を押す · <a href="/">今の版へ</a>`; return; }
+    if (G.mode === 'map') { h.innerHTML = `寄りたい所を押す · <a href="/classic/">前の版</a>`; return; }
     const T = G.tool && TOOLS.find(t => t.id === G.tool);
     if (!T) { h.textContent = stage.cut ? HINT_CUT : HINT_NEAR; return; }
     h.textContent = (T.hints ? T.hints[G.sub[T.id]] : T.hint) + (traces(T.id) ? (TOUCH ? '（回すのは2本指）' : '（回すのは右ボタン）') : '');
@@ -1003,7 +1004,7 @@ async function boot() {
       if (MODE !== 'play') { toast('試作の画面では、次の土地へは行かない'); return; }
       localStorage.setItem(CARRY, JSON.stringify({ from: s.site, to, cash: s.cash - price, persons: s.persons, known: s.known, learned: s.learned, year: s.year, q: s.q,
         history: [...(s.flags.history || []), { site: s.site, years: s.turn / 4, rel: E.relations(s).score }] }));
-      location.href = `/next/?travel=${to}`;
+      location.href = `${BASE}?travel=${to}`;
     };
     $('#reportBody').querySelectorAll('[data-choice]').forEach(b2 => b2.onclick = () => {
       const [k, v2] = b2.dataset.choice.split(':'); if (k === 'surplus') s.flags.surplus = v2; if (k === 'pest') s.flags.pestHand = v2 === 'hand'; persist();
@@ -1017,7 +1018,7 @@ async function boot() {
   function renderBook() {
     $('#tabs').innerHTML = BK.TABS.map(([k, n]) => `<button data-tab="${k}" class="${G.tab === k ? 'on' : ''}">${n}</button>`).join('');
     const body = $('#sheetBody');
-    body.innerHTML = G.tab === 'web' ? BK.pageWeb(s) : G.tab === 'book' ? BK.pageBook(s) : G.tab === 'plan' ? BK.pagePlan(s) : G.tab === 'sky' ? BK.pageSky(s, G.studied !== s.turn) : BK.pageNote(s, atlasRead()) + (MODE === 'play' ? '<p><a href="/next/?globe=atlas&from=play">地球儀の図鑑を開く</a></p>' : '');
+    body.innerHTML = G.tab === 'web' ? BK.pageWeb(s) : G.tab === 'book' ? BK.pageBook(s) : G.tab === 'plan' ? BK.pagePlan(s) : G.tab === 'sky' ? BK.pageSky(s, G.studied !== s.turn) : BK.pageNote(s, atlasRead()) + (MODE === 'play' ? `<p><a href="${BASE}?globe=atlas&from=play">地球儀の図鑑を開く</a></p>` : '');
     body.scrollTop = 0;
   }
   $('#bookBtn').onclick = () => openBook();
@@ -1044,8 +1045,8 @@ async function boot() {
   v.lookAt(center, mapDist(), 50, 60); setMode('map');
   addEventListener('resize', () => { fitControls(); placeCard(); });
   if (MODE === 'play') {
-    $('#where').style.cursor = 'pointer'; $('#where').title = 'はじめの画面へ'; $('#where').onclick = () => { location.href = '/next/'; };
-    if (fresh) { persist(); history.replaceState(null, '', '/next/?play'); $('#reportBody').innerHTML = BK.climateHTML(s); $('#reportAct').innerHTML = '<button class="yes" id="rBack">この土地で暮らしを始める</button>'; $('#report').hidden = false; $('#rBack').onclick = () => { $('#report').hidden = true; }; }
+    $('#where').style.cursor = 'pointer'; $('#where').title = 'はじめの画面へ'; $('#where').onclick = () => { location.href = BASE; };
+    if (fresh) { persist(); history.replaceState(null, '', `${BASE}?play`); $('#reportBody').innerHTML = BK.climateHTML(s); $('#reportAct').innerHTML = '<button class="yes" id="rBack">この土地で暮らしを始める</button>'; $('#report').hidden = false; $('#rBack').onclick = () => { $('#report').hidden = true; }; }
   }
   v.start();
   window.__next = { s, E, v, stage, setHour, G, act, toScreen, select, setTool, flyNear, toMap, center, house: () => s.world.house, traced, setDraft, flowsNow, runSeason, openBook, setSub: (t, k) => { G.sub[t] = k; renderSubs(); setHint(); } };
@@ -1139,12 +1140,12 @@ async function bootGlobe(mode = 'title') {
   };
   if (mode === 'travel') {
     const price = E.SITES[toKey]?.plotPrice || 0;
-    travel(fromKey, toKey, LAND_INVITE[toKey] ? LAND_INVITE[toKey](BK.man(price)) : { from: 'ノート', subject: '次の土地へ', body: [''], go: '行く' }, `/next/?play&new=${toKey}`);
+    travel(fromKey, toKey, LAND_INVITE[toKey] ? LAND_INVITE[toKey](BK.man(price)) : { from: 'ノート', subject: '次の土地へ', body: [''], go: '行く' }, `${BASE}?play&new=${toKey}`);
   } else if (mode === 'atlas') {
     look(15, -40);
     $('#where').textContent = '地球儀で学ぶ';
     const card = document.createElement('div'); card.className = 'atlas-card'; document.body.appendChild(card);
-    const back = Q.get('from') === 'play' && saved ? '/next/?play' : '/next/';
+    const back = Q.get('from') === 'play' && saved ? `${BASE}?play` : BASE;
     const list = () => {
       const read = atlasRead();
       card.innerHTML = `<b>世界の知恵</b><p class="small">世界の土地で、人が水・土・生き物とどう関わってきたか。地球儀を回して、印を押す。</p>
@@ -1184,14 +1185,14 @@ async function bootGlobe(mode = 'title') {
     const card = document.createElement('div'); card.className = 'title-card';
     card.innerHTML = `<h1>Orbarium</h1><p>本物の土地で、水・食べもの・エネルギー・お金をめぐらせる</p>
       <div class="btns">${saved ? `<button class="yes" id="cont">つづきから（${saved.year}年・${BK.esc(E.SITES[saved.site].name)}）</button>` : ''}<button class="${saved ? '' : 'yes'}" id="newg">はじめから</button><button id="atl">地球儀で学ぶ</button></div>
-      <p class="src">地形・気候・植生は実在の場所のデータ（標高：AWS Terrain Tiles／気候：Open-Meteo／植生：© ESA WorldCover／建物と道：© OpenStreetMap contributors） · <a href="/">今の版へ</a></p>`;
+      <p class="src">地形・気候・植生は実在の場所のデータ（標高：AWS Terrain Tiles／気候：Open-Meteo／植生：© ESA WorldCover／建物と道：© OpenStreetMap contributors） · <a href="/classic/">前の版</a></p>`;
     document.body.appendChild(card); hint.textContent = '';
-    if (saved) $('#cont').onclick = () => { location.href = '/next/?play'; };
-    $('#atl').onclick = () => { location.href = '/next/?globe=atlas'; };
+    if (saved) $('#cont').onclick = () => { location.href = `${BASE}?play`; };
+    $('#atl').onclick = () => { location.href = `${BASE}?globe=atlas`; };
     $('#newg').onclick = () => {
       if (saved && !confirm('はじめからやり直しますか？（今の暮らしは消える）')) return;
       card.remove(); localStorage.removeItem(CARRY);
-      travel('tokyo', 'med', INVITE, '/next/?play&new=med');
+      travel('tokyo', 'med', INVITE, `${BASE}?play&new=med`);
     };
   }
   v.start(); window.__next = { v, mode, globe };

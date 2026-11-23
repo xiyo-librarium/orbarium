@@ -44,7 +44,7 @@ def run(viewport, tag):
         page.on('pageerror', lambda e: errs.append(str(e)))
         if tag == 'phone': mock_real.block(page)   # スマホでは実データが取れない場合（仮の地形）を通す
         else: mock_real.install(page)
-        page.goto('http://localhost:8765/index.html'); page.wait_for_timeout(700)
+        page.goto('http://localhost:8765/classic/index.html'); page.wait_for_timeout(700)
         page.screenshot(path=f'{OUT}/{tag}_1_title.png')
         page.click('#new'); page.wait_for_timeout(1500)
         page.screenshot(path=f'{OUT}/{tag}_2_trip.png'); overflow(page, tag + ' trip')

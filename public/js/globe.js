@@ -2,7 +2,7 @@
 let LAND = null;
 export async function loadLand() {
   if (LAND) return LAND;
-  const r = await fetch('data/land110.json'); LAND = await r.json(); return LAND;
+  const r = await fetch('/data/land110.json'); LAND = await r.json(); return LAND;
 }
 const rad = Math.PI / 180;
 

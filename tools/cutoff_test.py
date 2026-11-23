@@ -56,7 +56,7 @@ with sync_playwright() as p:
         tag = f'{W}x{H}'
         pg = b.new_page(viewport={'width': W, 'height': H})
         mock_real.install(pg)
-        pg.goto('http://localhost:8767/index.html'); pg.wait_for_timeout(400)
+        pg.goto('http://localhost:8767/classic/index.html'); pg.wait_for_timeout(400)
         snap(pg, tag, 'title')
         click(pg, '#new', tag); pg.wait_for_timeout(600); snap(pg, tag, 'trip')
         click(pg, '#go', tag); pg.wait_for_timeout(200); click(pg, '#skip', tag); pg.wait_for_timeout(700)
