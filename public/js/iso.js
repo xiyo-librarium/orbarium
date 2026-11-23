@@ -18,13 +18,18 @@ export function sunVector(lat, month, hour) {
 }
 export const dirName = (az) => ['北', '北東', '東', '南東', '南', '南西', '西', '北西'][Math.round(az / 45) % 8];
 const hex3 = (hex) => { const n = parseInt(hex.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
-const SUNC = [1.0, 0.93, 0.80], SKYC = [0.86, 0.89, 0.96];   // 日差しはあたたかく、空の光はやわらかく少しだけ青い
+let SUNC = [1.0, 0.93, 0.80];
+const SKYC = [0.89, 0.90, 0.94];   // 日差しはあたたかく、空の光はやわらかく少しだけ青い
+/* 日差しの色は太陽の高さで変わる：低い朝夕は空気の層を長く通るので、青が散って金色に */
+function sunColor(elev) { const w = Math.max(0, Math.min(1, (elev - 5) / 45)); SUNC = [1.0, 0.78 + 0.15 * w, 0.52 + 0.28 * w]; }
 /* 日なたと日かげ：lam＝面と日差しの向きの合いぐあい、lit＝影にならない割合、ao＝くぼみの暗さ */
-const BOUNCE = [1.0, 0.95, 0.80];   // 地面からの照り返し（側面だけ、少し暖かい色）
+const BOUNCE = [1.0, 0.93, 0.78];   // 地面からの照り返し（側面だけ、暖かい色）。日かげの壁も冷たく沈まない
 /* つや消し：色を少しだけくすませ（彩度を落とし）、日なたも白く飛ばさない。土・木・しっくいの、光を吸うような面に */
 const MATTE = 0.16;
 const matteRGB = (c) => { const L = c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11; return c.map(x => x * (1 - MATTE) + L * MATTE); };
-const lightK = (i, d, ao, side) => ao * (SKYC[i] * 0.70 + SUNC[i] * 0.36 * d + (side ? BOUNCE[i] * 0.08 : 0));
+/* 空の光（どの向きにも来る）と日差し（向きがある）の割合。日差しをしっかり効かせて、形が光で読めるように */
+const AMB = 0.58, SUNK = 0.52;
+const lightK = (i, d, ao, side) => ao * (SKYC[i] * AMB + SUNC[i] * SUNK * d + (side ? BOUNCE[i] * 0.14 : 0));
 function lightRGB(rgb, lam, lit, ao = 1, side = false) {
   const d = Math.max(0, lam) * lit, m = matteRGB(rgb);
   return m.map((c, i) => Math.round(Math.min(255, c * lightK(i, d, ao, side))));
@@ -92,14 +97,15 @@ export function createView(canvas, world, opt = {}) {
   // top：真上から見る / wallMode：'up' できあがり・'cut' 手前の壁を下げる・'down' 壁を全部下げる / house：描く家（設計中は下書き）/ base：いま建っている家
   ARID = opt.arid || 0;
   const v = { world, top: false, wallMode: 'up', house: null, base: null, rect: null, ghostEdge: null, furnGhost: null, selFurn: -1, cx: opt.cx ?? 25, cy: opt.cy ?? 25, R: opt.R ?? 8, angle: 0, rot: 0, zoom: 1, hover: null, ghost: null, faces: [], dpr: Math.min(2, window.devicePixelRatio || 1), maxLv: Math.max(...world.H), lat: opt.lat ?? 35, month: opt.month ?? 3, hour: 10, sun: null };
-  v.setSun = (lat, month, hour) => { v.lat = lat ?? v.lat; v.month = month ?? v.month; v.hour = hour ?? v.hour; v.sun = sunVector(v.lat, v.month, v.hour); };
+  v.setSun = (lat, month, hour) => { v.lat = lat ?? v.lat; v.month = month ?? v.month; v.hour = hour ?? v.hour; v.sun = sunVector(v.lat, v.month, v.hour); sunColor(v.sun.elev); };
   v.setSun();
   // 影：高さの地図（地面・置いたもの・家の、見えている高さ）に沿って、日差しの逆向きにたどる
-  let occ = null, occX0 = 0, occY0 = 0, occW = 0, occMax = 0;
+  let occ = null, occT = null, occX0 = 0, occY0 = 0, occW = 0, occMax = 0;
   function buildOcc(x0, x1, y0, y1, hs) {
     const M = 8; occX0 = Math.max(0, x0 - M); occY0 = Math.max(0, y0 - M); const xe = Math.min(N - 1, x1 + M), ye = Math.min(N - 1, y1 + M);
     occW = xe - occX0 + 1; const occH = ye - occY0 + 1; occ = new Float32Array(occW * occH); occMax = 0;
     for (let y = occY0; y <= ye; y++) for (let x = occX0; x <= xe; x++) occ[(y - occY0) * occW + (x - occX0)] = h(world, x, y);
+    occT = occ.slice();   // 地面だけの高さ（地面の段の影を見分けるため）
     const up = (x, y, z) => { if (x < occX0 || y < occY0 || x > xe || y > ye) return; const i = (y - occY0) * occW + (x - occX0); if (z > occ[i]) occ[i] = z; };
     for (const k in world.blocks) { const [x, y, z] = k.split(',').map(Number), d = BLOCKS[world.blocks[k].t]; if (d.overlay || d.pit) continue; up(x, y, z + (d.kind === 'roof' ? 0.35 : d.kind === 'pv' ? 0.12 : d.kind === 'tree' ? 2.2 : d.kind === 'heap' ? 2.35 : 1)); }
     if (hs) { const up2 = v.wallMode === 'up' && !v.top, box = roofBox(hs); for (const k in hs.cells) { const [x, y] = k.split(',').map(Number); up(x, y, hs.z + (up2 ? roofZ(hs, x + 0.5, y + 0.5, box) + 0.2 : 0.45)); } }
@@ -110,6 +116,20 @@ export function createView(canvas, world, opt = {}) {
       for (let yy = Math.floor(t.y - rr); yy <= Math.floor(t.y + rr); yy++) for (let xx = Math.floor(t.x - rr); xx <= Math.floor(t.x + rr); xx++) if (Math.hypot(xx + 0.5 - t.x, yy + 0.5 - t.y) <= rr + 0.2) up(xx, yy, top);
     }
     for (let i = 0; i < occ.length; i++) occMax = Math.max(occMax, occ[i]);
+  }
+  /* 地面の上の点：1m の段は本当はなだらかな斜面なので、段の縁の影は落とさない（家・木・物と、大きな丘の影だけ） */
+  function litGround(px, py, pz) {
+    const [sx, sy, sz] = v.sun.dir; if (sz > 0.985) return 1;
+    const step = 0.25, k = step / Math.max(0.05, Math.hypot(sx, sy));
+    let x = px, y = py, z = pz; const cx0 = Math.floor(px), cy0 = Math.floor(py);
+    for (let i = 0; i < 100; i++) {
+      x += sx * k; y += sy * k; z += sz * k; if (z > occMax + 0.01) return 1;
+      const fx = Math.floor(x), fy = Math.floor(y); if (fx === cx0 && fy === cy0) continue;
+      const ix = fx - occX0, iy = fy - occY0; if (ix < 0 || iy < 0 || ix >= occW || iy * occW >= occ.length) return 1;
+      const j = iy * occW + ix, o = occ[j], t = occT[j];
+      if (o > z + 0.02 && (o > t + 0.01 || t > pz + 2.5)) return 0;
+    }
+    return 1;
   }
   function litAt(px, py, pz) {
     const [sx, sy, sz] = v.sun.dir; if (sz > 0.985) return 1;
@@ -122,6 +142,39 @@ export function createView(canvas, world, opt = {}) {
       if (occ[iy * occW + ix] > z + 0.02) return 0;
     }
     return 1;
+  }
+  /* 影を受ける面：地面と、畑・マルチなど地面に置いたもの（上の面だけ） */
+  const recv = (m) => !!m && (m.type === 'terrain' || (m.type === 'block' && (BLOCKS[m.b?.t]?.kind === 'bed' || BLOCKS[m.b?.t]?.overlay)));
+  /* やわらかい影の層：地面の上の点ごとに日差しの逆向きをたどって（1マスを4×4に分けて）影を塗り、
+     小さい絵に描いて引きのばすことで縁をぼかす。家の足元には接地の暗がり。
+     地面だけにかかるよう、地面の上面を黒・ほかを白で描いた型と「明るいほう」で合わせ、最後に掛け算で重ねる */
+  const MKR = 2;   // 型は1/2の大きさで描く。影は1マスが12px ほどになる大きさで描いて引きのばす（縁のぼけがズームに比例）
+  function shadowLayer(list, x0, x1, y0, y1, hs) {
+    const g = geom(), SHR = Math.max(4, Math.round(g.tw / 12)), W = Math.ceil(canvas.width / SHR), Hh = Math.ceil(canvas.height / SHR);
+    if (!v.shCv) { v.shCv = document.createElement('canvas'); v.mkCv = document.createElement('canvas'); }
+    const sc = v.shCv, mk = v.mkCv; if (sc.width !== W || sc.height !== Hh) { sc.width = W; sc.height = Hh; } const MW = Math.ceil(canvas.width / MKR), MH = Math.ceil(canvas.height / MKR); if (mk.width !== MW || mk.height !== MH) { mk.width = MW; mk.height = MH; }
+    const s = sc.getContext('2d'), S = v.sun.dir, lamF = Math.max(0, S[2]);
+    const shc = [0, 1, 2].map(i => Math.round(255 * Math.min(1, SKYC[i] * AMB / (SKYC[i] * AMB + SUNC[i] * SUNK * lamF)))).join(',');
+    s.fillStyle = '#fff'; s.fillRect(0, 0, W, Hh);
+    const Pp = (px, py, pz) => { const q = project(px, py, pz, g); return [q[0] / SHR, q[1] / SHR]; };
+    const quad = (ax, ay, bx, by, z) => { const a = Pp(ax, ay, z), b = Pp(bx, ay, z), c = Pp(bx, by, z), d = Pp(ax, by, z); s.beginPath(); s.moveTo(a[0], a[1]); s.lineTo(b[0], b[1]); s.lineTo(c[0], c[1]); s.lineTo(d[0], d[1]); s.closePath(); s.fill(); };
+    const K = 4, K2 = 10, dark = new Uint8Array(K * K);
+    s.fillStyle = `rgb(${shc})`;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      if (hs && hs.cells[`${x},${y}`]) continue;
+      const z = groundTop(x, y); let nd = 0;
+      for (let j = 0; j < K; j++) for (let i = 0; i < K; i++) { const d = litGround(x + (i + 0.5) / K, y + (j + 0.5) / K, z + 0.05) ? 0 : 1; dark[j * K + i] = d; nd += d; }
+      if (!nd) continue;
+      if (nd === K * K) { quad(x - 0.02, y - 0.02, x + 1.02, y + 1.02, z); continue; }
+      // 影の縁のマスは細かく（10×10）調べなおす
+      for (let j = 0; j < K2; j++) for (let i = 0; i < K2; i++) if (!litGround(x + (i + 0.5) / K2, y + (j + 0.5) / K2, z + 0.05)) quad(x + i / K2 - 0.01, y + j / K2 - 0.01, x + (i + 1) / K2 + 0.01, y + (j + 1) / K2 + 0.01, z);
+    }
+    const m = mk.getContext('2d');
+    m.setTransform(1, 0, 0, 1, 0, 0); m.globalCompositeOperation = 'source-over'; m.globalAlpha = 1; m.fillStyle = '#fff'; m.fillRect(0, 0, mk.width, mk.height);
+    m.setTransform(1 / MKR, 0, 0, 1 / MKR, 0, 0);
+    for (const it of list) { if (!it.meta || it.meta.type === 'ghost') continue; const rc = recv(it.meta); it.draw(m, (face) => rc && face === 4 ? '#000' : '#fff'); }
+    m.setTransform(1, 0, 0, 1, 0, 0); m.globalAlpha = 1; m.globalCompositeOperation = 'lighten'; m.imageSmoothingEnabled = true; m.imageSmoothingQuality = 'high'; m.drawImage(sc, 0, 0, mk.width, mk.height); m.globalCompositeOperation = 'source-over';
+    ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.imageSmoothingEnabled = true; ctx.drawImage(mk, 0, 0, canvas.width, canvas.height); ctx.restore();
   }
   function size() { const r = canvas.getBoundingClientRect(); canvas.width = Math.round(r.width * v.dpr); canvas.height = Math.round(r.height * v.dpr); pick.width = canvas.width; pick.height = canvas.height; }
   function geom() {
@@ -144,7 +197,7 @@ export function createView(canvas, world, opt = {}) {
     const S = v.sun.dir;
     // 上の面：地面はなだらかにならした傾き（傾斜）で、日差しとの合いぐあいを決める
     const topLam = meta?.slope ? (meta.slope[0] * S[0] + meta.slope[1] * S[1] + meta.slope[2] * S[2]) : S[2];
-    const topLit = !L ? 1 : meta.type === 'terrain' ? (litAt(x0 + 0.27, y0 + 0.27, z + ht + 0.01) + litAt(x0 + 0.73, y0 + 0.27, z + ht + 0.01) + litAt(x0 + 0.27, y0 + 0.73, z + ht + 0.01) + litAt(x0 + 0.73, y0 + 0.73, z + ht + 0.01)) / 4 : litAt((x0 + x1) / 2, (y0 + y1) / 2, z + ht + 0.01);
+    const topLit = !L || (!v.top && recv(meta)) ? 1 : meta.type === 'terrain' ? (litAt(x0 + 0.27, y0 + 0.27, z + ht + 0.01) + litAt(x0 + 0.73, y0 + 0.27, z + ht + 0.01) + litAt(x0 + 0.27, y0 + 0.73, z + ht + 0.01) + litAt(x0 + 0.73, y0 + 0.73, z + ht + 0.01)) / 4 : litAt((x0 + x1) / 2, (y0 + y1) / 2, z + ht + 0.01);
     const topFill = L ? lightCol(color, topLam, topLit, meta.ao ?? 1) : shade(color, 1.0);
     const topMul = L && meta.decor && alpha === 1 && meta.type !== 'terrain' ? lightMul(topLam, topLit, meta.ao ?? 1) : null;
     const a = v.angle * Math.PI / 180;
@@ -213,7 +266,7 @@ export function createView(canvas, world, opt = {}) {
     // 明るさ（rbox と同じ考え方）
     const lam = meta.slope[0] * S[0] + meta.slope[1] * S[1] + meta.slope[2] * S[2];
     // 影の境目をなめらかに：角（となりと共有）で日なたかを調べ、強く変わる向きにグラデーション
-    const Lc = occ ? C.map(([px, py]) => (litAt(px + 0.001, py + 0.001, top + 0.02) + litAt(px - 0.001, py - 0.001, top + 0.02)) / 2) : [1, 1, 1, 1];
+    const Lc = occ && v.top ? C.map(([px, py]) => (litAt(px + 0.001, py + 0.001, top + 0.02) + litAt(px - 0.001, py - 0.001, top + 0.02)) / 2) : [1, 1, 1, 1];   // 3Dでは影はあとから「影の層」で重ねる
     const lit = (Lc[0] + Lc[1] + Lc[2] + Lc[3]) / 4;
     let topFill = lightCol(color, lam, lit, meta.ao ?? 1);
     const ddx = (Lc[1] + Lc[2]) - (Lc[0] + Lc[3]), ddy = (Lc[2] + Lc[3]) - (Lc[0] + Lc[1]);
@@ -371,6 +424,7 @@ export function createView(canvas, world, opt = {}) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!v.top) { const gr = ctx.createLinearGradient(0, 0, 0, canvas.height); gr.addColorStop(0, '#DCE5E4'); gr.addColorStop(0.55, '#EEEEE4'); gr.addColorStop(1, '#F3ECDD'); ctx.fillStyle = gr; ctx.fillRect(0, 0, canvas.width, canvas.height); }
     for (const it of list) it.draw(ctx);
+    if (!v.top && occ) shadowLayer(list, x0, x1, y0, y1, hsNow);
     // ねらっているマス：木や家に隠れていても見えるよう、いちばん上に地面の高さで枠を描く
     if (v.aim && v.aim.length) {
       const g0 = geom(), q = (x, y) => { const z = groundTop(x, y); return [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]].map(([a, b]) => project(a, b, z + 0.01, g0)); };
@@ -675,7 +729,8 @@ export function createView(canvas, world, opt = {}) {
         const pq = q.map(([px, py]) => project(px, py, gz + 0.01, g));
         list.push({ depth: terrainDepth(ox, oy, floorLv) + 2e-5, draw: (cx, pc) => { if (pc) return; const A = [(pq[0][0] + pq[1][0]) / 2, (pq[0][1] + pq[1][1]) / 2], B = [(pq[2][0] + pq[3][0]) / 2, (pq[2][1] + pq[3][1]) / 2], gr = cx.createLinearGradient(A[0], A[1], B[0], B[1]); gr.addColorStop(0, 'rgba(30,35,20,.30)'); gr.addColorStop(1, 'rgba(30,35,20,0)'); cx.fillStyle = gr; cx.beginPath(); cx.moveTo(pq[0][0], pq[0][1]); for (const p of pq) cx.lineTo(p[0], p[1]); cx.closePath(); cx.fill(); } });
       }
-      const seed = (ex * 73 + ey * 151 + (t === 'h' ? 7 : 0)) | 0, tex = (z0, z1) => wallTexture(wallKind(hs), z0, z1, seed, accentOf(hs));
+      const eo = { dir: o.dir, E: eavesDepth(hs), eave: drainDirs(hs).includes(o.dir) };   // 軒の影：外向きと軒の出。軒が壁の上にあるのは雨の流れ落ちる側だけ（妻側は屋根の線にそう）
+      const seed = (ex * 73 + ey * 151 + (t === 'h' ? 7 : 0)) | 0, tex = (z0, z1) => wallTexture(wallKind(hs), z0, z1, seed, accentOf(hs), eo);
       // 基礎：石を積んだ帯。外の地面が低ければ、そこまで下ろす
       if (!v.top) {
         const gz = hs.cells[`${ox},${oy}`] ? z : Math.min(z, h(world, ox, oy)), O2 = T / 2 + 0.06;   // 壁の中心線から外側だけ（家の中には出さない）
@@ -684,7 +739,7 @@ export function createView(canvas, world, opt = {}) {
       }
       if (v.top || !full) { rbox(list, ...rect, z, v.top ? HOUSE_H : LOW, O && (O.door || v.top) ? O.color : Wm.color, { ...meta, sideDecor: v.top || O?.door ? null : tex(0, LOW) }, alpha); continue; }
       if (op === 'door') {
-        rbox(list, ...rect, z, 2.1, O.color, { ...meta, sideDecor: (cx2, p2, fc) => doorDecor(cx2, p2, fc, accentOf(hs)) }, alpha); rbox(list, ...rect, z + 2.1, HOUSE_H - 2.1, Wm.color, { ...meta, sideDecor: tex(2.1, HOUSE_H) }, alpha);
+        rbox(list, ...rect, z, 2.1, O.color, { ...meta, sideDecor: (cx2, p2, fc) => { doorDecor(cx2, p2, fc, accentOf(hs)); eaveBand(cx2, p2, fc, 0, 2.1, eo); } }, alpha); rbox(list, ...rect, z + 2.1, HOUSE_H - 2.1, Wm.color, { ...meta, sideDecor: tex(2.1, HOUSE_H) }, alpha);
         // 扉の前の踏み石
         if (!hs.cells[`${ox},${oy}`] && !v.top) { const gz = h(world, ox, oy), c0 = [o.x + 0.5 + (ox - o.x) * 0.72, o.y + 0.5 + (oy - o.y) * 0.72]; rbox(list, c0[0] - 0.3, c0[1] - 0.22 + (o.dir === 'e' || o.dir === 'w' ? -0.08 : 0), c0[0] + 0.3, c0[1] + 0.22, gz, 0.06, '#B7B2A6', { type: 'ghost' }, 1); }
       } else if (op) {
@@ -692,7 +747,7 @@ export function createView(canvas, world, opt = {}) {
         const isWin = (k) => ['window', 'window2'].includes(hs.open[k]) && outerDir[k] === o.dir;
         const cont = t === 'h' ? { lo: isWin(`h:${ex - 1},${ey}`), hi: isWin(`h:${ex + 1},${ey}`) } : { lo: isWin(`v:${ex},${ey - 1}`), hi: isWin(`v:${ex},${ey + 1}`) };
         rbox(list, ...rect, z, 0.9, Wm.color, { ...meta, sideDecor: tex(0, 0.9) }, alpha);
-        rbox(list, ...rect, z + 0.9, 1.3, accentOf(hs) || '#D6CCB8', { ...meta, sideDecor: windowDecor(op, t, { ...cont, frame: accentOf(hs) }) }, 1);
+        rbox(list, ...rect, z + 0.9, 1.3, accentOf(hs) || '#D6CCB8', { ...meta, sideDecor: windowDecor(op, t, { ...cont, frame: accentOf(hs), eo }) }, 1);
         rbox(list, ...rect, z + 2.2, HOUSE_H - 2.2, Wm.color, { ...meta, sideDecor: tex(2.2, HOUSE_H) }, alpha);
         // 窓台
         const SD = 0.1, s0 = cont.lo ? 0 : 0.12, s1 = cont.hi ? 1 : 0.88, sr = t === 'h' ? [ex + s0, ey - T / 2 - SD, ex + s1, ey + T / 2 + SD] : [ex - T / 2 - SD, ey + s0, ex + T / 2 + SD, ey + s1];
@@ -732,7 +787,7 @@ export function createView(canvas, world, opt = {}) {
       for (const T2 of RT.tiles) {
         if (!inView(T2.cx, T2.cy)) continue;
         const pv = pvSet.has(`${T2.cx},${T2.cy}`);
-        const decor = (cx, t) => roofSkin(cx, t, T2, hs.roof, along, pv);
+        const decor = (cx, t) => roofSkin(cx, t, T2, hs.roof, along, pv, RZ);
         slab(list, [[T2.x0, T2.y0], [T2.x1, T2.y0], [T2.x1, T2.y1], [T2.x0, T2.y1]], RZ, 0.15, R.color, { type: 'roof', x: T2.cx, y: T2.cy, decor, noSides: true });
       }
       for (const sg of RT.edges) { if (inView(Math.floor(sg.mx), Math.floor(sg.my))) fascia(list, sg, RZ, 0.15, R.color); }
@@ -850,18 +905,45 @@ export function createView(canvas, world, opt = {}) {
     list.push({ depth: Math.max(pts[0][2], pts[1][2]) + 0.02, meta: { type: 'roof' }, draw: (cx, pc) => poly(cx, pts, pc ? pc(face) : fill, 1) });
   }
   /* 屋根の表面：トタンの波は流れの向き（along＝東西に流れる）に、世界の座標でそろえて引く。太陽光パネルとさびも */
-  function roofSkin(cx, t, T2, kind, along, pv) {
+  function roofSkin(cx, t, T2, kind, along, pv, RZ) {
     const U = (wx, wy) => faceAt(t, (wx - T2.x0) / (T2.x1 - T2.x0), (wy - T2.y0) / (T2.y1 - T2.y0));
     const line = (A, B) => { cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.stroke(); };
     if (kind === 'green') { const rd = roofDecor(kind, T2.cx, T2.cy); rd && rd(cx, t, geom()); }
-    else if (kind === 'teja') {   // 素焼きの瓦：流れにそって半円の瓦の列（山と谷）、40cmごとに重なりの段。1枚ずつ焼き色がちがう
-      const P = 0.25, C = 0.4, a0 = along ? T2.y0 : T2.x0, a1 = along ? T2.y1 : T2.x1, b0 = along ? T2.x0 : T2.y0, b1 = along ? T2.x1 : T2.y1;
-      const UQ = (p0, p1, q0, q1, f) => { const pts = along ? [U(q0, p0), U(q1, p0), U(q1, p1), U(q0, p1)] : [U(p0, q0), U(p1, q0), U(p1, q1), U(p0, q1)]; cx.fillStyle = f; cx.beginPath(); cx.moveTo(pts[0][0], pts[0][1]); for (const r of pts) cx.lineTo(r[0], r[1]); cx.closePath(); cx.fill(); };
-      for (let k = Math.floor(a0 / P); k * P < a1; k++) {
-        const p0 = Math.max(a0, k * P), p1 = Math.min(a1, (k + 1) * P), pm = Math.min(p1, Math.max(p0, k * P + P * 0.5)); if (p1 <= p0) continue;
-        for (let j = Math.floor(b0 / C); j * C < b1; j++) { const q0 = Math.max(b0, j * C), q1 = Math.min(b1, (j + 1) * C); if (q1 <= q0) continue; const tn = hash(k, j, 55) - 0.5; UQ(p0, p1, q0, q1, tn > 0 ? `rgba(240,190,150,${(tn * 0.16).toFixed(3)})` : `rgba(90,40,20,${(-tn * 0.16).toFixed(3)})`); UQ(p0, p1, q0, Math.min(q1, q0 + 0.035), 'rgba(70,22,8,.30)'); }
-        if (pm > p0) UQ(p0, pm, b0, b1, 'rgba(245,214,180,.12)');   // 山（上向きの瓦）は明るく
-        UQ(Math.max(p0, k * P + P * 0.5), Math.min(p1, k * P + P * 0.58), b0, b1, 'rgba(70,32,16,.22)');   // 谷との境の影
+    else if (kind === 'teja') {
+      /* 素焼きの瓦（テハ）を1枚ずつ：流れにそって、下向きの瓦（谷）と上向きの瓦（山）が交互に並ぶ列。
+         40cmごとに上の瓦が下の瓦に重なり、その縁が段になって影を落とす。日差しの向き（横から・下から）で、
+         山の瓦は日の側が明るく反対が暗い。谷の瓦は山の影に入る。1枚ずつ焼き色がちがい、ところどころ苔 */
+      const S = v.sun.dir, Cw = 0.2, L = 0.4;
+      // u：流れに直角（列が並ぶ向き）、w：流れの向き。along のときは流れが y、そうでなければ x
+      const u0 = along ? T2.x0 : T2.y0, u1 = along ? T2.x1 : T2.y1, w0 = along ? T2.y0 : T2.x0, w1 = along ? T2.y1 : T2.x1;
+      const XY = (u, w) => along ? [u, w] : [w, u], mu = (u0 + u1) / 2;
+      const down = RZ ? (RZ(...XY(mu, w1 - 0.01)) < RZ(...XY(mu, w0 + 0.01)) ? 1 : -1) : 1;   // 流れの下る向き（w が増える向きなら 1）
+      const su = along ? S[0] : S[1], sdn = (along ? S[1] : S[0]) * down, elev = Math.max(0.08, S[2]);
+      const Qw = (ua, ub, wa, wb, f) => { ua = Math.max(u0, ua); ub = Math.min(u1, ub); wa = Math.max(w0, wa); wb = Math.min(w1, wb); if (ub <= ua || wb <= wa) return; const pts = [U(...XY(ua, wa)), U(...XY(ub, wa)), U(...XY(ub, wb)), U(...XY(ua, wb))]; cx.fillStyle = f; cx.beginPath(); cx.moveTo(pts[0][0], pts[0][1]); for (const r of pts) cx.lineTo(r[0], r[1]); cx.closePath(); cx.fill(); };
+      const side = Math.max(-1, Math.min(1, su / Math.max(0.25, elev + Math.abs(su) * 0.3)));   // 横からの日の強さ（-1〜1）
+      const lipSh = Math.min(0.14, 0.035 / Math.max(0.15, elev + Math.max(0, sdn) * 0.6));   // 段の影の長さ
+      for (let i = Math.floor(u0 / Cw); i * Cw < u1; i++) {
+        const ua = i * Cw, ub = ua + Cw, cap = (i & 1) === 0, um = ua + Cw / 2, lo = side > 0 ? [ua, um] : [um, ub], hi = side > 0 ? [um, ub] : [ua, um];
+        const off = cap ? L * 0.45 : 0;   // 山の瓦の段は谷の瓦の段とずれて見える（縁が網目にそろわない）
+        for (let r = Math.floor((w0 - off) / L); r * L + off < w1; r++) {
+          const wa = r * L + off, wb = wa + L, tn = (hash(i, r, 55) - 0.5) * 0.5 + (hash(i, 0, 58) - 0.5) * 0.5, moss = hash(i, r, 57) < 0.06;
+          Qw(ua, ub, wa, wb, tn > 0 ? `rgba(236,170,120,${(tn * 0.18).toFixed(3)})` : `rgba(80,34,18,${(-tn * 0.2).toFixed(3)})`);   // 焼き色：列ごとに少し、1枚ごとにもう少し
+          if (moss) Qw(ua, ub, down > 0 ? wa + L * 0.4 : wa, down > 0 ? wb : wb - L * 0.4, 'rgba(118,122,72,.30)');
+          if (cap) {   // 山：日の側が明るく、反対が暗い
+            Qw(...hi, wa, wb, `rgba(255,222,186,${(0.07 + 0.12 * Math.abs(side)).toFixed(3)})`);
+            Qw(...lo, wa, wb, `rgba(58,24,10,${(0.06 + 0.16 * Math.abs(side)).toFixed(3)})`);
+          } else {     // 谷：一段低く暗い。日の側の山の影がかかる
+            Qw(ua, ub, wa, wb, 'rgba(60,26,12,.10)');
+            const sw = Math.min(Cw * 0.6, 0.03 + 0.08 * Math.abs(side));
+            if (side > 0) Qw(ub - sw, ub, wa, wb, 'rgba(48,20,8,.24)'); else Qw(ua, ua + sw, wa, wb, 'rgba(48,20,8,.24)');
+          }
+          Qw(ua, ua + 0.01, wa, wb, 'rgba(40,16,6,.22)');   // 列の境の細いすき間
+          // 段：下の端の縁は少し明るく、その下の瓦に影
+          const edge = down > 0 ? wb : wa;
+          const rim = `rgba(255,214,176,${((cap ? 0.10 : 0.05) + 0.12 * Math.max(0, sdn)).toFixed(3)})`, drop = cap ? 'rgba(46,18,6,.26)' : 'rgba(46,18,6,.14)';   // 山の瓦の縁ほどはっきり
+          if (down > 0) { Qw(ua, ub, edge - 0.025, edge, rim); Qw(ua, ub, edge, edge + lipSh, drop); }
+          else { Qw(ua, ub, edge, edge + 0.025, rim); Qw(ua, ub, edge - lipSh, edge, drop); }
+        }
       }
     }
     else if (kind === 'mud') {   // 土の平屋根：こてで均した泥。ところどころ明るく乾いたむら
@@ -1038,8 +1120,8 @@ export function createView(canvas, world, opt = {}) {
   function wallLook(hs) { const M = WALLS[hs.wall]; return wallKind(hs) === 'bahareque' ? { ...M, color: '#C4A079' } : M; }
   /* バハレケの腰壁（ソカロ）と窓枠の色 */
   function accentOf(hs) { const M = WALLS[hs.wall]; return M?.accent ? ACCENTS[(hs.accent ?? 0) % ACCENTS.length][0] : M?.frame || null; }
-  function wallTexture(kind, z0, z1, seed, accent = null) {   // z0, z1：この部分の床からの高さ（m）。seed：壁ごとの板の色むら
-    return (cx, p) => {
+  function wallTexture(kind, z0, z1, seed, accent = null, eo = null) {   // z0, z1：この部分の床からの高さ（m）。seed：壁ごとの板の色むら。eo：外向きと軒の出
+    return (cx, p, face) => {
       const span = z1 - z0, fy = (zz) => (zz - z0) / span, Q = (a0, b0, a1, b1, f) => quadOn(cx, p, a0, b0, a1, b1, f);
       const band = (za, zb, f) => { const a = Math.max(0, fy(za)), b = Math.min(1, fy(zb)); if (b > a) Q(0, a, 1, b, f); };
       const zocalo = () => {   // 腰壁（ソカロ）：下の90cmを色で塗り、浮き彫りの枠とひし形の模様。上との境に白い線
@@ -1106,7 +1188,8 @@ export function createView(canvas, world, opt = {}) {
         for (let i = 0; i < 4; i++) { const [px, py] = faceAt(p, hash(seed, i, 34), hash(seed, i, 35)), rr = W * (0.2 + hash(seed, i, 36) * 0.25), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, `rgba(${i % 2 ? '250,244,230' : '150,125,90'},.10)`); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.beginPath(); cx.arc(px, py, rr, 0, 7); cx.fill(); }
       }
       if (z0 < 0.6) { const A = faceAt(p, 0.5, fy(0)), B2 = faceAt(p, 0.5, fy(0.6)), gr = cx.createLinearGradient(A[0], A[1], B2[0], B2[1]); gr.addColorStop(0, 'rgba(70,50,30,.24)'); gr.addColorStop(1, 'rgba(70,50,30,0)'); Q(0, 0, 1, 1, gr); }   // 雨の跳ね返りで少し暗い足元
-      if (z1 > HOUSE_H - 0.7) { const A = faceAt(p, 0.5, fy(HOUSE_H)), B2 = faceAt(p, 0.5, fy(HOUSE_H - 0.7)), gr = cx.createLinearGradient(A[0], A[1], B2[0], B2[1]); gr.addColorStop(0, 'rgba(25,25,30,.32)'); gr.addColorStop(1, 'rgba(25,25,30,0)'); Q(0, 0, 1, 1, gr); }   // 軒の下の影
+      if (z1 > HOUSE_H - 0.25) { const A = faceAt(p, 0.5, fy(HOUSE_H)), B2 = faceAt(p, 0.5, fy(HOUSE_H - 0.25)), gr = cx.createLinearGradient(A[0], A[1], B2[0], B2[1]); gr.addColorStop(0, 'rgba(25,25,30,.22)'); gr.addColorStop(1, 'rgba(25,25,30,0)'); Q(0, 0, 1, 1, gr); }   // 軒の付け根の暗がり
+      eaveBand(cx, p, face, z0, z1, eo);
     };
   }
   function stoneDecor(seed) {   // 基礎：石を積んだ帯
@@ -1117,6 +1200,17 @@ export function createView(canvas, world, opt = {}) {
       for (let r = 1; r < rows; r++) lineOn(cx, faceAt(p, 0, r / rows), faceAt(p, 1, r / rows));
       for (let r = 0; r < rows; r++) for (let k = 0; k < 6; k++) { const f = (k + (r % 2) * 0.5) / 5; if (f > 0.02 && f < 0.98) lineOn(cx, faceAt(p, f, r / rows), faceAt(p, f, (r + 1) / rows)); }
     };
+  }
+  /* 軒の影：日の当たる外壁に、軒の出 E がつくる影の帯。高さ＝E×（日の高さ）÷（壁に向かう日差しの水平の強さ）。
+     壁が日に背を向けていれば、面ごと日かげなので帯は要らない。帯の暗さは、日なたと日かげの明るさの比から */
+  const DIRI = { e: 0, s: 1, w: 2, n: 3 };
+  function eaveBand(cx, p, face, z0, z1, eo) {
+    if (!eo || !eo.eave || v.top || v.wallMode !== 'up' || face == null || DIRI[eo.dir] !== face) return;
+    const S = v.sun.dir, n = SIDE[face], sn = n[0] * S[0] + n[1] * S[1]; if (sn < 0.03) return;
+    const hS = Math.min(HOUSE_H, (eo.E + 0.1) * S[2] / sn), amb = SKYC[1] * AMB + BOUNCE[1] * 0.14, a = 1 - amb / (amb + SUNC[1] * SUNK * sn);
+    const span = z1 - z0, fy = (zz) => (zz - z0) / span, band = (za, zb, f) => { const A = Math.max(0, fy(za)), B = Math.min(1, fy(zb)); if (B > A) quadOn(cx, p, 0, A, 1, B, f); };
+    band(HOUSE_H - hS * 0.94, HOUSE_H, `rgba(30,30,42,${a.toFixed(3)})`);
+    band(HOUSE_H - hS * 1.06, HOUSE_H - hS * 0.94, `rgba(30,30,42,${(a * 0.5).toFixed(3)})`);   // 影の縁は少しぼける
   }
   function windowDecor(op, et, cont = {}) {
     return (cx, p, face) => {
@@ -1137,6 +1231,7 @@ export function createView(canvas, world, opt = {}) {
       Q(0.488, 0.07, 0.512, 0.93, FR); if (L) Q(0, 0.07, 0.016, 0.93, FR); if (Rt) Q(0.984, 0.07, 1, 0.93, FR);   // 縦の桟（つなぎ目は細く）
       for (const k of op === 'window2' ? [0.36, 0.64] : [0.58]) Q(g0, k - 0.018, g1, k + 0.018, FR);   // 横の桟：小さなガラスに分ける
       Q(f0 - 0.02, 0.0, f1 + 0.02, 0.045, 'rgba(255,250,238,.35)'); // 窓台
+      eaveBand(cx, p, face, 0.9, 2.2, cont.eo);
     };
   }
   function doorDecor(cx, p, face, paint = null) {   // 板の扉：縦の板、横の桟と筋かい、黒い取っ手。paint：色を塗った扉（バハレケの家）
