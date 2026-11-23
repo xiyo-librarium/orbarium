@@ -10,7 +10,7 @@ import { HOUSE_H, roofZ, roofBox, eavesDepth, houseOuterEdges, drainDirs, ACCENT
 const T = 0.2;   // 壁の厚さ
 const DV = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] };
 
-export function buildHouse(hs, P, at) {
+export function buildHouse(hs, P, at, opt = {}) {
   const group = new THREE.Group();
   const parts = new Map();   // 材料ごとに形を集めて、最後に1つにまとめる（描く回数を減らす）
   const add = (mat, geo) => { if (!parts.has(mat)) parts.set(mat, []); parts.get(mat).push(geo); };
@@ -148,8 +148,31 @@ export function buildHouse(hs, P, at) {
     const ridgeMid = ridgeAlongX ? (bx.Y0 + bx.Y1) / 2 : (bx.X0 + bx.X1) / 2;
     const withRidge = (a, b) => { const pts = seg(a, b); if (shape !== 'gable') return pts; const k = ridgeAlongX ? 1 : 0; if ((a[k] - ridgeMid) * (b[k] - ridgeMid) < 0) { pts.push(ridgeAlongX ? [a[0], ridgeMid] : [ridgeMid, a[1]]); pts.sort((p1, p2) => (p1[k] - a[k]) * Math.sign(b[k] - a[k]) - (p2[k] - a[k]) * Math.sign(b[k] - a[k])); } return pts; };
     fascia(withRidge([X0, Y1], [X1, Y1])); fascia(withRidge([X1, Y1], [X1, Y0])); fascia(withRidge([X1, Y0], [X0, Y0])); fascia(withRidge([X0, Y0], [X0, Y1]));
+    if (hs.gutter) gutters(X0, X1, Y0, Y1);
     if (tin || shape === 'flat' || hs.roof !== 'teja') return;
     tiles(X0, X1, Y0, Y1, p, shape, ridgeAlongX);
+  }
+  // 雨どい：雨が落ちる軒にそって半円の樋。いちばん近いタンクへたてどいを下ろす
+  function gutters(X0, X1, Y0, Y1) {
+    const gm = matte({ color: '#8E918A', vary: 0.05, freq: 3, rough: 0.55 }), o = 0.08, rr = 0.06;
+    const pipe = (a, b, r) => { const d = b.clone().sub(a), L = d.length(); if (L < 0.02) return; const g = new THREE.CylinderGeometry(r, r, L, 10); g.translate(0, L / 2, 0);
+      g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize())); g.translate(a.x, a.y, a.z); add(gm, g); };
+    for (const dir of drains) {
+      const [nx, ny] = DV[dir], A = dir === 'n' ? [X0, Y0] : dir === 's' ? [X0, Y1] : dir === 'w' ? [X0, Y0] : [X1, Y0], B = dir === 'n' ? [X1, Y0] : dir === 's' ? [X1, Y1] : dir === 'w' ? [X0, Y1] : [X1, Y1];
+      const zA = RZ(A[0], A[1]) - 0.17, zB = RZ(B[0], B[1]) - 0.17;
+      const a = new THREE.Vector3(A[0] + nx * o, zA, A[1] + ny * o), b = new THREE.Vector3(B[0] + nx * o, zB, B[1] + ny * o);
+      pipe(a, b, rr);
+      // たてどい：この軒のそばのタンクへ（なければ軒の端から地面へ）
+      const tk = (opt.tanks || []).map(t => ({ t, d: Math.abs((t.x + 0.5 - a.x) * ny - (t.y + 0.5 - a.z) * nx) })).filter(q => q.d < 1.8).sort((p, q) => p.d - q.d)[0];
+      const L = Math.max(0.3, Math.hypot(b.x - a.x, b.z - a.z)), u = (pt) => Math.max(0.15 / L, Math.min(1 - 0.15 / L, ((pt[0] - a.x) * (b.x - a.x) + (pt[1] - a.z) * (b.z - a.z)) / (L * L)));
+      if (tk) {
+        const k = u([tk.t.x + 0.5, tk.t.y + 0.5]), top = new THREE.Vector3().lerpVectors(a, b, k), tz = tk.t.z + 1.32;
+        const bot = new THREE.Vector3(top.x, tz + 0.25, top.z), into = new THREE.Vector3(tk.t.x + 0.5, tz, tk.t.y + 0.5);
+        pipe(top, bot, 0.04); pipe(bot, into, 0.04);
+      } else if (!opt.tanks?.length) {
+        const top = a.clone().lerp(b, 0.04), g0 = at(top.x, top.z); pipe(top, new THREE.Vector3(top.x, g0, top.z), 0.04);
+      }
+    }
   }
   function tiles(X0, X1, Y0, Y1, p, shape, ridgeAlongX) {
     // 1枚の瓦：半円の殻を 42cm 押し出す（厚み 1.5cm、縁が光る）

@@ -83,7 +83,7 @@ export function canPut(w, x, y, z, t) {
   if (z < g) return '地面の中';
   if (at(w, x, y, z)) return 'もう何かある';
   if (z === g) { const tw = treeWhy(w, x, y); if (tw) return tw; }
-  if (w.house && w.house.cells[`${x},${y}`] && z >= w.house.z - 1 && z < w.house.z + HOUSE_H && !['batt'].includes(d.kind)) return '家の中';
+  { const bd = buildingAt(w, x, y); if (bd && z >= bd.z - 1 && z < bd.z + HOUSE_H && !['batt'].includes(d.kind)) return bd === w.house ? '家の中' : '建物の中'; }
   if (d.overlay && z !== g) return d.kind === 'bed' ? '畑は地面の上に' : '床や植物は地面の上に';
   if (d.overlay && d.kind === 'plant') { const below = at(w, x, y, z - 1); if (!below || BLOCKS[below.t].kind !== 'media') return 'ヨシやカンナは、浄化の層の上に植える'; }
   if (d.pit && z >= w.H0[idx(x, y)]) return '掘った穴の中にしか置けない（先に掘る）';
@@ -511,10 +511,10 @@ export function analyze(w, site, persons = 1) {
   const fedTanks = new Set(); let roofCatch = 0, roofLost = 0, noGutter = 0;
   const tankAt = new Map(tanks.map(t => [K(t.x, t.y, t.z), t]));
   const structs = [];
-  if (w.house) {   // 家：雨が落ちる軒（片流れなら下がる側だけ）のそばのタンク
-    const hs = w.house, dc = new Set(); for (const o of drainEdges(hs)) dc.add(ck(o.x, o.y));
+  for (const hs of buildings(w)) {   // 建物（母屋も離れも）：雨が落ちる軒（片流れなら下がる側だけ）のそばのタンク
+    const dc = new Set(); for (const o of drainEdges(hs)) dc.add(ck(o.x, o.y));
     const hc = [...dc].map(k => k.split(',').map(Number)), E = eavesDepth(hs), sh = hs.roofShape || 'flat';
-    structs.push({ cells: hc, eave: hs.z + HOUSE_H + (sh === 'flat' ? 0 : -(hs.pitch || 0.3) * E) + 0.01, coef: ROOFS[hs.roof].catch, area: roofCatchArea(hs) * ROOFS[hs.roof].catch, gut: !!hs.gutter || !!ROOFS[hs.roof].canales });
+    structs.push({ cells: hc, eave: hs.z + HOUSE_H + (sh === 'flat' ? 0 : -(hs.pitch || 0.3) * E) + 0.01, coef: ROOFS[hs.roof].catch, area: roofCatchArea(hs) * ROOFS[hs.roof].catch, gut: !!hs.gutter || !!ROOFS[hs.roof].canales, building: bid(hs) });
   }
   for (const c of comp) {
     const exposed = c.filter(r => !at(w, r.x, r.y, r.z + 1) || BLOCKS[at(w, r.x, r.y, r.z + 1).t].kind === 'pv');
@@ -524,7 +524,7 @@ export function analyze(w, site, persons = 1) {
     for (const hp of heaps) { const k0 = K(hp.x, hp.y, hp.z); if (seenH.has(k0)) continue; const c = [], st = [hp]; seenH.add(k0);
       while (st.length) { const q = st.pop(); c.push(q); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const k = K(q.x + dx, q.y + dy, q.z), o = w.blocks[k]; if (o && BLOCKS[o.t].kind === 'heap' && !seenH.has(k)) { seenH.add(k); st.push({ x: q.x + dx, y: q.y + dy, z: q.z, b: o }); } } }
       structs.push({ cells: c.map(r => [r.x, r.y]), eave: c[0].z + 2.2, coef: 0.85, area: c.length * 1.1 * 0.85, gut: c.every(r => r.b.gut), heap: true }); } }
-  const roofComps = [];
+  const roofComps = [], byBuilding = {};
   for (const st0 of structs) {
     const direct = tanks.filter(t => t.z < st0.eave && st0.cells.some(([x, y]) => Math.max(Math.abs(x - t.x), Math.abs(y - t.y)) <= 1));
     let got = 0;
@@ -536,6 +536,7 @@ export function analyze(w, site, persons = 1) {
       seen.forEach(k => fedTanks.add(k)); got = st0.area;
     } else if (direct.length) { direct.forEach(t => fedTanks.add(K(t.x, t.y, t.z))); got = Math.min(st0.area, direct.length * 1.5 * st0.coef); noGutter += st0.area - got; }
     roofCatch += got; if (!direct.length) roofLost += st0.area;
+    if (st0.building) byBuilding[st0.building] = { area: st0.area, got, tanks: direct.length, gut: st0.gut };
     if (st0.comp) roofComps.push({ n: st0.comp.length, area: st0.area, tanks: direct.length });
   }
   if (roofLost > 0.5) diag.push({ lv: 'warn', text: `屋根${Math.round(roofLost)}m²ぶんの雨がタンクに入っていない（タンクは屋根の軒から1m以内に。入口が軒より低ければ、家より高い所でもよい）` });
@@ -597,7 +598,7 @@ export function analyze(w, site, persons = 1) {
   }
   const count = (kind) => blocksOf(w, kind).length;
   return {
-    groups, house, gh, ghBeds, roofComps, roofCatch, roofLost, tanks: tanks.length, fedTanks: fed.length, fedKeys: [...fedTanks], tankCap: fed.length * 1000, tankBase,
+    groups, house, gh, ghBeds, roofComps, roofCatch, roofLost, byBuilding, tanks: tanks.length, fedTanks: fed.length, fedKeys: [...fedTanks], tankCap: fed.length * 1000, tankBase,
     beds: beds.length, gArea, bedMaxZ, risers, stoneRisers, wallArea, wallBedShare, mulch: beds.filter(b => b.b.m).length, bedSet,
     tankGrav, pondGrav, pumps, ponds: ponds.length, pondCap: ponds.length * 1000, pondArea: new Set(ponds.map(p => `${p.x},${p.y}`)).size, pondCatch, pondTop,
     filter, pvKw: (count('pv') + (w.house?.pv || 0)) * BLOCKS.pv.kw, battKwh: (count('batt') + (w.house?.batt || 0)) * BLOCKS.batt.kwh, heap: count('heap'), coops: count('coop'), trees: count('tree'), hedge: count('hedge'),
@@ -807,6 +808,7 @@ export function cellProblem(w, d, x, y) {
   const g = h(w, x, y);
   if (Math.abs(g - d.z) > 1) return g > d.z ? '地面が2段以上高い' : '地面が2段以上低い';
   for (let z = Math.min(g, d.z) - 1; z < d.z + HOUSE_H; z++) if (at(w, x, y, z)) return 'ほかのものがある';
+  { const ob = buildingAt(w, x, y); if (ob && bid(ob) !== bid(d)) return 'ほかの建物がある'; }
   { const tw = treeWhy(w, x, y); if (tw) return tw.startsWith('やぶ') ? 'やぶがある' : '木がある'; }
   return null;
 }
@@ -896,6 +898,41 @@ export function buildHouse(s, d) {
   w.earth = Math.max(0, w.earth + est.dig - est.fil);
   w.house = cloneHouse(d);
   w.mods.compostToilet = houseHas(d, 'ctoilet'); w.mods.saving = houseHas(d, 'shower2'); if (d.eq.depth) w.mods.depth = d.eq.depth;
+  return null;
+}
+/* 建物は何棟でも：母屋（w.house、住む）と離れ（w.annex）。離れの使い道はカードで選ぶ。
+   どの屋根も雨を受ける。暑さ寒さの計算は、今は母屋だけ */
+export const USES = {
+  live: { name: '住む', note: '寝起きする母屋。暑さ寒さを計算する。' },
+  stay: { name: '泊める', note: '手伝いに来た人が泊まる離れ。代わりに人手をもらう。' },
+  store: { name: 'しまう', note: '薪や穫れたものの倉庫。薪が乾き、備蓄が増える。' },
+  grow: { name: '育てる', note: '温室。寒い季節も苗や野菜が育つ。' }
+};
+export const buildings = (w) => [w.house, ...(w.annex || [])].filter(Boolean);
+export const bid = (b) => (b && b.id) || 'main';
+export function buildingAt(w, x, y) { for (const b of buildings(w)) if (b.cells[ck(x, y)]) return b; return null; }
+export function buildingById(w, id) { return buildings(w).find(b => bid(b) === id) || null; }
+export function newAnnex(w, z, use = 'store') { const d = newHouse(z); w.nextB = (w.nextB || 0) + 1; d.id = 'b' + w.nextB; d.use = use; return d; }
+/* 建物を建てる・建て直す（母屋なら buildHouse と同じ） */
+export function buildBuilding(s, d) {
+  const w = s.world; if (bid(d) === 'main') return buildHouse(s, d);
+  const probs = houseProblems(d); if (probs.length) return probs[0];
+  const list = w.annex || (w.annex = []), i = list.findIndex(b => b.id === d.id), cur = i >= 0 ? list[i] : null;
+  const est = estimate(w, cur, d);
+  if (est.total > s.cash + 1e-9) return `お金が足りない（${Math.round(est.total)}万円かかる）`;
+  s.cash -= est.total; spend(w, est.local, est.far);
+  for (const k in d.cells) { const [x, y] = k.split(',').map(Number); w.H[idx(x, y)] = d.z; clearVeg(w, x, y); }
+  w.earth = Math.max(0, w.earth + est.dig - est.fil);
+  if (i >= 0) list[i] = cloneHouse(d); else list.push(cloneHouse(d));
+  return null;
+}
+/* 離れを壊す：片づけの手間（床1m²あたり0.4万円）。母屋は壊せない */
+export const DEMOLISH_M2 = 0.4;
+export function removeBuilding(s, id) {
+  const w = s.world; if (id === 'main') return '母屋は壊せない（使い道は変えられない）';
+  const list = w.annex || [], i = list.findIndex(b => b.id === id); if (i < 0) return '建物がない';
+  const cost = Object.keys(list[i].cells).length * DEMOLISH_M2; if (cost > s.cash + 1e-9) return 'お金が足りない';
+  s.cash -= cost; spend(w, cost, 0); list.splice(i, 1);
   return null;
 }
 /* 最初の小さな家（4×3m）：斜面の上のほうの平らな段に、等高線に沿って長く。扉は外が同じ段の短い辺、窓は低い側の長い辺に2つ */

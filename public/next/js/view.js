@@ -88,12 +88,39 @@ export function createView(canvas, opt = {}) {
     if (envWant) { const L = envWant; envWant = null; setEnv(L.hemiSky, L.horizon, L.hemiGround);
       if (scene.background?.isTexture) scene.background.dispose();
       scene.background = sky('#' + L.skyTop.getHexString(), '#' + L.skyBottom.getHexString()); }
-    if (dof.enabled) { const f = camera.position.distanceTo(controls.target); dof.uniforms.focus.value = f; dof.uniforms.aperture.value = (v.blur ?? 0.016) / f; }
+    if (scene.fog && scene.fog.isFog) { const d = camera.position.distanceTo(controls.target); scene.fog.near = Math.max(90, d * 0.85); scene.fog.far = scene.fog.near + 190; }   // 遠くから見るときは霧も遠くへ
+    if (dof.enabled) {
+      // ピント：押した物があればそこ、なければ回す中心。遠くから見るほどぼかしを弱く（地図は全体が読めるように）
+      const f = camera.position.distanceTo(v.focusPoint || controls.target), d = camera.position.distanceTo(controls.target);
+      const k = (v.blur ?? 0.016) * Math.max(0.15, Math.min(1, 1.6 - d / 60));
+      dof.uniforms.focus.value = f; dof.uniforms.aperture.value = k / f;
+    }
     composer.render(); v.lastDraw = performance.now();
   };
+  // 飛ぶ：回す中心と距離・角度をなめらかに移す（地図⇄近く、押した所へ寄る）
+  let fly = null;
+  const sph = () => { const o = camera.position.clone().sub(controls.target); const r = o.length(); return { r, polar: Math.acos(Math.max(-1, Math.min(1, o.y / r))), azim: Math.atan2(o.z, o.x) }; };
+  v.flyTo = (target, dist, polarDeg, ms = 650) => {
+    const a = sph(), t0 = controls.target.clone();
+    const polar = polarDeg != null ? THREE.MathUtils.degToRad(polarDeg) : a.polar;
+    fly = { t0, t1: target.clone(), r0: a.r, r1: dist, p0: a.polar, p1: polar, az: a.azim, start: performance.now(), ms };
+    v.req();
+  };
+  v.flying = () => !!fly;
+  const stepFly = () => {
+    if (!fly) return false;
+    const u = Math.min(1, (performance.now() - fly.start) / fly.ms), e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+    controls.target.lerpVectors(fly.t0, fly.t1, e);
+    const r = fly.r0 + (fly.r1 - fly.r0) * e, p = fly.p0 + (fly.p1 - fly.p0) * e;
+    camera.position.set(controls.target.x + r * Math.sin(p) * Math.cos(fly.az), controls.target.y + r * Math.cos(p), controls.target.z + r * Math.sin(p) * Math.sin(fly.az));
+    camera.lookAt(controls.target);
+    if (u >= 1) { fly = null; controls.update(); controls.dispatchEvent({ type: 'change' }); }
+    return true;
+  };
+  v.distance = () => camera.position.distanceTo(controls.target);
   controls.addEventListener('change', v.req);
   addEventListener('resize', v.resize);
-  const loop = () => { requestAnimationFrame(loop); const moving = controls.update(); if (v.need || moving) { v.need = false; v.render(); } };
+  const loop = () => { requestAnimationFrame(loop); const flying = stepFly(); const moving = flying ? false : controls.update(); if (v.need || moving || flying) { v.need = false; v.render(); if (v.onFrame) v.onFrame(); } };
   v.start = () => { v.resize(); loop(); };
   return v;
 }

@@ -10,11 +10,25 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div class="hud">
-  <div class="chip" id="where">読みこみ中…</div>
+<div class="top">
+  <div class="row">
+    <button class="pill" id="toMap" hidden><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>地図</button>
+    <div class="chip" id="where">読みこみ中…</div>
+    <span class="grow"></span>
+    <div class="chip num" id="cash"></div>
+    <button class="icon" id="undo" aria-label="取り消し" disabled><svg viewBox="0 0 24 24"><path d="M9 7H4v5"/><path d="M4.5 11.5A8 8 0 1 1 7 18"/></svg></button>
+    <button class="icon" id="redo" aria-label="やり直し" disabled><svg viewBox="0 0 24 24"><path d="M15 7h5v5"/><path d="M19.5 11.5A8 8 0 1 0 17 18"/></svg></button>
+  </div>
   <label class="sun"><span aria-hidden="true">☀</span><input type="range" id="hour" min="6" max="18" step="0.25" value="10" aria-label="時刻"><span id="hourTxt"></span></label>
 </div>
-<p class="note">作り直しの試作です。いまは見た目だけで、作る道具はまだありません。<a href="/">今の版へ</a></p>
+<div id="card" class="card" hidden></div>
+<div id="tip" class="tip" hidden></div>
+<div id="toast" class="toast" hidden></div>
+<div class="bottom">
+  <p class="hint" id="hint"></p>
+  <button class="season" id="season" hidden>季節を過ごす</button>
+  <nav class="tools" id="tools" hidden></nav>
+</div>
 <script type="module" src="/next/js/main.js"></script>
 </body>
 </html>
