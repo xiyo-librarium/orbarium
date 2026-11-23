@@ -431,7 +431,27 @@ function openBuild(cx, cy, o = {}) {
     if (v.top && !wasTop) { st.angle3d = v.angle; v.angle = 0; } else if (!v.top && wasTop) v.angle = st.angle3d ?? v.angle;
     ov.querySelectorAll('[data-view]').forEach(x => x.classList.toggle('on', x.dataset.view === vw));
   };
-  const redraw = () => { v.house = st.draft; v.base = st.base; v.baseWorld = base; v.selFurn = st.cat === 'house' ? st.sel : -1; v.draw(); miniMap(mini, dw, v); renderBuildSide(st); };
+  /* 水の見え方：タンクの水位（いまの季節の水）、畑の土の湿り気、水まわりの設計中は斜面の水の筋 */
+  st.syncWater = () => {
+    const A = E.W.analyze(dw, E.SITES[G.s.site], G.s.persons.length), cap = Math.max(60, Math.min(170, 80 + 18 * ((G.s.om ?? 2) - 2)));
+    const keep = v.water && v.water.rain;
+    v.water = { tankFrac: A.tankCap ? Math.min(1, (G.s.tank || 0) / A.tankCap) : 0, soilFrac: Math.min(1, (G.s.soil ?? cap * 0.6) / cap), fed: new Set(A.fedKeys), flow: st.cat === 'water', rain: keep || null, A, soilCap: cap };
+    if (st.rainResult && st.rainResult.sig !== JSON.stringify(A.fedKeys)) st.rainResult = null;
+  };
+  /* 雨の日を見る：その土地の大雨の日（メデジン35mm、タオス18mm）を数秒で。数字は目安 */
+  st.playRain = () => {
+    st.syncWater(); const W2 = v.water, A = W2.A, mm = G.s.site === 'taos' ? 18 : 35;
+    const tankL = (G.s.tank || 0) > A.tankCap ? A.tankCap : (G.s.tank || 0), inflow = A.roofCatch * mm, room = Math.max(0, A.tankCap - tankL), overflow = Math.max(0, inflow - room);
+    const tank1 = A.tankCap ? Math.min(1, (tankL + inflow) / A.tankCap) : 0;
+    const roofArea = (dw.house ? Object.keys(dw.house.cells).length : 0), runoff = Math.max(0, (2500 - roofArea) * mm / 1000 * 0.12), lost = A.roofLost * mm;
+    const runoffC = A.gArea ? Math.min(0.5, 0.05 + 0.6 * (A.risers - (A.stoneRisers || 0)) / Math.max(1, A.gArea)) * (1 - 0.3 * A.mulch / Math.max(1, A.beds)) : 0.1;
+    const soil0 = W2.soilFrac, soil1 = Math.min(1, soil0 + mm * (1 - runoffC) / W2.soilCap);
+    const eave = {}; for (const k of A.fedKeys) { const [x, y, z] = k.split(',').map(Number); const nearHouse = dw.house && [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]].some(([dx, dy]) => dw.house.cells[`${x + dx},${y + dy}`]); eave[k] = Math.max(1.3, Math.min(3.2, nearHouse ? dw.house.z + E.W.HOUSE_H - z : 2.2)); }
+    st.rainResult = { mm, inflow, overflow, lost, runoff, pond: A.ponds ? Math.min(A.pondCap, A.pondCatch * mm * 0.15) : 0, soilUp: Math.round((soil1 - soil0) * 100), tank0: Math.round(W2.tankFrac * 100), tank1: Math.round(tank1 * 100), sig: JSON.stringify(A.fedKeys), playing: true };
+    renderBuildSide(st);
+    v.playRain({ mm, tank0: W2.tankFrac, tank1, soil0, soil1, eave, dur: 9000, done: () => { st.rainResult.playing = false; renderBuildSide(st); } });
+  };
+  const redraw = () => { v.house = st.draft; v.base = st.base; v.baseWorld = base; v.selFurn = st.cat === 'house' ? st.sel : -1; st.syncWater(); v.draw(); miniMap(mini, dw, v); renderBuildSide(st); };
   st.redraw = redraw;
   st.setCat = (cat) => {
     st.cat = cat; st.msg = ''; st.sel = -1; st.drag = null; st.held = null; v.rect = null; v.ghost = null; v.ghostEdge = null; v.furnGhost = null;
@@ -756,6 +776,7 @@ function renderBuildSide(st) {
   });
   if (st.cat === 'house') bindHouse(st, el);
   else if (st.cat) {
+    el.querySelectorAll('[data-rain]').forEach(b => b.onclick = () => st.playRain());
     el.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { st.tool = b.dataset.tool; st.held = null; st.msg = ''; G.view.ghost = null; renderBuildSide(st); });
     el.querySelectorAll('[data-hcancel]').forEach(b => b.onclick = () => { st.held = null; st.msg = ''; renderBuildSide(st); });
     el.querySelectorAll('[data-mat]').forEach(b => b.onclick = () => { const [k, t] = b.dataset.mat.split(':'); MAT[k] = t; renderBuildSide(st); });
@@ -772,7 +793,11 @@ function trayBody(st) {
   if (st.cat === 'land' && (st.dw.wood || 0) > 0.005) opts += `<p class="small">とってある木：${st.dw.wood.toFixed(1)}m³（堆肥のチップに使い、残りは${st.draft && st.draft.stove ? 'かまどの薪に' : '薪に。［家］の素材で「薪のかまど」をつけると使える'}）</p>`;
   const mv = ['water', 'gear'].includes(st.cat) ? card(MOVE) : '';
   if (st.held) opts += `<div class="held"><span>持っている：<b>${esc(E.W.BLOCKS[st.dw.blocks[st.held.join(',')]?.t]?.name || '')}</b>。置きたい所を押す</span><button class="btn ghost" data-hcancel="1">やめる</button></div>`;
-  return `<div class="tcards">${known.map(card).join('')}${mv}${card(ERASE)}</div>
+  const rr = st.rainResult, L = (x) => x >= 1000 ? `${(x / 1000).toFixed(1)}m³` : `${Math.round(x)}L`;
+  const rain = st.cat === 'water' ? `<div class="rainbox"><div class="rb-h"><b>水の流れ</b><button class="btn" data-rain="1"${rr && rr.playing ? ' disabled' : ''}>${rr && rr.playing ? '雨が降っている…' : `雨の日を見る（${G.s.site === 'taos' ? 18 : 35}mm）`}</button></div>
+    <p class="small">青い筋は、雨が斜面のどこを流れて集まるか。タンクの水位は、いまの季節の水。</p>
+    ${rr && !rr.playing ? `<ul class="small rb-list"><li>屋根からタンクへ ${L(rr.inflow - rr.overflow)}（水位 ${rr.tank0}% → ${rr.tank1}%）${rr.overflow > 1 ? `、あふれた ${L(rr.overflow)}` : ''}</li>${rr.lost > 1 ? `<li>雨樋がなく、軒から落ちた ${L(rr.lost)}</li>` : ''}<li>斜面を流れ去った ${L(rr.runoff * 1000)}${rr.pond > 1 ? `（ため池に ${L(rr.pond)}）` : ''}</li><li>畑の土の湿り気 +${rr.soilUp}%</li></ul><p class="small muted">数字は目安。</p>` : ''}</div>` : '';
+  return `${rain}<div class="tcards">${known.map(card).join('')}${mv}${card(ERASE)}</div>
     ${t ? `<p class="small tnote">${esc(t.note)}</p>` : ''}${opts}
     ${hidden ? `<p class="small muted">まだ知らない作り方が、あと${hidden}つ。困りごとや図鑑から覚える。</p>` : ''}`;
 }
@@ -799,11 +824,12 @@ function houseBody(st) {
       }).join('')}`;
   }
   if (st.tab === 'mat') body = `
-    <h3>壁 <span class="small">家全体の壁を、この素材で張る</span></h3><div class="mcards">${Object.entries(E.W.WALLS).filter(([, M]) => !M.home || M.home === G.s.site).map(([k, M]) => matCard('wall', k, M, d.wall === k, wallMeters(M))).join('')}</div>
-    ${E.W.WALLS[d.wall].accent ? `<div class="seg-o accents"><span class="small">腰壁（ソカロ）と窓枠の色</span>${E.W.ACCENTS.map(([c, n], i) => `<button class="sw${(d.accent ?? 0) === i ? ' on' : ''}" data-accent="${i}" style="--c:${c}" aria-label="${n}" title="${n}"></button>`).join('')}</div>` : ''}
+    <h3>壁 <span class="small">家全体の壁を、この素材で張る</span></h3><div class="mcards">${Object.entries(E.W.WALLS).filter(([, M]) => !M.hidden && (!M.home || M.home === G.s.site)).map(([k, M]) => matCard('wall', k, M, d.wall === k, wallMeters(M))).join('')}</div>
+    ${d.wall === 'bahareque' ? `<div class="seg-o"><span class="small">仕上げ</span><button class="opt${(d.finish || 'earth') === 'earth' ? ' on' : ''}" data-finish="earth">土のまま（骨組みと編み目を見せる）</button><button class="opt${d.finish === 'lime' ? ' on' : ''}" data-finish="lime">しっくいと色の腰壁</button></div>` : ''}
+    ${E.W.WALLS[d.wall].accent ? `<div class="seg-o accents"><span class="small">${(d.finish || 'earth') === 'lime' ? '腰壁（ソカロ）と窓枠の色' : '窓枠と扉の色'}</span>${E.W.ACCENTS.map(([c, n], i) => `<button class="sw${(d.accent ?? 0) === i ? ' on' : ''}" data-accent="${i}" style="--c:${c}" aria-label="${n}" title="${n}"></button>`).join('')}</div>` : ''}
     <h3>屋根 <span class="small">雨を集める面にもなる</span></h3><div class="mcards">${Object.entries(E.W.ROOFS).filter(([, M]) => !M.home || M.home === G.s.site).map(([k, M]) => matCard('roof', k, M, d.roof === k)).join('')}</div>
     ${E.W.ROOFS[d.roof].flat ? `<h3>屋根の形</h3><p class="small" style="margin:0">${esc(E.W.ROOFS[d.roof].name)}は平らだけ。軒は出さず、まわりを低い壁（パラペット）で囲んで、木の樋（カナレ）から雨を落とす。雨樋は要らない。</p>` : roofShapeBlock(d)}
-    <h3>床</h3><div class="mcards">${Object.entries(E.W.FLOORS).map(([k, M]) => matCard('floor', k, M, d.floor === k)).join('')}</div>
+    <h3>床</h3><div class="mcards">${Object.entries(E.W.FLOORS).filter(([, M]) => !M.hidden && (!M.home || M.home === G.s.site)).map(([k, M]) => matCard('floor', k, M, d.floor === k)).join('')}</div>
     <h3>そのほか</h3><div class="seg-o">
       ${E.W.ROOFS[d.roof].canales ? '' : gutterBtn(d)}
       <button class="opt${d.stove ? ' on' : ''}" data-stove="1">薪のかまど${d.stove ? 'あり' : 'をつける'}（${E.W.STOVE_PRICE}万円。切った木で料理と暖房、電気が減る）</button>
@@ -829,6 +855,7 @@ function bindHouse(st, el) {
     if (R.flat) { d.roofShape = 'flat'; d.eaves = 0.16; }   // 土の平屋根：軒を出さず、パラペットで囲む
   }));
   el.querySelectorAll('[data-accent]').forEach(b => b.onclick = () => set(d => { d.accent = +b.dataset.accent; }));
+  el.querySelectorAll('[data-finish]').forEach(b => b.onclick = () => set(d => { d.finish = b.dataset.finish; }));
   el.querySelectorAll('[data-floor]').forEach(b => b.onclick = () => set(d => { d.floor = b.dataset.floor; }));
   el.querySelectorAll('[data-rshape]').forEach(b => b.onclick = () => set(d => { d.roofShape = b.dataset.rshape; if (d.roofShape === 'gable' && !['ns', 'ew'].includes(d.roofDir)) d.roofDir = 'ns'; if (d.roofShape === 'mono' && !['n', 'e', 's', 'w'].includes(d.roofDir)) d.roofDir = 's'; if (!d.pitch) d.pitch = 0.3; }));
   el.querySelectorAll('[data-rdir]').forEach(b => b.onclick = () => set(d => { d.roofDir = b.dataset.rdir; }));

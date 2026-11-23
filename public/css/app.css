@@ -393,3 +393,12 @@ dl.cpoints dt { font-weight: 700; white-space: nowrap; } dl.cpoints dd { margin:
 .accents { align-items: center; gap: 8px; }
 .accents .sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; background: var(--c); box-shadow: 0 0 0 1px rgba(0,0,0,.15); cursor: pointer; padding: 0; }
 .accents .sw.on { box-shadow: 0 0 0 2px #1F2A2E; }
+.swatch.pat-baldosa { background: repeating-linear-gradient(0deg, rgba(240,225,205,.8) 0 1px, transparent 1px 11px), repeating-linear-gradient(90deg, rgba(240,225,205,.8) 0 1px, transparent 1px 11px), var(--c); }
+.swatch.pat-tierra { background: radial-gradient(circle at 35% 40%, rgba(255,235,200,.35) 0 6px, transparent 9px), radial-gradient(circle at 70% 70%, rgba(80,50,30,.25) 0 4px, transparent 7px), var(--c); }
+.swatch.pat-bahareque { background: linear-gradient(90deg, #8A6A3E 0 3px, transparent 3px calc(100% - 3px), #8A6A3E calc(100% - 3px)), repeating-linear-gradient(45deg, rgba(120,90,50,.35) 0 2px, transparent 2px 6px) 30% 30% / 40% 40% no-repeat, var(--c); }
+/* 水の流れ */
+.rainbox { border: 0.5px solid #9CC3E6; background: #F1F7FD; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.rainbox .rb-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.rainbox p { margin: 6px 0 0; }
+.rb-list { margin: 6px 0 0; padding-left: 18px; }
+.rb-list li { margin: 2px 0; }

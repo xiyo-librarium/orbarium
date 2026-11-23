@@ -382,7 +382,103 @@ export function createView(canvas, world, opt = {}) {
       ctx.fillStyle = 'rgba(255,196,80,.95)'; ctx.beginPath(); ctx.arc(sx, sy, 9 * v.dpr, 0, 7); ctx.fill();
       ctx.strokeStyle = 'rgba(255,170,40,.9)'; ctx.lineWidth = 2 * v.dpr; for (let i = 0; i < 8; i++) { const a2 = i * Math.PI / 4; ctx.beginPath(); ctx.moveTo(sx + Math.cos(a2) * 12 * v.dpr, sy + Math.sin(a2) * 12 * v.dpr); ctx.lineTo(sx + Math.cos(a2) * 16 * v.dpr, sy + Math.sin(a2) * 16 * v.dpr); ctx.stroke(); }
     }
+    // 水の層：いまの絵を写しておき、その上に水を重ねる（雨の再生では、写しの上に水だけを描き直す）
+    if (v.water && (v.water.flow || v.water.rain)) { v.pickData = null; if (!v.baseCv || v.baseCv.width !== canvas.width || v.baseCv.height !== canvas.height) { v.baseCv = document.createElement('canvas'); v.baseCv.width = canvas.width; v.baseCv.height = canvas.height; } v.baseCv.getContext('2d').drawImage(canvas, 0, 0); drawWater(ctx, performance.now()); }
   }
+  /* ---------- 水：見えるようにする ----------
+     v.water = { tankFrac 0〜1, soilFrac 0〜1, fed: Set("x,y,z") 雨の入るタンク, flow: 斜面の水の筋を出すか, rain: 再生中の雨 }
+     斜面の筋：段々の平らな所でも流れる向きが決まるよう、地形をならした高さを少し足して、いちばん急に下がるとなりへ流す */
+  let flowCache = null;
+  function flowLines() {
+    let sig = 0; for (let y = 0; y < N; y += 3) for (let x = 0; x < N; x += 3) sig = (sig * 31 + h(world, x, y) * 7) | 0;
+    if (flowCache && flowCache.sig === sig) return flowCache;
+    const H0 = new Float32Array(N * N), B = new Float32Array(N * N), R = 4;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) H0[y * N + x] = h(world, x, y);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { let sum = 0, n = 0; for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= N || yy >= N) continue; sum += H0[yy * N + xx]; n++; } B[y * N + x] = sum / n; }
+    const S = new Float32Array(N * N); for (let i = 0; i < N * N; i++) S[i] = H0[i] + 0.35 * B[i];
+    const to = new Int32Array(N * N).fill(-1), acc = new Float32Array(N * N).fill(1), order = [...Array(N * N).keys()].sort((a, b) => S[b] - S[a]);
+    for (const i of order) {
+      const x = i % N, y = (i / N) | 0; let best = -1, bd = 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= N || yy >= N) continue; const j = yy * N + xx, d = (S[i] - S[j]) / Math.hypot(dx, dy); if (d > bd) { bd = d; best = j; } }
+      if (best >= 0) { to[i] = best; acc[best] += acc[i]; }
+    }
+    return (flowCache = { sig, to, acc });
+  }
+  /* 手前のものに隠れていないか：当たり判定の絵で、その点にいちばん手前に描かれているものを調べる */
+  function seen(px, py, ok) {
+    if (!v.pickData) v.pickData = pctx.getImageData(0, 0, pick.width, pick.height);
+    const X = Math.round(px), Y = Math.round(py); if (X < 0 || Y < 0 || X >= pick.width || Y >= pick.height) return false;
+    const o = (Y * pick.width + X) * 4, d = v.pickData.data; if (d[o + 3] < 250) return false;
+    const f = v.faces[((d[o] << 16) | (d[o + 1] << 8) | d[o + 2]) - 1]; return !!f && ok(f);
+  }
+  function drawWater(cx, now) {
+    const W = v.water, g = geom(); if (!W || v.top || !(W.flow || W.rain)) return;
+    const x0 = Math.max(0, v.cx - v.R), x1 = Math.min(N - 1, v.cx + v.R), y0 = Math.max(0, v.cy - v.R), y1 = Math.min(N - 1, v.cy + v.R);
+    const R = W.rain, t = R ? Math.min(1, (now - R.start) / R.dur) : 1, raining = R && t < 0.7, ease = R ? Math.min(1, t / 0.7) : 1;
+    const tankF = R ? R.tank0 + (R.tank1 - R.tank0) * ease : W.tankFrac, soilF = R ? R.soil0 + (R.soil1 - R.soil0) * ease : W.soilFrac;
+    const hs = v.house, inHouse = (x, y) => hs && hs.cells[`${x},${y}`];
+    // 畑の土：湿っていれば濃く、乾けば白っぽくひびが入る
+    for (const k in world.blocks) { const b = world.blocks[k]; if (BLOCKS[b.t]?.kind !== 'bed') continue; const [x, y, z] = k.split(',').map(Number); if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+      const q = [[x + 0.04, y + 0.04], [x + 0.96, y + 0.04], [x + 0.96, y + 0.96], [x + 0.04, y + 0.96]].map(([a, c]) => project(a, c, z + 0.15, g));
+      if (!seen((q[0][0] + q[2][0]) / 2, (q[0][1] + q[2][1]) / 2, (f) => f.x === x && f.y === y)) continue;
+      cx.fillStyle = soilF > 0.5 ? `rgba(40,24,10,${((soilF - 0.5) * 0.5).toFixed(3)})` : `rgba(235,220,190,${((0.5 - soilF) * 0.7).toFixed(3)})`; cx.beginPath(); cx.moveTo(q[0][0], q[0][1]); for (const r of q) cx.lineTo(r[0], r[1]); cx.closePath(); cx.fill();
+      if (soilF < 0.3) { cx.strokeStyle = 'rgba(120,90,60,.5)'; cx.lineWidth = 0.8 * v.dpr; const a = project(x + 0.3, y + 0.25, z + 0.15, g), b2 = project(x + 0.55, y + 0.6, z + 0.15, g), c2 = project(x + 0.8, y + 0.5, z + 0.15, g); cx.beginPath(); cx.moveTo(a[0], a[1]); cx.lineTo(b2[0], b2[1]); cx.lineTo(c2[0], c2[1]); cx.stroke(); }
+    }
+    // 斜面の水の筋：雨の日は流れて見え、水まわりの設計中はうっすら
+    if (W.flow || R) {
+      const F = flowLines(), alphaK = R ? (t < 0.75 ? 1 : Math.max(0.6, 1 - (t - 0.75) / 0.25 * 0.4)) : 0.6;
+      cx.lineCap = 'round';
+      if (R) { cx.setLineDash([5 * v.dpr, 7 * v.dpr]); cx.lineDashOffset = -((now - R.start) / 1000) * 26 * v.dpr; }
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const i = y * N + x, j = F.to[i], a = F.acc[i]; if (j < 0 || a < 9 || inHouse(x, y)) continue;
+        const xx = j % N, yy = (j / N) | 0; if (xx < x0 || xx > x1 || yy < y0 || yy > y1 || inHouse(xx, yy)) continue;
+        const za = groundTop(x, y), zb = groundTop(xx, yy), onCell = (f) => (f.x === x && f.y === y) || (f.x === xx && f.y === yy);
+        cx.strokeStyle = `rgba(38,118,204,${(Math.min(0.95, 0.4 + Math.log2(a) * 0.09) * alphaK).toFixed(3)})`; cx.lineWidth = Math.min(7, 1.2 + Math.log2(a) * 0.75) * v.dpr;
+        for (let k = 0; k < 4; k++) {   // 4つに分けて、木や家に隠れている所は描かない
+          const u0 = k / 4, u1 = (k + 1) / 4, um = (u0 + u1) / 2, P = (u) => project(x + 0.5 + (xx - x) * u, y + 0.5 + (yy - y) * u, (u < 0.5 ? za : zb) + 0.04, g), M = P(um);
+          if (!seen(M[0], M[1], onCell)) continue;
+          const A = P(u0), Bq = P(u1); cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(Bq[0], Bq[1]); cx.stroke();
+        }
+      }
+      cx.setLineDash([]);
+    }
+    // タンク：手前半分を透かして水位を見せる。雨の入らないタンクは空のまま
+    for (const k in world.blocks) {
+      const b = world.blocks[k]; if (BLOCKS[b.t]?.kind !== 'tank') continue; const [x, y, z] = k.split(',').map(Number); if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+      const fed = W.fed && W.fed.has(k), f = fed ? tankF : 0, r0 = 0.42, cxw = x + 0.5, cyw = y + 0.5, an = v.angle * Math.PI / 180, ph = -an - Math.PI / 4;
+      const arc = (zz) => { const out = []; for (let k2 = 0; k2 <= 16; k2++) { const th = ph + Math.PI * k2 / 16; out.push(project(cxw + r0 * Math.cos(th), cyw + r0 * Math.sin(th), zz, g)); } return out; };
+      const lo = arc(z + 0.04), hi = arc(z + 0.04 + 0.88 * f), top = arc(z + 0.95);
+      if (!seen(lo[8][0], (lo[8][1] + top[8][1]) / 2, (fc) => fc.x === x && fc.y === y)) continue;
+      cx.strokeStyle = 'rgba(255,255,255,.55)'; cx.lineWidth = 1 * v.dpr; cx.beginPath(); cx.moveTo(lo[0][0], lo[0][1]); for (const q of top) cx.lineTo(q[0], q[1]); cx.lineTo(lo[16][0], lo[16][1]); cx.stroke();   // 目盛りの枠
+      if (f > 0.01) { cx.fillStyle = 'rgba(46,120,200,.55)'; cx.beginPath(); cx.moveTo(lo[0][0], lo[0][1]); for (const q of lo) cx.lineTo(q[0], q[1]); for (let k2 = 16; k2 >= 0; k2--) cx.lineTo(hi[k2][0], hi[k2][1]); cx.closePath(); cx.fill(); cx.strokeStyle = 'rgba(200,232,255,.95)'; cx.lineWidth = 1.4 * v.dpr; cx.beginPath(); cx.moveTo(hi[0][0], hi[0][1]); for (const q of hi) cx.lineTo(q[0], q[1]); cx.stroke(); }
+      if (R && fed && raining) {   // 樋から落ちてくる雨水
+        const top0 = project(cxw, cyw, z + 1.0, g), from = project(cxw, cyw, z + (R.eave?.[k] ?? 2.2), g), ph2 = ((now - R.start) / 400) % 1;
+        cx.fillStyle = 'rgba(120,180,240,.9)'; for (let d = 0; d < 5; d++) { const u = (ph2 + d / 5) % 1, px = from[0] + (top0[0] - from[0]) * u, py = from[1] + (top0[1] - from[1]) * u; cx.beginPath(); cx.arc(px, py, 1.8 * v.dpr, 0, 7); cx.fill(); }
+      }
+      if (R && fed && f >= 0.999 && t < 0.85) {   // あふれる
+        const rim = project(cxw + 0.42, cyw + 0.42, z + 0.95, g), gnd = project(cxw + 0.6, cyw + 0.6, z, g), ph3 = ((now - R.start) / 300) % 1;
+        cx.fillStyle = 'rgba(120,180,240,.8)'; for (let d = 0; d < 4; d++) { const u = (ph3 + d / 4) % 1; cx.beginPath(); cx.arc(rim[0] + (gnd[0] - rim[0]) * u, rim[1] + (gnd[1] - rim[1]) * u, 1.6 * v.dpr, 0, 7); cx.fill(); }
+      }
+    }
+    // 雨粒
+    if (raining) {
+      const Wd = canvas.width, Hd = canvas.height, n = 180, sec = (now - R.start) / 1000, fade = Math.min(1, t / 0.08) * Math.min(1, (0.7 - t) / 0.08);
+      cx.strokeStyle = `rgba(150,180,215,${(0.55 * fade).toFixed(3)})`; cx.lineWidth = 1 * v.dpr;
+      for (let i = 0; i < n; i++) { const px = (hash(i, 1, 81) * Wd + sec * 40 * v.dpr) % Wd, py = (hash(i, 2, 82) * Hd + sec * (520 + hash(i, 3, 83) * 200) * v.dpr) % Hd; cx.beginPath(); cx.moveTo(px, py); cx.lineTo(px - 3 * v.dpr, py + 13 * v.dpr); cx.stroke(); }
+    }
+  }
+  v.playRain = (info) => {   // 1日の雨を数秒で見せる
+    if (!v.water) return; cancelAnimationFrame(v.rainRaf);
+    v.water.rain = { start: performance.now(), dur: info.dur || 9000, ...info };
+    v.draw();
+    const step = () => {
+      const R = v.water && v.water.rain; if (!R) return;
+      const now = performance.now();
+      if (now - R.start >= R.dur) { v.water.tankFrac = R.tank1; v.water.soilFrac = R.soil1; v.water.rain = null; v.draw(); R.done && R.done(); return; }
+      ctx.drawImage(v.baseCv, 0, 0); drawWater(ctx, now); v.rainRaf = requestAnimationFrame(step);
+    };
+    v.rainRaf = requestAnimationFrame(step);
+  };
   /* 地面（と畑・マルチ）の上面の高さ */
   function groundTop(x, y) { const g = h(world, x, y), b = at(world, x, y, g); return g + (b && BLOCKS[b.t]?.kind === 'bed' ? 0.14 : 0); }
   /* ---------- 形の部品：球・円柱・接地の影 ---------- */
@@ -530,7 +626,7 @@ export function createView(canvas, world, opt = {}) {
   }
   /* 家：床・壁（窓と扉つき）・屋根。設計中は新しい床を青く、なくなる床を赤く */
   function drawHouse(list, hs, base, x0, x1, y0, y1, floorLv) {
-    const z = hs.z, Wm = WALLS[hs.wall], F = FLOORS[hs.floor], R = ROOFS[hs.roof];
+    const z = hs.z, Wm = wallLook(hs), F = FLOORS[hs.floor], R = ROOFS[hs.roof];
     const inView = (x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
     for (const k in hs.cells) {
       const [x, y] = k.split(',').map(Number); if (!inView(x, y)) continue;
@@ -564,7 +660,7 @@ export function createView(canvas, world, opt = {}) {
         const pq = q.map(([px, py]) => project(px, py, gz + 0.01, g));
         list.push({ depth: terrainDepth(ox, oy, floorLv) + 2e-5, draw: (cx, pc) => { if (pc) return; const A = [(pq[0][0] + pq[1][0]) / 2, (pq[0][1] + pq[1][1]) / 2], B = [(pq[2][0] + pq[3][0]) / 2, (pq[2][1] + pq[3][1]) / 2], gr = cx.createLinearGradient(A[0], A[1], B[0], B[1]); gr.addColorStop(0, 'rgba(30,35,20,.30)'); gr.addColorStop(1, 'rgba(30,35,20,0)'); cx.fillStyle = gr; cx.beginPath(); cx.moveTo(pq[0][0], pq[0][1]); for (const p of pq) cx.lineTo(p[0], p[1]); cx.closePath(); cx.fill(); } });
       }
-      const seed = (ex * 73 + ey * 151 + (t === 'h' ? 7 : 0)) | 0, tex = (z0, z1) => wallTexture(hs.wall, z0, z1, seed, accentOf(hs));
+      const seed = (ex * 73 + ey * 151 + (t === 'h' ? 7 : 0)) | 0, tex = (z0, z1) => wallTexture(wallKind(hs), z0, z1, seed, accentOf(hs));
       // 基礎：石を積んだ帯。外の地面が低ければ、そこまで下ろす
       if (!v.top) {
         const gz = hs.cells[`${ox},${oy}`] ? z : Math.min(z, h(world, ox, oy)), O2 = T / 2 + 0.06;   // 壁の中心線から外側だけ（家の中には出さない）
@@ -595,7 +691,7 @@ export function createView(canvas, world, opt = {}) {
       const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number);
       for (const [px, py] of t === 'h' ? [[ex, ey], [ex + 1, ey]] : [[ex, ey], [ex, ey + 1]]) { const k = px + ',' + py, e = vtx.get(k) || { h: 0, v: 0, low: false }; e[t]++; if (!(v.wallMode === 'up' || (v.wallMode === 'cut' && !FRONT.includes(o.dir)))) e.low = true; vtx.set(k, e); }
     }
-    const trim = { board: '#8F6B47', brick: '#8E4630', tapia: WALLS.tapia.color, adobe: WALLS.adobe.color, strawbale: WALLS.strawbale.color }[hs.wall] || '#F3EEE3';
+    const trim = wallKind(hs) === 'bahareque' ? '#7E5E38' : { board: '#8F6B47', brick: '#8E4630', tapia: WALLS.tapia.color, adobe: WALLS.adobe.color, strawbale: WALLS.strawbale.color }[hs.wall] || '#F3EEE3';
     for (const [k, e] of vtx) {
       if (!e.h || !e.v) continue; const [px, py] = k.split(',').map(Number); if (px < x0 - 1 || px > x1 + 1 || py < y0 - 1 || py > y1 + 1) continue;
       const P2 = T / 2 + 0.025; rbox(list, px - P2, py - P2, px + P2, py + P2, z, v.top ? HOUSE_H + 0.01 : e.low ? LOW + 0.01 : HOUSE_H, trim, { type: 'trim', nopick: true }, 1);
@@ -634,7 +730,7 @@ export function createView(canvas, world, opt = {}) {
           const T3 = 0.2, [nx, ny] = sg.n, xa = Math.min(sg.a[0], sg.b[0]), xb = Math.max(sg.a[0], sg.b[0]), ya = Math.min(sg.a[1], sg.b[1]), yb = Math.max(sg.a[1], sg.b[1]);
           const rr = nx ? [nx > 0 ? xa - T3 : xa, ya, nx > 0 ? xa : xa + T3, yb] : [xa, ny > 0 ? ya - T3 : ya, xb, ny > 0 ? ya : ya + T3];
           const zt = RZ((rr[0] + rr[2]) / 2, (rr[1] + rr[3]) / 2) - 0.02;
-          rbox(list, ...rr, zt, 0.36, Wm.color, { type: 'roof', x: Math.floor(sg.mx - nx * 0.5), y: Math.floor(sg.my - ny * 0.5), dbias: after(rr), sideDecor: wallTexture(hs.wall, HOUSE_H, HOUSE_H + 0.36, (Math.floor(sg.mx) * 31 + Math.floor(sg.my) * 17) | 0, accentOf(hs)) }, 1);
+          rbox(list, ...rr, zt, 0.36, Wm.color, { type: 'roof', x: Math.floor(sg.mx - nx * 0.5), y: Math.floor(sg.my - ny * 0.5), dbias: after(rr), sideDecor: wallTexture(wallKind(hs), HOUSE_H, HOUSE_H + 0.36, (Math.floor(sg.mx) * 31 + Math.floor(sg.my) * 17) | 0, accentOf(hs)) }, 1);
           if (canaleAt.has(sg)) {   // カナレ：外へ0.5m、幅14cm。屋根の各辺のまん中あたりに1本
             const cxm = sg.mx, cym = sg.my, w2 = 0.07, out = 0.5;
             const cr = nx ? [nx > 0 ? cxm : cxm - out, cym - w2, nx > 0 ? cxm + out : cxm, cym + w2] : [cxm - w2, ny > 0 ? cym : cym - out, cxm + w2, ny > 0 ? cym + out : cym];
@@ -657,7 +753,7 @@ export function createView(canvas, world, opt = {}) {
         const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number), off = 0.07, [ox2, oy2] = { n: [0, -off], s: [0, off], w: [-off, 0], e: [off, 0] }[o.dir];
         const [pa, pb] = t === 'h' ? [[ex, ey], [ex + 1, ey]] : [[ex, ey], [ex, ey + 1]];
         const ha = roofZ(hs, ...pa, box), hb = roofZ(hs, ...pb, box); if (Math.max(ha, hb) < HOUSE_H + 0.02) continue;
-        gableWall(list, [pa[0] + ox2, pa[1] + oy2], [pb[0] + ox2, pb[1] + oy2], z + HOUSE_H, z + ha, z + hb, o.dir, Wm.color, wallTexture(hs.wall, HOUSE_H, Math.max(ha, hb), (ex * 73 + ey * 151) | 0, accentOf(hs)), { type: 'wall', e: o.e, x: o.x, y: o.y });
+        gableWall(list, [pa[0] + ox2, pa[1] + oy2], [pb[0] + ox2, pb[1] + oy2], z + HOUSE_H, z + ha, z + hb, o.dir, Wm.color, wallTexture(wallKind(hs), HOUSE_H, Math.max(ha, hb), (ex * 73 + ey * 151) | 0, accentOf(hs)), { type: 'wall', e: o.e, x: o.x, y: o.y });
       }
       // かまどの煙突：屋根から出る鉄の煙突と笠。木がとってあれば、うすい煙
       const sf = (hs.furn || []).find(f => f.t === 'stove');
@@ -922,13 +1018,30 @@ export function createView(canvas, world, opt = {}) {
     };
   }
   /* ---------- 家の仕上げ ---------- */
+  /* バハレケは仕上げで見え方が変わる：土のまま（骨組みと編み目を見せる）／しっくいと色の腰壁 */
+  function wallKind(hs) { return hs.wall === 'bahareque' && hs.finish === 'lime' ? 'bahareque_lime' : hs.wall; }
+  function wallLook(hs) { const M = WALLS[hs.wall]; return wallKind(hs) === 'bahareque' ? { ...M, color: '#C4A079' } : M; }
   /* バハレケの腰壁（ソカロ）と窓枠の色 */
   function accentOf(hs) { const M = WALLS[hs.wall]; return M?.accent ? ACCENTS[(hs.accent ?? 0) % ACCENTS.length][0] : M?.frame || null; }
   function wallTexture(kind, z0, z1, seed, accent = null) {   // z0, z1：この部分の床からの高さ（m）。seed：壁ごとの板の色むら
     return (cx, p) => {
       const span = z1 - z0, fy = (zz) => (zz - z0) / span, Q = (a0, b0, a1, b1, f) => quadOn(cx, p, a0, b0, a1, b1, f);
       const band = (za, zb, f) => { const a = Math.max(0, fy(za)), b = Math.min(1, fy(zb)); if (b > a) Q(0, a, 1, b, f); };
-      if (kind === 'bahareque') {   // しっくいの白い壁。ところどころ土色がにじみ、下は色を塗った腰壁（ソカロ）に浮き彫りの模様
+      if (kind === 'bahareque') {   // 土のまま：カブヤの繊維と石灰を混ぜた土。木の柱と梁を見せ、ところどころ割り竹の編み目をのぞかせる
+        const W = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]);
+        for (let i = 0; i < 6; i++) { const [px, py] = faceAt(p, hash(seed, i, 61), hash(seed, i, 62)), rr = W * (0.15 + hash(seed, i, 63) * 0.3), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, i % 3 ? 'rgba(236,214,176,.30)' : 'rgba(112,78,46,.18)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.fillRect(px - rr, py - rr, rr * 2, rr * 2); }
+        cx.lineWidth = 0.7 * v.dpr;   // 土にまぜたカブヤの繊維
+        for (let i = 0; i < 34; i++) { const a = hash(seed, i, 64), b = hash(seed, i, 65), ang = hash(seed, i, 66) * 6.28, L = 0.03 + hash(seed, i, 67) * 0.05, A = faceAt(p, a, b), B = faceAt(p, Math.min(1, a + Math.cos(ang) * L), Math.min(1, Math.max(0, b + Math.sin(ang) * L * 1.6))); cx.strokeStyle = i % 2 ? 'rgba(244,228,192,.55)' : 'rgba(96,66,36,.32)'; lineOn(cx, A, B); }
+        if (hash(seed, 1, 60) > 0.55 && z0 <= 1.05 && z1 >= 1.95) {   // 編み目の窓：割った竹を縦横に編んだ下地が見える
+          const a0 = 0.24, a1 = 0.76, b0 = fy(1.1), b1 = fy(1.9), nx = 5, ny = 6;
+          Q(a0 - 0.02, b0 - 0.02 / span, a1 + 0.02, b1 + 0.02 / span, 'rgba(246,232,204,.55)');   // 土の切り口
+          Q(a0, b0, a1, b1, '#8C6B40');
+          for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) { const u0 = a0 + (a1 - a0) * i / nx, u1 = a0 + (a1 - a0) * (i + 1) / nx, w0 = b0 + (b1 - b0) * j / ny, w1 = b0 + (b1 - b0) * (j + 1) / ny, over = (i + j) % 2; Q(u0 + 0.004, w0 + 0.004 / span, u1 - 0.004, w1 - 0.004 / span, over ? '#D8B676' : '#B48F55'); Q(over ? u0 + 0.004 : u0 + 0.004, over ? w1 - 0.02 / span : w0 + 0.004 / span, u1 - 0.004, over ? w1 - 0.004 / span : w0 + 0.018 / span, 'rgba(60,40,18,.28)'); }
+        }
+        const post = (a, b) => { Q(a, 0, b, 1, '#8A6A3E'); Q(a, 0, a + (b - a) * 0.35, 1, 'rgba(255,232,190,.22)'); for (let zz = Math.ceil(z0 / 0.45) * 0.45; zz < z1; zz += 0.45) Q(a, fy(zz), b, Math.min(1, fy(zz) + 0.018 / span), 'rgba(50,32,14,.55)'); };   // 竹の柱と節
+        if ((seed & 1) === 0) post(0, 0.07);
+        band(0, 0.09, '#7E5E38'); band(HOUSE_H - 0.16, HOUSE_H, '#7A5A34'); band(HOUSE_H - 0.16, HOUSE_H - 0.13, 'rgba(255,232,190,.25)');   // 土台と梁
+      } else if (kind === 'bahareque_lime') {   // しっくいの白い壁。ところどころ土色がにじみ、下は色を塗った腰壁（ソカロ）に浮き彫りの模様
         const W = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]);
         for (let i = 0; i < 3; i++) { const [px, py] = faceAt(p, hash(seed, i, 41), Math.min(1, Math.max(0, fy(0.9 + hash(seed, i, 42) * 2)))), rr = W * (0.12 + hash(seed, i, 43) * 0.18), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, 'rgba(176,140,98,.16)'); gr.addColorStop(1, 'rgba(176,140,98,0)'); cx.fillStyle = gr; cx.fillRect(px - rr, py - rr, rr * 2, rr * 2); }
         if (z0 < 0.9 && accent) {
@@ -1039,6 +1152,14 @@ export function createView(canvas, world, opt = {}) {
         lineOn(cx, faceAt(p, 0, b1), faceAt(p, 1, b1));
       }
       cx.strokeStyle = 'rgba(120,80,40,.10)'; for (let i = 0; i < 4; i++) { const fy = (Math.floor(hash(x, y, 43 + i) * 5) + 0.3 + hash(x, y, 47 + i) * 0.4) / 5, a = hash(x, y, 51 + i) * 0.6; lineOn(cx, faceAt(p, a, fy), faceAt(p, a + 0.35, fy + 0.01)); }
+    };
+    if (t === 'baldosa') return (cx, p) => {   // 素焼きタイル：30cm角くらい（1マスに3×3）、1枚ずつ焼き色がちがう。白い目地
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) { quadOn(cx, p, i / 3 + 0.012, j / 3 + 0.012, (i + 1) / 3 - 0.012, (j + 1) / 3 - 0.012, tone(hash(x * 3 + i, y * 3 + j, 71) - 0.5, 0.34)); if (hash(x * 3 + i, y * 3 + j, 72) > 0.8) quadOn(cx, p, i / 3 + 0.05, j / 3 + 0.05, i / 3 + 0.14, j / 3 + 0.12, 'rgba(255,225,200,.18)'); }
+      cx.strokeStyle = 'rgba(236,222,200,.75)'; cx.lineWidth = 1 * v.dpr; for (let k = 0; k <= 3; k++) { lineOn(cx, faceAt(p, k / 3, 0), faceAt(p, k / 3, 1)); lineOn(cx, faceAt(p, 0, k / 3), faceAt(p, 1, k / 3)); }
+    };
+    if (t === 'tierra') return (cx, p) => {   // 土の床：突き固めて油でみがいた、つやのあるむら
+      for (let i = 0; i < 3; i++) { const [px, py] = faceAt(p, hash(x, y, 73 + i), hash(x, y, 76 + i)), q2 = faceAt(p, Math.min(1, hash(x, y, 73 + i) + 0.4), hash(x, y, 76 + i)), rr = Math.max(2, Math.hypot(q2[0] - px, q2[1] - py)), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, i % 2 ? 'rgba(255,226,180,.28)' : 'rgba(90,56,30,.2)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.beginPath(); cx.arc(px, py, rr, 0, 7); cx.fill(); }
+      const A = faceAt(p, 0.2, 0.3), B = faceAt(p, 0.55, 0.45); cx.strokeStyle = 'rgba(255,240,210,.35)'; cx.lineWidth = 2 * v.dpr; lineOn(cx, A, B);   // 油のつや
     };
     return (cx, p) => {   // 土間：こてむらと粒、2mごとの目地
       for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) quadOn(cx, p, i / 2, j / 2, (i + 1) / 2, (j + 1) / 2, tone(smooth(x * 2 + i, y * 2 + j, 44, 3) - 0.5, 0.3));
