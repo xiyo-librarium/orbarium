@@ -691,13 +691,14 @@ function compact(rep) {
 
 /* ---------- 学びのきっかけ ---------- */
 export const TECH = ['heap', 'toilet', 'grey', 'saving', 'catch', 'mulch', 'terrace', 'offgrid', 'deep', 'hedge', 'chicken', 'pond', 'insulation', 'greenhouse'];
+const site0 = (s) => SITES[s.site] || {};
 function triggers(s, rep) {
   const out = [], has = (id) => s.known.includes(id);
   const ev = (k) => rep.events.find(e => e.kind === k);
   if (!has('heap') && ev('lowN')) out.push({ id: 'heap', why: 'lowN' });
   if (!has('toilet') && has('heap') && s.turn >= 4) out.push({ id: 'toilet', why: 'sewer' });
   if (!has('grey') && (ev('tankempty') || ev('watercut'))) out.push({ id: 'grey', why: ev('tankempty') ? 'tankempty' : 'watercut' });
-  if (!has('saving') && ev('watercut')) out.push({ id: 'saving', why: 'watercut' });
+  if (!has('saving') && site0(s).haul && (ev('haul') || ev('tankempty'))) out.push({ id: 'saving', why: 'saving' });   // 節水は、水が本当に高い土地（タオス）で覚える
   if (!has('mulch') && ev('dry')) out.push({ id: 'mulch', why: 'dry' });
   if (!has('terrace') && (ev('erosion') || (ev('dry') && has('mulch')))) out.push({ id: 'terrace', why: ev('erosion') ? 'erosion' : 'dry' });
   if (!has('offgrid') && ev('blackout')) out.push({ id: 'offgrid', why: 'blackout' });

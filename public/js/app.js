@@ -1,5 +1,5 @@
 import * as E from './engine.js';
-import { NOTES, LESSON, eventText, ATLAS, INVITE, LANDS, CLIMATE } from './content.js';
+import { NOTES, LESSON, eventText, ATLAS, INVITE, LANDS, CLIMATE, CHAPTER_END, LAND_INVITE } from './content.js';
 import { createGlobe, flyTo, loadLand } from './globe.js';
 import { createView, sunVector, dirName, vegObjects } from './iso.js';
 import { loadRealPlot, mapsUrl } from './realsite.js';
@@ -51,7 +51,7 @@ async function travel(from = E.SITES.tokyo, to = E.SITES.med, after = startGame,
   if (toKey && toKey !== 'tokyo') G.realP = realPromise(toKey);   // 実データは、メールを読んでいるあいだに裏で取ってくる
   const wait = !!(story && story.go);   // メールがあるときは、出発の地点で止まって［行く］を待つ
   const body = Array.isArray(story?.body) ? story.body.map(p => `<p>${esc(p)}</p>`).join('') : story ? `<p>${esc(story.body)}</p>` : '';
-  app.innerHTML = `<div class="travel"><div class="cap" id="cap">${wait ? esc(from.name || '') : from.name ? `${esc(from.name)}から、${esc(to.name)}へ` : esc(to.name)}</div>${story ? `<div class="mailcard trip" id="trip"><div class="small">メール · ${esc(story.from)}</div><b>${esc(story.subject)}</b>${body}${wait ? `<div class="go"><button class="btn primary" id="go">${esc(story.go)}</button></div>` : ''}</div>` : ''}<canvas id="tg" aria-hidden="true"></canvas><button class="btn skip" id="skip"${wait ? ' hidden' : ''}>とばす</button></div>`;
+  app.innerHTML = `<div class="travel"><div class="cap" id="cap">${wait ? esc(from.name || '') : from.name ? `${esc(from.name)}から、${esc(to.name)}へ` : esc(to.name)}</div>${story ? `<div class="mailcard trip" id="trip"><div class="small">メール · ${esc(story.from)}</div><b>${esc(story.subject)}</b>${body}${wait ? `<div class="go"><button class="btn primary" id="go">${esc(story.go)}</button></div>` : ''}</div>` : ''}<canvas id="tg" aria-hidden="true"></canvas><button class="btn skip" id="skip"${wait ? ' hidden' : ''}>スキップ</button></div>`;
   await loadLand();
   const g = createGlobe(document.getElementById('tg'), { lon: from.lon, lat: from.lat });
   g.label = from.name ? { lon: from.lon, lat: from.lat, text: from.name } : null; g.draw();
@@ -80,17 +80,19 @@ function chooseLand() {
     <div class="note locked"><b>どこでも（準備中）</b><span>地球儀から好きな場所を選ぶモード。その土地の実際の天気と地形で始める。</span></div>
     <button class="btn ghost" data-m="close">まだここにいる</button>`, (m, close) => {
     if (m === 'close') return close();
-    if (m.startsWith('go:')) {
-      const k = m.slice(3); close();
-      const from = E.SITES[s.site], to = E.SITES[k];
-      const hist = [...(s.flags.history || []), { site: s.site, years: s.turn / 4, rel: E.relations(s).score }];
-      travel(from, to, async () => {
-        const real = await waitReal(G.realP || realPromise(k), to.name); G.realP = null;
-        G.s = E.newGame({ site: k, seed: Math.floor(Math.random() * 1e6), cash: s.cash - to.plotPrice, persons: s.persons, known: s.known, learned: s.learned, year: s.year, flags: { history: hist }, real });
-        G.s.q = s.q; G.tab = 'web'; G.cat = null; persist(); game(); climate(true);
-      });
-    }
+    if (m.startsWith('go:')) { close(); goLand(m.slice(3)); }
   });
+}
+/* 次の土地へ：出発地の上で、その土地の人からのメールを読んで［行く］ */
+function goLand(k) {
+  const s = G.s, from = E.SITES[s.site], to = E.SITES[k];
+  if (s.cash < to.plotPrice) return chooseLand();
+  const hist = [...(s.flags.history || []), { site: s.site, years: s.turn / 4, rel: E.relations(s).score }];
+  travel(from, to, async () => {
+    const real = await waitReal(G.realP || realPromise(k), to.name); G.realP = null;
+    G.s = E.newGame({ site: k, seed: Math.floor(Math.random() * 1e6), cash: s.cash - to.plotPrice, persons: s.persons, known: s.known, learned: s.learned, year: s.year, flags: { history: hist }, real });
+    G.s.q = s.q; G.tab = 'web'; G.cat = null; persist(); game(); climate(true);
+  }, LAND_INVITE[k] ? LAND_INVITE[k](man(to.plotPrice)) : null);
 }
 /* 実在の土地のデータを取りに行く（地球儀の移動中に裏で進める）。取れなければ null */
 function realPromise(key, lat, lon) {
@@ -335,8 +337,8 @@ const CATS = [['house', '家'], ['farm', '畑・植栽'], ['water', '水'], ['ge
 const TOOLS = {
   farm: [
     { id: 'beds', how: 'area', name: '畑', block: 'bed', note: 'なぞった四角が畑になる。斜面なら等高線にそって細長く' },
-    { id: 'mulch', how: 'mark', mark: 'm', name: 'マルチ', learn: 'mulch', price: 0.01, color: '#B9935A', note: '刈った草で畑を覆う。乾きにくく、草も生えにくい' },
-    { id: 'cover', how: 'mark', mark: 'g', name: '温室の覆い', learn: 'greenhouse', price: 1.2, color: '#DDE8EC', note: '畑に覆いをかける。外より暖かく、冬も育つ' },
+    { id: 'mulch', how: 'mark', mark: 'm', name: 'マルチ', learn: 'mulch', price: 0.01, color: '#B9935A', note: 'なぞった四角の中の畑を、刈った草で覆う（最初に押した畑がもう覆ってあれば外す）。乾きにくく、草も生えにくい' },
+    { id: 'cover', how: 'mark', mark: 'g', name: '温室の覆い', learn: 'greenhouse', price: 1.2, color: '#DDE8EC', note: 'なぞった四角の中の畑に覆いをかける（最初に押した畑がもう覆ってあれば外す）。外より暖かく、冬も育つ' },
     { id: 'tree', how: 'point', block: 'tree', name: '果樹', note: '実がなり、根で斜面を押さえる。落ち葉は堆肥の材料に。なぞると並べて植える' },
     { id: 'hedge', how: 'point', block: 'hedge', note: 'なぞると並べて植える。風よけ・獣よけ' }
   ],
@@ -493,6 +495,10 @@ function openBuild(cx, cy, o = {}) {
     const c = v.groundAt(e.clientX, e.clientY); if (!c) return { c: cellAny(f), f };
     return { c, f: { type: 'terrain', x: c[0], y: c[1], face: 4, z: E.W.h(dw, c[0], c[1]) } };
   };
+  const isRect = (t) => t.how === 'area' || t.how === 'mark';   // 面で選ぶ道具（なぞった四角）。マルチ・覆いは四角の中の畑だけに
+  const markOk = (x, y) => { const tb = topAt(x, y); return !!tb && E.W.BLOCKS[tb.b.t].kind === 'bed'; };
+  const rectOk = (t) => t.how === 'mark' ? markOk : areaOk(t);
+  const lineCells = (a, b) => { const out = []; let [x0, y0] = a; const [x1, y1] = b, dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1; let e = dx + dy; for (let k = 0; k < 200; k++) { out.push([x0, y0]); if (x0 === x1 && y0 === y1) break; const e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } } return out; };   // 速くなぞっても飛ばさない
   const rectCells = (r) => { const out = []; for (let y = r.ya; y <= r.yb; y++) for (let x = r.xa; x <= r.xb; x++) out.push([x, y]); return out; };
   const pointZ = (f, x, y) => f && f.type === 'block' && f.face === 4 && f.x === x && f.y === y && !E.W.BLOCKS[f.b.t].overlay ? f.z + 1 : E.W.h(dw, x, y);
   const topAt = (x, y) => { let best = null; for (const k in dw.blocks) { const [bx, by, bz] = k.split(',').map(Number); if (bx === x && by === y && (!best || bz > best.z)) best = { x, y, z: bz, b: dw.blocks[k] }; } return best; };
@@ -602,7 +608,7 @@ function openBuild(cx, cy, o = {}) {
     const t = T(), A = aimAt(e, f0, t), c = A.c; if (!t || !c) return;
     st.drag = { a: c, b: c, f: A.f, path: [c], seen: new Set([String(c)]) }; cv.setPointerCapture(e.pointerId);
     v.aim = [c];
-    if (t.how === 'area') { v.rect = { ...rectFrom(c, c), mode: 'add', ok: areaOk(t) }; v.ghost = null; v.draw(); }
+    if (isRect(t)) { v.rect = { ...rectFrom(c, c), mode: 'add', ok: rectOk(t) }; v.ghost = null; v.draw(); }
   });
   cv.addEventListener('pointermove', (e) => {
     const f = v.pickAt(e.clientX, e.clientY);
@@ -615,8 +621,9 @@ function openBuild(cx, cy, o = {}) {
       const A = aimAt(e, f, t);
       if (st.drag) {
         const c = A.c; if (!c) return; st.drag.b = c;
+        if (t.how === 'mark') { const r = rectFrom(st.drag.a, c), nb = rectCells(r).filter(([x, y]) => markOk(x, y)).length, pr = toolPrice(t); v.rect = { ...r, mode: 'add', ok: markOk }; v.aim = rectCells(r); tip.textContent = `${toolName(t)} ${r.xb - r.xa + 1}×${r.yb - r.ya + 1}m（畑${nb}マス）${pr ? ` · 約${(nb * pr).toFixed(2)}万円` : ''}`; v.draw(); return; }
         if (t.how === 'area') { const r = rectFrom(st.drag.a, c), n = (r.xb - r.xa + 1) * (r.yb - r.ya + 1), pr = toolPrice(t); v.rect = { ...r, mode: 'add', ok: areaOk(t) }; v.aim = rectCells(r); tip.textContent = `${toolName(t)} ${r.xb - r.xa + 1}×${r.yb - r.ya + 1}m${pr != null ? ` · 約${(n * pr).toFixed(1)}万円` : ''}`; v.draw(); return; }
-        if (!st.drag.seen.has(String(c))) { st.drag.seen.add(String(c)); st.drag.path.push(c); }
+        for (const q of lineCells(st.drag.path[st.drag.path.length - 1], c)) if (!st.drag.seen.has(String(q))) { st.drag.seen.add(String(q)); st.drag.path.push(q); }
         v.aim = st.drag.path;
         v.ghost = { ok: true, cells: st.drag.path.map(([x, y]) => [x, y, E.W.h(dw, x, y), t.how === 'point' ? 1 : t.how === 'cut' ? 0.2 : 0.15]) };
         tip.textContent = `${toolName(t)} ×${st.drag.path.length}${toolPrice(t) ? ` · 約${(st.drag.path.length * toolPrice(t)).toFixed(1)}万円` : ''}`; v.draw(); return;
@@ -639,6 +646,11 @@ function openBuild(cx, cy, o = {}) {
       if (!t || !dr) return;
       const before = snap(); let err = null, n = 0;
       if (t.how === 'area') err = applyArea(t, dr.a, dr.b);
+      else if (t.how === 'mark') {   // 四角の中の畑すべて。最初に押した畑に合わせて、つける／外すをそろえる
+        const cells = rectCells(rectFrom(dr.a, dr.b)).filter(([x, y]) => markOk(x, y)), state = {};
+        cells.sort((p, q) => (p[0] === dr.a[0] && p[1] === dr.a[1] ? -1 : 0) - (q[0] === dr.a[0] && q[1] === dr.a[1] ? -1 : 0));
+        if (!cells.length) err = '四角の中に畑がない'; for (const [x, y] of cells) { const r = applyAt(t, null, x, y, state); if (r) err = err || r; else n++; }
+      }
       else if (t.how === 'move' || t.how === 'gutter') { const r = applyAt(t, f || dr.f, dr.b[0], dr.b[1], {}); if (r) err = r; else n++; }
       else { const state = {}, f1 = dr.path.length === 1 ? aimAt(e, f, t).f || dr.f : null; for (const [x, y] of dr.path) { const r = applyAt(t, f1, x, y, state); if (r) err = err || r; else n++; } }
       if (snap() !== before) { st.undo.push(before); st.msg = err && n ? `一部は${err}` : ''; } else st.msg = err || '';
@@ -1050,7 +1062,7 @@ function wake(before, rep, lessons) {
   const mails = lessons.map(l => { const n = NOTES[l.id]; const m = (LESSON[l.why] || LESSON.intro)(n.name); return `<div class="card mail"><span class="k">メール · ${esc(m.from)}</span><b>${esc(m.subject)}</b><span>${esc(m.body)}</span><span class="k">ノートに「${esc(n.name)}」を書いた → ${MODHINT[l.id] || '地図に置けるようになった'}</span></div>`; }).join('');
   const phase = rep.phase === 'nino' ? 'エルニーニョの年（雨が少ない）' : rep.phase === 'nina' ? 'ラニーニャの年（雨が多い）' : '';
   const goodN = E.relations(s).nodes.filter(x => x.good === true && x.v > 0.15).length;
-  const end = goodN >= GOAL && s.flags['done_' + s.site] == null;
+  const end = goodN >= (G.goal ?? GOAL) && s.flags['done_' + s.site] == null;   // G.goal はテスト用
   if (end) { G.s = E.clone(s); G.s.flags['done_' + s.site] = s.turn; persist(); }
   d.innerHTML = `<div class="laptop" id="lap"><div class="screen">
     <header><h2>${rep.year}年 ${esc(site.quarters[rep.q])}が過ぎた</h2><span class="small">雨 ${Math.round(rep.A.rain)}mm ${phase ? '· ' + phase : ''}</span></header>
@@ -1065,8 +1077,8 @@ function wake(before, rep, lessons) {
     ${mails ? `<div class="cards">${mails}</div>` : ''}
     <div class="cards">${evs.length ? evs.map(({ e, t }) => `<div class="card ${t.tone}"><span class="k">出来事</span><b>${esc(t.title)}</b><span>${esc(t.body)}</span>${choiceHTML(t.choice)}</div>`).join('') : '<div class="card"><b>穏やかな3か月だった</b><span>大きな出来事はなかった。</span></div>'}</div>
     ${s.cash < 0 ? '<div class="card bad"><b>お金が足りない</b><span>赤字になった。予定で外貨の仕事を増やすか、しばらく何も建てずに過ごそう。</span></div>' : ''}
-    ${end ? endHTML() : ''}
-    <div style="display:flex;justify-content:flex-end;gap:8px">${end && Object.keys(LANDS).some(k => k !== s.site) ? '<button class="btn" id="nextland">次の土地を選ぶ</button>' : ''}<button class="btn primary" id="back">${end ? 'このまま続ける' : '開いて、計画に戻る'}</button></div>
+    ${end ? endHTML(rep) : ''}
+    <div style="display:flex;justify-content:flex-end;gap:8px">${end && Object.keys(LANDS).some(k => k !== s.site) ? `<button class="btn" id="nextland">${CHAPTER_END[s.site] ? esc(chapterMail(rep).go) : '次の土地を選ぶ'}</button>` : ''}<button class="btn primary" id="back">${end ? (CHAPTER_END[s.site] ? esc(chapterMail(rep).stay) : 'このまま続ける') : '開いて、計画に戻る'}</button></div>
   </div></div><div class="base"></div>`;
   document.body.appendChild(d);
   d.querySelectorAll('[data-choice]').forEach(b => b.onclick = () => {
@@ -1076,7 +1088,7 @@ function wake(before, rep, lessons) {
     b.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b));
   });
   const back = d.querySelector('#back'); back.focus();
-  const nl = d.querySelector('#nextland'); if (nl) nl.onclick = () => { d.remove(); renderAll(); chooseLand(); };
+  const nl = d.querySelector('#nextland'); if (nl) nl.onclick = () => { d.remove(); renderAll(); const nx = Object.keys(LANDS).filter(k => k !== G.s.site); if (CHAPTER_END[G.s.site] && nx.length === 1) goLand(nx[0]); else chooseLand(); };
   back.onclick = () => { d.remove(); renderAll(); };
 }
 function choiceHTML(c) {
@@ -1085,12 +1097,20 @@ function choiceHTML(c) {
   if (c === 'pest') return `<div class="row"><button class="btn${f.pestHand ? ' sel' : ''}" data-choice="pest:hand">次は手で取る</button><button class="btn${!f.pestHand ? ' sel' : ''}" data-choice="pest:none">様子を見る</button></div>`;
   return '';
 }
-function endHTML() {
+/* 章の終わりのメール（招いてくれた人から）。数字はこの季節の結果 */
+function chapterMail(rep) {
+  const s = G.s, P = (x) => Math.round((x || 0) * 100);
+  const w = s.world, heap = Object.values(w.blocks).some(b => b.t === 'heap'), ctoilet = !!(w.house && (w.house.furn || []).some(f => f.t === 'ctoilet'));
+  return CHAPTER_END[s.site]({ water: P(rep.waterSelf), food: P(rep.foodSelf), money: P(E.cycles(s)[3].closure), heap, ctoilet });
+}
+function endHTML(rep) {
   const rel = E.relations(G.s);
   const good = rel.nodes.filter(x => x.good === true && x.v > 0.15).map(x => x.name);
   const years = (G.s.turn / 4).toFixed(1), site = E.SITES[G.s.site];
   const more = Object.keys(LANDS).some(k => k !== G.s.site);
-  return `<div class="card good"><b>${esc(site.name)}で、めぐりができた（${years}年）</b><span>東京では、4つの輪はどれも部屋の中で閉じず、遠くへ抜けていた。いまは ${good.length}の相手と豊かに関わっている：${esc(good.join('、'))}。</span><span class="k">${more ? '学んだことを持って、次の土地へ行ける。ここで続けてもいい。' : '地球儀から好きな土地を選ぶ章は準備中。ここで続けられる。'}</span></div>`;
+  const cm = CHAPTER_END[G.s.site] && more ? chapterMail(rep) : null;
+  const mail = cm ? `<div class="card mail"><span class="k">メール · ${esc(cm.from)}</span><b>${esc(cm.subject)}</b>${cm.body.map(p => `<span>${esc(p)}</span>`).join('')}</div>` : '';
+  return mail + `<div class="card good"><b>${esc(site.name)}で、めぐりができた（${years}年）</b><span>東京では、4つの輪はどれも部屋の中で閉じず、遠くへ抜けていた。いまは ${good.length}の相手と豊かに関わっている：${esc(good.join('、'))}。</span><span class="k">${more ? `学んだ技術と、所持金と、週の過ごし方を持って次の土地へ行ける。${cm ? '置いたものはトミーの家に残る。' : '置いたものは持っていけない。'}ここで続けてもいい。` : '地球儀から好きな土地を選ぶ章は準備中。ここで続けられる。'}</span></div>`;
 }
 const GOAL = 10;
 const MODHINT = { toilet: '家の設定で足せる', saving: '家の設定で足せる', insulation: '3Dで断熱した壁・屋根・床・窓が置けるようになった', bamboo: '3Dで竹と土壁が置けるようになった', earth: '3Dで土嚢・古タイヤの壁が置けるようになった', straw: '3Dでわらの壁が置けるようになった', grey: '3Dの［水］で浄化の穴が掘れるようになった', mulch: '3Dの［畑］で畑を押すと敷ける', terrace: '3Dの［畑］で段差を押すと石垣を積める', deep: '3Dの［家］の設定で基礎を深くできる', catch: '3Dの［家］で柱と屋根の小屋を建て、軒の下にタンクを', pond: '3Dの［水］でため池が掘れるようになった', offgrid: '3Dの［電気］で置けるようになった', hedge: '3Dの［生き物］で置けるようになった', chicken: '3Dの［生き物］で置けるようになった', heap: '3Dの［畑］で置けるようになった', greenhouse: '3Dでガラス屋根が置ける。ガラスで囲った部屋に畑を作ると温室になる' };
