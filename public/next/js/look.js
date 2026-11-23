@@ -64,11 +64,41 @@ export const PALETTES = {
   }
 };
 
-/* 太陽の色：低いほど金色（空気の層を長く通るため） */
-export function sunColor(elevDeg) {
-  const w = Math.max(0, Math.min(1, (elevDeg - 3) / 40));
-  return new THREE.Color().setRGB(1.0, 0.72 + 0.22 * w, 0.48 + 0.38 * w);
+/* 時刻の光。太陽が低いほど、日差しは金色からあかね色へ、空の光（影の色）は青く、地平は暖かい霞に。
+   朝は淡くさわやかに（黄〜桃）、夕方は濃く（橙〜あかね）。高さ（度）ごとの色を、間はなめらかにつなぐ */
+const TOD = {
+  am: [
+    { e: 0, sun: '#FFA07C', k: 2.5, sky: '#8E9CCB', hor: '#F5C6B4', gnd: '#8A7262', env: 0.56, top: '#9FB1D2' },
+    { e: 7, sun: '#FFBE8C', k: 3.0, sky: '#9DACD0', hor: '#F6D5BE', gnd: '#94806A', env: 0.58, top: '#AEC0D8' },
+    { e: 18, sun: '#FFD8AA', k: 3.6, sky: '#AFBFD8', hor: '#F3E0CB', env: 0.58, top: '#B7C9DA' },
+    { e: 34, sun: '#FFEBD0', k: 4.1, sky: '#BCCDDF', hor: '#EFE6D6', env: 0.58, top: '#BDD0DC' },
+    { e: 60, sun: '#FFF6EA', k: 4.4, env: 0.6 }
+  ],
+  pm: [
+    { e: 0, sun: '#FF7A44', k: 2.4, sky: '#7C86BA', hor: '#F2AA7C', gnd: '#8C6A52', env: 0.54, top: '#909EC6' },
+    { e: 7, sun: '#FF9C58', k: 2.9, sky: '#8E99C2', hor: '#F4BF8E', gnd: '#957659', env: 0.57, top: '#A3B2D0' },
+    { e: 18, sun: '#FFBF7E', k: 3.5, sky: '#A4B0CC', hor: '#F2D2A8', env: 0.58, top: '#B2C2D4' },
+    { e: 34, sun: '#FFDBAE', k: 4.1, sky: '#BAC6D6', hor: '#F0DCBE', env: 0.58, top: '#BACBD6' },
+    { e: 60, sun: '#FFF4E6', k: 4.4, env: 0.6 }
+  ]
+};
+export function skyLight(P, elevDeg, am) {
+  const K = am ? TOD.am : TOD.pm, e = Math.max(0, elevDeg);
+  let i = 0; while (i < K.length - 2 && e > K[i + 1].e) i++;
+  const A = K[i], B = K[i + 1], t = Math.max(0, Math.min(1, (e - A.e) / (B.e - A.e))), s = t * t * (3 - 2 * t);
+  const mix = (a, b) => new THREE.Color(a).lerp(new THREE.Color(b), s);
+  // 空と地平の色は、日が高ければその土地の色。低いほど時刻の色を強く
+  const w = 1 - Math.max(0, Math.min(1, e / 60)), ww = w * w * (3 - 2 * w);
+  const tint = (key, base) => mix(A[key] ?? base, B[key] ?? base).lerp(new THREE.Color(base), 1 - ww);
+  return {
+    sun: mix(A.sun, B.sun), sunK: A.k + (B.k - A.k) * s, env: A.env + (B.env - A.env) * s,
+    hemiSky: tint('sky', P.hemiSky), horizon: tint('hor', P.fog), hemiGround: tint('gnd', P.hemiGround),
+    skyTop: tint('top', P.sky[0]), skyBottom: tint('hor', P.sky[1]), fog: tint('hor', P.fog), day: 1 - 0.45 * ww, exposure: 0.95 + 0.2 * ww
+  };
 }
+
+/* 葉の「透ける光」は昼の明るさに合わせる（夕方に葉だけ光って見えないように） */
+export const glow = { mats: [], set(k) { for (const [m, base] of this.mats) m.emissiveIntensity = base * k; } };
 
 /* 同じ場所なら毎回同じ乱数 */
 export function hash(x, y = 0, k = 0) { let n = (Math.floor(x * 73.1) * 374761393 + Math.floor(y * 91.7) * 668265263 + k * 2147483647) | 0; n = (n ^ (n >>> 13)) * 1274126177; return ((n ^ (n >>> 16)) >>> 0) / 4294967295; }

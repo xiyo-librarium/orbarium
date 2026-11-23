@@ -2,7 +2,7 @@
    形は場所から決まる乱数で選ぶので、同じ木はいつ見ても同じ形。 */
 import * as THREE from 'three';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { matte, hash } from './look.js';
+import { matte, hash, glow } from './look.js';
 
 const coarse = matchMedia('(pointer: coarse)').matches;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -36,6 +36,35 @@ function tierGeo(variant) {
     p.setXYZ(i, v.x * k, v.y + droop, v.z * k);
   }
   g.computeVertexNormals(); return g;
+}
+
+/* 葉の影：葉のかたまりは日の光を少し通し、ところどころ丸く抜ける（木漏れ日）。
+   影を作るときだけ、日の向きから見た模様で穴をあける。模様はかたまりごとに固定（時刻を動かしても踊らない）。
+   ・丸い穴：かたまりの 3 割ほど。光の筋が地面に丸い日だまりを落とす
+   ・小さな抜け：さらに 1〜2 割。ぼかすと「薄い影」になる */
+function dappleDepth() {
+  const m = new THREE.MeshDepthMaterial();
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = 'varying vec2 vL; varying vec3 vC;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      #ifdef USE_INSTANCING
+        mat4 mI = modelMatrix * instanceMatrix;
+      #else
+        mat4 mI = modelMatrix;
+      #endif
+      vec3 wP = (mI * vec4(transformed, 1.0)).xyz, wC = (mI * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+      vL = (mat3(viewMatrix) * (wP - wC)).xy; vC = wC;`);
+    sh.fragmentShader = `varying vec2 vL; varying vec3 vC;
+      float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float spots(vec2 p) { vec2 i = floor(p), f = fract(p); float d = 9.0;
+        for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) { vec2 g = vec2(float(x), float(y)), o = vec2(h21(i + g), h21(i + g + 17.3));
+          d = min(d, length(g + o - f) / (0.16 + 0.2 * h21(i + g + 5.1))); }
+        return d; }
+      ` + sh.fragmentShader.replace('void main() {', `void main() {
+        vec2 sp = vL * 1.8 + vec2(h21(vC.xz), h21(vC.zx + 3.7)) * 40.0;
+        if (spots(sp) < 1.0) discard;
+        if (spots(sp * 3.1 + 11.0) < 0.85) discard;`);
+  };
+  return m;
 }
 
 export function buildTrees(list, at, P, opt = {}) {
@@ -136,13 +165,16 @@ export function buildTrees(list, at, P, opt = {}) {
   // 葉：凹凸を付けず、つやもほとんど無し。光を少し通すので、日かげ側を自分の色でわずかに光らせる
   const leafMat = matte({ color: '#ffffff', vary: 0.12, freq: 0.7, rough: 0.85, spec: 0.3 });
   leafMat.emissive = new THREE.Color('#3A4A22'); leafMat.emissiveIntensity = 0.42;
+  glow.mats.push([leafMat, 0.42]);
   const woodMat = matte({ color: '#ffffff', vary: 0.2, freq: 3, bump: 0.6, bumpFreq: 6, spec: 0.5 });
   const inst = (geo, mat, items) => {
     if (!items.length) return;
     const m = new THREE.InstancedMesh(geo, mat, items.length), mt = new THREE.Matrix4(), c = new THREE.Color();
     items.forEach((it, i) => { mt.compose(it.p, it.q, it.s); m.setMatrixAt(i, mt); m.setColorAt(i, c.set(it.c).multiplyScalar(it.k ?? 1)); });
+    if (mat === leafMat) m.customDepthMaterial = leafDepth;
     m.castShadow = true; m.receiveShadow = true; group.add(m);
   };
+  const leafDepth = dappleDepth();
   B.big.forEach((items, v) => inst(big[v], leafMat, items));
   B.small.forEach((items, v) => inst(small[v], leafMat, items));
   B.tier.forEach((items, v) => inst(tiers[v], leafMat, items));

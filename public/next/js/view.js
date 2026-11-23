@@ -7,7 +7,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
-import { sunColor } from './look.js';
+import { skyLight, glow } from './look.js';
 
 export function createView(canvas, opt = {}) {
   const mobile = matchMedia('(pointer: coarse)').matches;
@@ -34,7 +34,7 @@ export function createView(canvas, opt = {}) {
     const mat = new THREE.ShaderMaterial({ side: THREE.BackSide, uniforms: { a: { value: new THREE.Color(top) }, b: { value: new THREE.Color(horizon) }, c: { value: new THREE.Color(ground) } },
       vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
       fragmentShader: 'uniform vec3 a,b,c; varying vec3 vP; void main(){ float y = vP.y; vec3 col = y > 0.0 ? mix(b, a, pow(y, 0.6)) : mix(b, c, pow(-y, 0.4)); gl_FragColor = vec4(col, 1.0); }' });
-    s.add(new THREE.Mesh(geo, mat)); return pmrem.fromScene(s, 0.04).texture; };
+    s.add(new THREE.Mesh(geo, mat)); const rt = pmrem.fromScene(s, 0.04); geo.dispose(); mat.dispose(); return rt; };
 
   const sun = new THREE.DirectionalLight(0xffffff, 3.0);
   sun.castShadow = true; sun.shadow.mapSize.set(mobile ? 2048 : 4096, mobile ? 2048 : 4096);
@@ -52,16 +52,26 @@ export function createView(canvas, opt = {}) {
   composer.addPass(new OutputPass());
 
   const v = { renderer, scene, camera, controls, sun, ao, dof, need: true, focus: new THREE.Vector3(25, 0, 25), span: 30 };
+  let envRT = null, envWant = null;
+  const setEnv = (top, horizon, ground) => { if (envRT) envRT.dispose(); envRT = envFrom(top, horizon, ground); scene.environment = envRT.texture; };
   v.setPalette = (P) => {
+    v.P = P;
+    if (scene.background?.isTexture) scene.background.dispose();
     scene.background = sky(P.sky[0], P.sky[1]);
-    scene.environment = envFrom(P.hemiSky, P.fog, P.hemiGround); scene.environmentIntensity = 0.6;
+    setEnv(P.hemiSky, P.fog, P.hemiGround); scene.environmentIntensity = 0.6;
     scene.fog = new THREE.Fog(P.fog, 90, 260);
     v.req();
   };
   // 太陽：世界の向き（x 東, y 南, z 上）→ three（x, 上, z）
-  v.setSun = (dir, elevDeg) => {
+  // 時刻の色：日差しの色と強さ、空の光（影の色）、空と霞。朝と夕方で色味を変える
+  v.setSun = (dir, elevDeg, am = true) => {
     const d = new THREE.Vector3(dir[0], Math.max(0.05, dir[2]), dir[1]).normalize();
-    sun.color.copy(sunColor(elevDeg)); sun.intensity = 1.8 + 2.6 * Math.min(1, Math.max(0, elevDeg) / 35);
+    const L = skyLight(v.P, elevDeg, am);
+    sun.color.copy(L.sun); sun.intensity = L.sunK;
+    scene.environmentIntensity = L.env; envWant = L;   // 環境の光は次に描く前に焼き直す（スライダーを動かしている間も1回/コマ）
+    if (scene.fog) scene.fog.color.copy(L.fog);
+    renderer.toneMappingExposure = L.exposure;   // 朝夕は少し明るめに写す（目が慣れるのと同じ）
+    glow.set(L.day);
     sun.target.position.copy(v.focus); sun.position.copy(v.focus).addScaledVector(d, 80);
     const cam = sun.shadow.camera; cam.left = -v.span; cam.right = v.span; cam.top = v.span; cam.bottom = -v.span; cam.near = 20; cam.far = 170; cam.updateProjectionMatrix();
     v.req();
@@ -75,6 +85,9 @@ export function createView(canvas, opt = {}) {
   v.resize = () => { const w = canvas.clientWidth, h = canvas.clientHeight; renderer.setSize(w, h, false); composer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); v.req(); };
   v.req = () => { v.need = true; };
   v.render = () => {
+    if (envWant) { const L = envWant; envWant = null; setEnv(L.hemiSky, L.horizon, L.hemiGround);
+      if (scene.background?.isTexture) scene.background.dispose();
+      scene.background = sky('#' + L.skyTop.getHexString(), '#' + L.skyBottom.getHexString()); }
     if (dof.enabled) { const f = camera.position.distanceTo(controls.target); dof.uniforms.focus.value = f; dof.uniforms.aperture.value = (v.blur ?? 0.016) / f; }
     composer.render(); v.lastDraw = performance.now();
   };

@@ -32,17 +32,26 @@ export function buildLand(world, N, P, opt = {}) {
     if (dug) c.lerp(c2.set(P.soil), 0.8);
     return c;
   };
+  // 平らにする所（段々の畑）：そのマスに触れる地面を、畑の高さより少し下に抑える。
+  // 上り側は切り土の斜面、下り側は畑の側面（段差）が見える
+  const flat = opt.flat || (() => null), vh = new Float32Array((M + 1) * (M + 1)), path = new THREE.Color(P.soil);
   for (let j = 0; j <= M; j++) for (let i = 0; i <= M; i++) {
-    const px = i / S, py = j / S; pos.push(px, at(px, py), py); const g = groundCol(px, py); col.push(g.r, g.g, g.b);
+    const px = i / S, py = j / S; let hh = at(px, py), onFlat = false;
+    for (const cx of (i % S ? [Math.floor(px)] : [px - 1, px])) for (const cy of (j % S ? [Math.floor(py)] : [py - 1, py])) { const L = flat(cx, cy); if (L != null) { hh = Math.min(hh, L - 0.02); onFlat = true; } }
+    vh[j * (M + 1) + i] = hh;
+    pos.push(px, hh, py); const g = groundCol(px, py); if (onFlat) g.lerp(path, 0.45); col.push(g.r, g.g, g.b);
   }
   for (let j = 0; j < M; j++) for (let i = 0; i < M; i++) { const a = j * (M + 1) + i, b = a + 1, d = a + M + 1, e = d + 1; idx.push(a, d, b, b, d, e); }
+  // 描いた地面の高さ（草や小物を置くとき用）
+  const ground = (px, py) => { const fx = Math.max(0, Math.min(M - 1e-6, px * S)), fy = Math.max(0, Math.min(M - 1e-6, py * S)), i = Math.floor(fx), j = Math.floor(fy), tx = fx - i, ty = fy - j, V = (a, b) => vh[b * (M + 1) + a];
+    return (V(i, j) * (1 - tx) + V(i + 1, j) * tx) * (1 - ty) + (V(i, j + 1) * (1 - tx) + V(i + 1, j + 1) * tx) * ty; };
   const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); gg.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); gg.setIndex(idx); gg.computeVertexNormals();
-  const ground = new THREE.Mesh(gg, matte({ vertexColors: true, vary: 0.1, freq: 0.9, bump: 0.08, bumpFreq: 1.2, rough: 0.9 }));
-  ground.receiveShadow = true; group.add(ground);
+  const groundMesh = new THREE.Mesh(gg, matte({ vertexColors: true, vary: 0.1, freq: 0.9, bump: 0.08, bumpFreq: 1.2, rough: 0.9 }));
+  groundMesh.receiveShadow = true; group.add(groundMesh);
 
   // 区画の切り口：土の側面（地層の帯）
   const side = [], sideCol = [], soil = new THREE.Color(P.soil), soilD = new THREE.Color(P.soilDark);
-  const edge = (pts) => { for (let k = 0; k < pts.length - 1; k++) { const [x0, y0] = pts[k], [x1, y1] = pts[k + 1], h0 = at(x0, y0), h1 = at(x1, y1);
+  const edge = (pts) => { for (let k = 0; k < pts.length - 1; k++) { const [x0, y0] = pts[k], [x1, y1] = pts[k + 1], h0 = ground(x0, y0), h1 = ground(x1, y1);
     side.push(x0, h0, y0, x0, base, y0, x1, h1, y1, x1, h1, y1, x0, base, y0, x1, base, y1);
     for (const hh of [h0, base, h1, h1, base, base]) { const t = Math.max(0, Math.min(1, (h0 - hh) / 6)); const cc = soil.clone().lerp(soilD, t); sideCol.push(cc.r, cc.g, cc.b); } } };
   const line = (fn) => Array.from({ length: M + 1 }, (_, k) => fn(k / S));
@@ -66,12 +75,10 @@ export function buildLand(world, N, P, opt = {}) {
   }
   const grass = new THREE.InstancedMesh(tuft, matte({ color: '#ffffff', vertexColors: true, vary: 0.2, freq: 0.6, rough: 0.7 }), spots.length);
   const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(), tp = new THREE.Vector3(), gc = new THREE.Color(), tip = new THREE.Color(P.grassTip), gbase = new THREE.Color(P.grass);
-  spots.forEach(([px, py, r], i) => { e.set(0, r * 6.28, 0); q.setFromEuler(e); const s = 0.8 + r * 0.9; sc.set(s, s * (0.8 + 0.5 * hash(px, py, 5)), s); tp.set(px, at(px, py) - 0.02, py); mtx.compose(tp, q, sc); grass.setMatrixAt(i, mtx); grass.setColorAt(i, gc.copy(gbase).lerp(tip, hash(px, py, 6) * 0.6)); });
+  spots.forEach(([px, py, r], i) => { e.set(0, r * 6.28, 0); q.setFromEuler(e); const s = 0.8 + r * 0.9; sc.set(s, s * (0.8 + 0.5 * hash(px, py, 5)), s); tp.set(px, ground(px, py) - 0.02, py); mtx.compose(tp, q, sc); grass.setMatrixAt(i, mtx); grass.setColorAt(i, gc.copy(gbase).lerp(tip, hash(px, py, 6) * 0.6)); });
   grass.receiveShadow = true; group.add(grass);
 
-  return { group, at, H, base };
+  return { group, at, ground, H, base };
 }
-
-/* 木：幹と、でこぼこした葉のかたまり（1つの形を大きさと色を変えて使い回す） */
 
 export { buildTrees } from './trees.js';
