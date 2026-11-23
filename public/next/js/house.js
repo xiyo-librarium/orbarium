@@ -153,10 +153,13 @@ export function buildHouse(hs, P, at, opt = {}) {
       else if (f.t === 'stove') { fb(brick, 0, 0, 0, 0.82, 0.7, 0.8); fb(matte({ color: '#3A332E' }), 0, 0, 0.8, 0.6, 0.46, 0.03); cyl(brick, mx + head[0] * 0.22 * kx, my + head[1] * 0.22 * ky, z + 0.8, 0.11, 1.4, 10); }
     }
   }
-  function inRoof(px, py, m = 0) {   // 屋根の形（家のマスを外へ E だけ広げた形）の中か
+  // 屋根の形（家のマスを外へ E だけ広げた形）の中か。m＞0 は外のふちから m 以上内側か
+  //（前はマスごとに m を引いていたので、マスの境目ごとに瓦が抜けて溝になっていた。軒の出で格子がずれるので溝の位置も変わっていた）
+  function inRoof(px, py, m = 0) {
+    if (m > 0) return inRoof(px, py) && inRoof(px + m, py) && inRoof(px - m, py) && inRoof(px, py + m) && inRoof(px, py - m);
     for (const [x, y] of cells) {
       const x0 = x - (has(x - 1, y) ? 0 : E), x1 = x + 1 + (has(x + 1, y) ? 0 : E), y0 = y - (has(x, y - 1) ? 0 : E), y1 = y + 1 + (has(x, y + 1) ? 0 : E);
-      if (px >= x0 + m && px <= x1 - m && py >= y0 + m && py <= y1 - m) return true;
+      if (px >= x0 && px <= x1 && py >= y0 && py <= y1) return true;
     }
     return false;
   }
