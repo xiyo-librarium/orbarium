@@ -53,19 +53,45 @@ function colorize(m, lived, paper = '#E6E1D5', ref = 0.3) {
   return m;
 }
 
-/* 虫ピン：地球に刺した細い針と丸い頭。少しずつ傾けて刺す */
+/* 虫ピン：地球に刺した細い鋼の針と、つやのある丸い頭（樹脂に透明な上塗り）。針の付け根に小さな座金。少しずつ傾けて刺す */
+const steel = new THREE.MeshStandardMaterial({ color: '#E2E5E7', metalness: 1.0, roughness: 0.2, envMapIntensity: 1.4 });
+const PIN_H = 0.082;   // 地面から頭の中心まで
 function insectPin(p, seat = 1) {
-  const g = new THREE.Group(), color = p.color || '#C9873A', main = !!p.main;
-  const needle = new THREE.Mesh(new THREE.CylinderGeometry(0.0016, 0.0022, 0.09, 8), new THREE.MeshStandardMaterial({ color: '#C9CDD0', metalness: 0.8, roughness: 0.3 }));
-  needle.position.y = 0.045 - 0.012;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(main ? 0.017 : 0.013, 20, 14), new THREE.MeshStandardMaterial({ color, roughness: 0.28, metalness: 0.0, envMapIntensity: 1.2 }));
-  head.position.y = 0.09 - 0.012; head.userData.pin = p; needle.userData.pin = p;
-  g.add(needle, head);
+  const g = new THREE.Group(), color = p.color || '#C9873A', main = !!p.main, R = main ? 0.0155 : 0.0118;
+  const needle = new THREE.Mesh(new THREE.CylinderGeometry(0.0012, 0.0012, PIN_H + 0.01, 10), steel); needle.position.y = (PIN_H - 0.01) / 2 - 0.004;
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.0012, 0.012, 10), steel); tip.rotation.x = Math.PI; tip.position.y = -0.014;
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.0032, 0.0024, 0.0035, 16), steel); collar.position.y = PIN_H - R * 0.92;
+  const headMat = new THREE.MeshPhysicalMaterial({ color, roughness: 0.38, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.06, sheen: 0.25, sheenColor: new THREE.Color(color).offsetHSL(0, -0.2, 0.25), envMapIntensity: 1.1 });
+  const head = new THREE.Mesh(new THREE.SphereGeometry(R, 36, 24), headMat); head.position.y = PIN_H;
+  head.userData.pin = p; needle.userData.pin = p;
+  g.add(needle, tip, collar, head);
   const n = ll(p.lat, p.lon).normalize(), h = Math.sin((p.lat * 12.9898 + p.lon * 78.233)) * 43758.5453, rnd = h - Math.floor(h);
-  const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(Math.cos(rnd * 6.28), 0, Math.sin(rnd * 6.28)), 0.12 + rnd * 0.12);   // 少し傾ける
+  const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(Math.cos(rnd * 6.28), 0, Math.sin(rnd * 6.28)), 0.1 + rnd * 0.12);   // 少し傾ける
   g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n).multiply(tilt);
-  g.position.copy(n.multiplyScalar(seat)); g.userData.pin = p; g.userData.dir = ll(p.lat, p.lon).normalize();
+  g.position.copy(n.clone().multiplyScalar(seat)); g.userData.pin = p; g.userData.dir = n;
   return g;
+}
+/* ピンの影：刺した所の小さな暗がりと、太陽の反対へのびる頭の影（ぼかした楕円を地面に貼る） */
+let shadowTex = null;
+function pinShadow(pin, sun) {
+  if (!shadowTex) { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(0,0,0,0.6)'); gr.addColorStop(0.45, 'rgba(0,0,0,0.3)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64); shadowTex = new THREE.CanvasTexture(c); }
+  const n = pin.userData.dir, grp = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false, opacity: 0.55, color: '#000' });
+  const decal = (center, along, len, wid, op) => {
+    const geo = new THREE.PlaneGeometry(1, 1); geo.rotateX(-Math.PI / 2);
+    const t = along.clone().normalize(), b = new THREE.Vector3().crossVectors(t, n).normalize();
+    const M = new THREE.Matrix4().makeBasis(t, n, b).scale(new THREE.Vector3(len, 1, wid)).setPosition(center);
+    geo.applyMatrix4(M); const m = new THREE.Mesh(geo, op === 1 ? mat : mat.clone()); if (op !== 1) m.material.opacity = 0.55 * op; m.renderOrder = 3; grp.add(m);
+  };
+  const any = Math.abs(n.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0), tAny = new THREE.Vector3().crossVectors(n, any);
+  decal(n.clone().multiplyScalar(1.0058), tAny, 0.012, 0.012, 1);   // 刺した所
+  const up = sun ? n.dot(sun) : 0;
+  if (sun && up > 0.05) {   // 昼の側だけ：頭の影
+    const away = sun.clone().sub(n.clone().multiplyScalar(up)).negate(); const L = Math.min(0.16, PIN_H * Math.sqrt(1 - up * up) / up);
+    if (away.lengthSq() > 1e-6) { away.normalize(); decal(n.clone().multiplyScalar(1.0059).add(away.clone().multiplyScalar(L * 0.5)), away, L + 0.014, 0.008, 0.8); decal(n.clone().multiplyScalar(1.006).add(away.clone().multiplyScalar(L)), away, 0.026, 0.024, 0.9); }
+  }
+  return grp;
 }
 
 export function buildGlobe(rings, pins = [], route = null, opt = {}) {
@@ -85,10 +111,10 @@ export function buildGlobe(rings, pins = [], route = null, opt = {}) {
   }));
   g.add(atm); g.userData.atm = atm;
   // 印：虫ピン。g.userData.pins に覚えておき、刺す動き（stick）に使う
-  g.userData.pins = pins.map(p => { const m = insectPin(p, p.hidden ? 1.35 : 1); m.visible = !p.hidden; g.add(m); return m; });
+  g.userData.pins = pins.map(p => { const m = insectPin(p, p.hidden ? 1.35 : 1); m.visible = !p.hidden; g.add(m); const sh = pinShadow(m, opt.sun); sh.visible = !p.hidden; m.userData.shadow = sh; g.add(sh); return m; });
   g.userData.stick = (pin, ms = 650, done) => {   // 上から刺さる
     const dir = pin.userData.dir, t0 = performance.now(); pin.visible = true;
-    const step = () => { const u = Math.min(1, (performance.now() - t0) / ms), e = 1 - Math.pow(1 - u, 3); pin.position.copy(dir).multiplyScalar(1.35 - 0.35 * e); if (opt.req) opt.req(); if (u < 1) requestAnimationFrame(step); else if (done) done(); };
+    const step = () => { const u = Math.min(1, (performance.now() - t0) / ms), e = 1 - Math.pow(1 - u, 3); pin.position.copy(dir).multiplyScalar(1.35 - 0.35 * e); if (opt.req) opt.req(); if (u < 1) requestAnimationFrame(step); else { if (pin.userData.shadow) pin.userData.shadow.visible = true; if (opt.req) opt.req(); if (done) done(); } };
     step();
   };
   if (route) g.add(routeLine(route));

@@ -909,17 +909,19 @@ async function bootGlobe(mode = 'title') {
   const livedOf = (st) => !st ? [] : [...(st.flags?.history || []).map(h => ({ site: h.site, years: h.years })), { site: st.site, years: st.turn / 4 }];
   const lived = mode === 'travel' ? (carry?.history || []).map(h => ({ site: h.site, years: h.years })) : livedOf(saved);
   const livedSites = [...new Set(lived.map(q => q.site))];
-  const LV = lived.map(q => ({ ...at(q.site), years: q.years }));
+  // 色づくのは、めぐりができた（章を終えた）土地だけ。次の土地へ移った所は終えている。今いる所は終えた印があれば
+  const cleared = (q) => mode === 'travel' || q.site !== saved?.site || saved?.flags?.['done_' + q.site] != null;
+  const LV = lived.filter(cleared).map(q => ({ ...at(q.site), years: q.years }));
   let pins = [{ ...at('tokyo'), color: PIN.home, id: 'home' }, ...livedSites.map(k => ({ ...at(k), main: k === (saved?.site || fromKey), color: PIN.lived, id: 'lived:' + k }))];
   let route = null;
   if (mode === 'title' && !saved) pins.push({ ...at('med'), main: true, color: PIN.lived, hidden: true, id: 'dest' });
   if (mode === 'travel') pins.push({ ...at(toKey), main: true, color: PIN.lived, hidden: true, id: 'dest' });
   if (mode === 'atlas') { const read = atlasRead(); pins = pins.concat(ATLAS.map(a => ({ lat: a.lat, lon: a.lon, id: a.id, color: read.includes(a.id) ? PIN.read : PIN.unread }))); }
-  const globe = buildGlobe(rings, pins, route, { lived: LV, req: () => v.req() });
+  const ss = subsolar(new Date()), sd = ll(ss.lat, ss.lon).normalize();
+  const globe = buildGlobe(rings, pins, route, { lived: LV, req: () => v.req(), sun: sd });
   v.scene.add(globe);
   const c = v.controls; c.enablePan = false; c.minDistance = 2.4; c.maxDistance = 7; c.minPolarAngle = 0.2; c.maxPolarAngle = Math.PI - 0.2; c.target.set(0, 0, 0); c.rotateSpeed = 0.5;
   v.camera.near = 0.05; v.camera.far = 50; v.camera.fov = 30; v.camera.updateProjectionMatrix();
-  const ss = subsolar(new Date()), sd = ll(ss.lat, ss.lon).normalize();
   v.sun.position.copy(sd).multiplyScalar(10); v.sun.target.position.set(0, 0, 0); v.sun.color.set('#FFF1DE'); v.sun.intensity = 3.2;
   globe.userData.atm.material.uniforms.s.value.copy(sd);
   const fit = () => { const a = v.camera.aspect || 1; return 1.3 / Math.tan(THREE.MathUtils.degToRad(v.camera.fov / 2)) / Math.min(1, a); };
