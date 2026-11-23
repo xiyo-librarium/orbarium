@@ -99,7 +99,7 @@ export function createStage(v, s, P) {
 export function buildBlocks(w, land, P) {
   const at = land.at, g = new THREE.Group();
   const leaf = matte({ color: '#ffffff', vary: 0.15, freq: 5, bump: 0.6, bumpFreq: 8, rough: 0.85, spec: 0.4 }); leaf.emissive = new THREE.Color('#25331C'); leaf.emissiveIntensity = 0.4;
-  const plants = [], tanks = [], beds = [], heaps = [], coops = [], ponds = [], media = [], reeds = [];
+  const plants = [], tanks = [], beds = [], heaps = [], coops = [], ponds = [], media = [], reeds = [], pumps = [];
   for (const k in w.blocks) {
     const [x, y, z] = k.split(',').map(Number), b = w.blocks[k], D = BLOCKS[b.t]; if (!D) continue;
     if (D.kind === 'bed') beds.push({ x, y, z, stone: !!(b.s || (w.stone && w.stone[`${x},${y}`])), mulch: !!b.m, cover: !!b.g });
@@ -109,6 +109,7 @@ export function buildBlocks(w, land, P) {
     else if (D.kind === 'pond') ponds.push({ x, y, z });
     else if (D.kind === 'media') media.push({ x, y, z, t: D.media });
     else if (D.kind === 'plant') reeds.push({ x, y, z, t: D.plant });
+    else if (D.kind === 'pump') pumps.push({ x, y, z });
   }
   const pickAt = (m, kind, extra = {}) => { m.userData.pick = { kind, ...extra }; return m; };
   if (beds.length) {
@@ -226,6 +227,11 @@ export function buildBlocks(w, land, P) {
     const rm = matte({ color: '#ffffff', vary: 0.15, freq: 4, rough: 0.8, spec: 0.4 }), im = new THREE.InstancedMesh(cone, rm, list.length), mt = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), c = new THREE.Color();
     list.forEach(([x, z, y, hh, t, r], i) => { e.set((r - 0.5) * 0.3, r * 6, (hash(x, y, 3) - 0.5) * 0.3); q.setFromEuler(e); mt.compose(new THREE.Vector3(x, z, y), q, new THREE.Vector3(1, hh, 1)); im.setMatrixAt(i, mt); im.setColorAt(i, c.set(t === 'canna' && r > 0.7 ? '#C8562E' : r > 0.5 ? '#86A05A' : '#9AAE64')); });
     im.castShadow = true; g.add(pickAt(im, 'filter'));
+  }
+  if (pumps.length) {   // ポンプ：小さな箱に管
+    const geos = [], pm = matte({ color: '#3A5F86', vary: 0.08, freq: 3, rough: 0.5 });
+    for (const q of pumps) { boxAt(geos, null, q.x + 0.5, q.y + 0.5, q.z + 0.22, 0.45, 0.35, 0.44); boxAt(geos, null, q.x + 0.5, q.y + 0.5, q.z + 0.6, 0.06, 0.06, 0.4); boxAt(geos, null, q.x + 0.72, q.y + 0.5, q.z + 0.78, 0.5, 0.06, 0.06); }
+    g.add(pickAt(mesh(geos, pm), 'pump'));
   }
   return g;
 }

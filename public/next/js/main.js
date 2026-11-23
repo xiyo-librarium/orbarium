@@ -8,6 +8,7 @@ import { PALETTES } from './look.js';
 import { createView } from './view.js';
 import { createStage } from './stage.js';
 import { buildGlobe, subsolar, ll } from './globe.js';
+import * as BK from './book.js';
 
 const W = E.W, $ = (s) => document.querySelector(s);
 const Q = new URLSearchParams(location.search), SITE = Q.get('site') || 'med';
@@ -34,23 +35,30 @@ const TOOLS = [
   { id: 'house', name: '家', hint: '地面をなぞって床を描く。建物にくっつけると広がる。壁を押すと 壁→窓→扉' },
   { id: 'field', name: '畑', hint: '地面をなぞって畑を作る（段々になる）。畑を押すたびに 裸地→マルチ→覆い' },
   { id: 'tree', name: '木', subs: [['tree', '果樹'], ['hedge', '生け垣']], hint: '押すと植える、なぞると並べる。ある木を押すと詳しく' },
-  { id: 'water', name: '水', subs: [['tank', 'タンク'], ['pond', '池'], ['filter', '排水の庭']],
-    hints: { tank: '地面を押してタンクを置く。軒のそばなら雨どいがつき、屋根の雨が集まる', pond: 'なぞって池を掘る。斜面の水が集まる低い所がいい', filter: 'なぞって排水の庭を作る。台所やシャワーの水を砂と草でこして畑へ' } },
+  { id: 'water', name: '水', subs: [['tank', 'タンク'], ['pond', '池'], ['filter', '排水の庭'], ['pump', 'ポンプ']],
+    hints: { tank: '地面を押してタンクを置く。軒のそばなら雨どいがつき、屋根の雨が集まる', pond: 'なぞって池を掘る。斜面の水が集まる低い所がいい', filter: 'なぞって排水の庭を作る。台所やシャワーの水を砂と草でこして畑へ', pump: '押してポンプを置く。タンクや池より高い畑へ水を送る（電気を使う）' } },
   { id: 'shed', name: '小屋', subs: [['heap', '堆肥小屋'], ['coop', 'ニワトリ小屋']],
     hints: { heap: 'なぞって堆肥小屋の区画を並べる（1区画1m³）。畑の近くがいい', coop: '押してニワトリ小屋を置く' } },
-  { id: 'terrain', name: '地形', subs: [['up', '上げる'], ['down', '下げる'], ['level', '平らに']], hint: 'なぞった所を1段（1m）上げる・下げる・平らにする。出た土はとっておく' },
+  { id: 'terrain', name: '地形', subs: [['up', '上げる'], ['down', '下げる'], ['level', '平らに'], ['stone', '石垣']],
+    hints: { up: 'なぞった所を1段（1m）上げる。盛る土は、とっておいた土から', down: 'なぞった所を1段（1m）下げる。出た土はとっておく', level: 'なぞった四角を、まん中の高さにそろえる', stone: '段差のふち（上の段）をなぞると、段差の面を石で積む。畑の土が流れなくなる' } },
   { id: 'erase', name: '消す', hint: '外したい物を押す（建物・タンク・畑・木・小屋・池）' }
 ];
+// 種類ごとに要る知識（ノートにないものは選べない）
+const SUBLEARN = { tree: { tree: 'hedge', hedge: 'hedge' }, water: { tank: null, pond: 'pond', filter: 'grey', pump: null }, shed: { heap: 'heap', coop: 'chicken' }, terrain: { up: null, down: null, level: null, stone: 'terrace' } };
+const SAVE = 'orbarium-next-1';
 const TOUCH = matchMedia('(pointer: coarse)').matches;
 const HINT_NEAR = TOUCH ? '物を押すと詳しく。作るのは下の道具で。1本指で回す・2本指で寄る' : '物を押すと詳しく。作るのは下の道具で。ドラッグで回す・ホイールで寄る';
 
 async function boot() {
   const S = E.SITES[SITE];
   $('#where').textContent = `${S.name} · 土地を読みこみ中…`;
+  // つづき：保存があればそこから（実在の土地のデータも保存に入っている）
+  let saved = null; if (!Q.has('new') && !Q.has('shot')) { try { const v0 = localStorage.getItem(SAVE); saved = v0 ? E.load(v0) : null; } catch { saved = null; } }
+  if (saved && saved.site !== SITE) saved = null;
   let real = null;
-  try { real = await loadRealPlot(S.lat0 ?? S.lat, S.lon0 ?? S.lon); E.applyReal(SITE, real); } catch (e) { console.warn('実データなし', e); }
-  const s = E.newGame({ site: SITE, seed: 7, real }); s.world.site = SITE;
-  s.known.push(...E.TECH.filter(t => !s.known.includes(t)));   // 試作：季節を移すまでは、学ぶものを全部知っている
+  if (!saved) { try { real = await loadRealPlot(S.lat0 ?? S.lat, S.lon0 ?? S.lon); E.applyReal(SITE, real); } catch (e) { console.warn('実データなし', e); } }
+  const s = saved || E.newGame({ site: SITE, seed: 7, real }); s.world.site = SITE;
+  if (!saved) {
   // 試作の母屋：その土地の工法で建て替えたところから
   const w0 = s.world, d0 = W.cloneHouse(w0.house);
   Object.assign(d0, LOCAL[SITE] || LOCAL.med);
@@ -58,6 +66,8 @@ async function boot() {
   W.buildHouse(s, d0);
   const cs = Object.keys(w0.house.cells).map(k => k.split(',').map(Number)), xs = cs.map(c => c[0]), ys = cs.map(c => c[1]);
   try { const bxx = Math.min(...xs) - 1, byy = Math.max(...ys) + 3; W.prefabBeds(s, [bxx, byy], [bxx + 6, byy + 3], 'hire'); } catch { /* 置けなければなし */ }
+  }
+  const persist = () => { if (Q.has('shot')) return; try { localStorage.setItem(SAVE, E.save(s)); } catch { /* 保存できない */ } };
 
   const P = PALETTES[SITE] || PALETTES.med, N = W.N;
   const v = createView($('#c'), { keep: Q.has('shot') });
@@ -86,7 +96,7 @@ async function boot() {
   const toMap = () => { select(null); v.flyTo(center, mapDist(), 50); };
   const flyNear = (p) => v.flyTo(new THREE.Vector3(p.x, p.y, p.z), nearDist(), 54);
   $('#toMap').onclick = toMap;
-  $('#season').onclick = () => toast('季節を過ごすのは、次の段階でここから動くようにします');
+  $('#season').onclick = () => runSeason();
 
   /* ---------- 時刻 ---------- */
   const month = 5;
@@ -108,13 +118,13 @@ async function boot() {
     try { err = fn(); } catch (e) { console.error(e); err = 'うまくいかなかった'; }
     if (err) { restore(before); stage.rebuild(); syncTop(); toast(err); return err; }
     G.undo.push(before); if (G.undo.length > 60) G.undo.shift(); G.redo = [];
-    changed();
+    changed(); persist();
     const spent = cash0 - s.cash;
     if (okMsg) toast(typeof okMsg === 'function' ? okMsg(spent) : okMsg + (Math.abs(spent) > 0.05 ? `（${spent > 0 ? '−' : '+'}${yen(Math.abs(spent))}）` : ''));
     return null;
   };
-  $('#undo').onclick = () => { if (G.draft) { setDraft(null); toast('下書きをやめた'); return; } if (!G.undo.length) return; G.redo.push(snap()); restore(G.undo.pop()); changed(); toast('取り消した'); };
-  $('#redo').onclick = () => { if (!G.redo.length) return; G.undo.push(snap()); restore(G.redo.pop()); changed(); toast('やり直した'); };
+  $('#undo').onclick = () => { if (G.draft) { setDraft(null); toast('下書きをやめた'); return; } if (!G.undo.length) return; G.redo.push(snap()); restore(G.undo.pop()); changed(); persist(); toast('取り消した'); };
+  $('#redo').onclick = () => { if (!G.redo.length) return; G.undo.push(snap()); restore(G.redo.pop()); changed(); persist(); toast('やり直した'); };
   addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); (e.shiftKey ? $('#redo') : $('#undo')).click(); } if (e.key === 'Escape') { if (G.draft) setDraft(null); else { setTool(null); select(null); } } if (e.key === 'Enter' && G.draft) $('#draftYes').click(); });
 
   /* ---------- 壁を下げて中を見る ---------- */
@@ -135,15 +145,19 @@ async function boot() {
   };
   G.sub = { tree: 'tree', water: 'tank', shed: 'heap', terrain: 'up' };
   const subsEl = $('#subs');
-  subsEl.onclick = (e) => { const b = e.target.closest('button'); if (!b || !G.tool) return; G.sub[G.tool] = b.dataset.sub; if (G.draft) setDraft(null); renderSubs(); setHint(); };
+  const knows = (id) => !id || s.known.includes(id);
+  const subOK = (t, k) => knows(SUBLEARN[t]?.[k]);
+  subsEl.onclick = (e) => { const b = e.target.closest('button'); if (!b || !G.tool) return; if (!subOK(G.tool, b.dataset.sub)) { toast('まだ知らない。季節を過ごすうちに、誰かが教えてくれるかもしれない'); return; } G.sub[G.tool] = b.dataset.sub; if (G.draft) setDraft(null); renderSubs(); setHint(); };
   function renderSubs() {
     const T = TOOLS.find(t => t.id === G.tool);
     if (!T || !T.subs) { subsEl.hidden = true; return; }
-    subsEl.innerHTML = T.subs.map(([k, label]) => `<button data-sub="${k}" class="${G.sub[T.id] === k ? 'on' : ''}">${label}</button>`).join(''); subsEl.hidden = false;
+    subsEl.innerHTML = T.subs.map(([k, label]) => `<button data-sub="${k}" class="${G.sub[T.id] === k ? 'on' : ''}${subOK(T.id, k) ? '' : ' locked'}">${subOK(T.id, k) ? '' : '🔒'}${label}</button>`).join(''); subsEl.hidden = false;
   }
   // なぞる道具：1本指（左ボタン）はなぞる。回すのは2本指か右ボタン
   const traces = (id) => !!id && id !== 'erase';
   function setTool(id) {
+    const T0 = id && TOOLS.find(t => t.id === id);
+    if (T0 && T0.subs && !subOK(id, G.sub[id])) { const k = T0.subs.find(([q]) => subOK(id, q)); if (!k) { toast(`${T0.name}の道具は、まだ知らない。季節を過ごすうちに教わる`); return; } G.sub[id] = k[0]; }
     if (G.draft && id !== G.tool) setDraft(null);
     G.tool = id; for (const b of tools.children) b.classList.toggle('on', b.dataset.tool === id);
     if (id) select(null);
@@ -304,10 +318,13 @@ async function boot() {
     if (G.tool === 'water' && (sub === 'pond' || sub === 'filter')) return { what: sub === 'pond' ? `池 ${nx}×${ny}m（深さ1m）` : `排水の庭 ${nx}×${ny}m`, cuts, land: true, real: true, done: sub === 'pond' ? '池を掘った' : '排水の庭を作った',
       note: sub === 'pond' ? '掘った土はとっておく（盛るのに使う）' : '台所やシャワーの排水が、砂利と砂と草の根を通ってきれいになる',
       apply: (t) => { for (const [x, y] of out) { const c = vegCut(t, x, y); if (c) return c; } return W.prefabPit(t, a, b, sub === 'pond' ? 'pond' : 'media_sand', 'hire', 1, sub === 'pond' ? null : 'plant_reed'); } };
+    if (G.tool === 'terrain' && sub === 'stone') return { what: `石垣 ${nx}×${ny}m の段差`, cuts: [], land: true, real: true, ok: '積む', done: '石垣を積んだ', note: '段差の面を石で留める。すき間がトカゲや虫の住みかになる',
+      apply: (t) => each(t, (x, y) => W.dropArea(t.world, x, y) ? W.buildStone(t, x, y) : '段差がない') };
     if (G.tool === 'terrain') return { what: `地形を${sub === 'up' ? '1段上げる' : sub === 'down' ? '1段下げる' : '平らにする'} ${nx}×${ny}m`, cuts, land: true, real: true, ok: '変える', done: '地形を変えた',
       note: sub === 'down' ? '掘った土はとっておく' : sub === 'up' ? '盛る土は、とっておいた土から（なければ買う）' : 'まん中の高さにそろえる',
       apply: (t) => { for (const [x, y] of out) { const c = vegCut(t, x, y); if (c) return c; }
         if (sub === 'level') return W.prefabLevel(t, a, b, 'hire');
+        if (sub === 'stone') return each(t, (x, y) => W.dropArea(t.world, x, y) ? W.buildStone(t, x, y) : '段差がない');
         return each(t, (x, y) => sub === 'up' ? W.fill(t, x, y, 'hire') : W.dig(t, x, y, 'hire')); } };
     return null;
   }
@@ -322,7 +339,9 @@ async function boot() {
   // 畑の印：裸地→マルチ→覆い→裸地（覆いは小さな温室）
   const bedAt = (w, x, y) => W.blocksOf(w, 'bed').find(q => q.x === x && q.y === y);
   const bedState = (b) => b.b.g ? 'cover' : b.b.m ? 'mulch' : 'bare';
-  const NEXT_BED = { bare: 'mulch', mulch: 'cover', cover: 'bare' }, BED_NAME = { bare: '裸地', mulch: 'マルチ（刈り草で覆う）', cover: '覆い（小さな温室）' };
+  const BED_NAME = { bare: '裸地', mulch: 'マルチ（刈り草で覆う）', cover: '覆い（小さな温室）' }, BED_LEARN = { bare: null, mulch: 'mulch', cover: 'greenhouse' };
+  const nextBed = (st) => { const order = ['bare', 'mulch', 'cover']; let i = order.indexOf(st); for (let k = 0; k < 3; k++) { i = (i + 1) % 3; if (knows(BED_LEARN[order[i]])) return order[i]; } return 'bare'; };
+  function cycleBeds(cells, st) { const to = nextBed(st); if (to === st) { toast('マルチも覆いも、まだ知らない'); return; } bedMarks(cells, to); }
   function setBed(t, b, to) { const want = { m: to === 'mulch' ? 1 : 0, g: to === 'cover' ? 1 : 0 }; for (const k of ['m', 'g']) if (!!b.b[k] !== !!want[k]) { const e = W.toggleMark(t, b.x, b.y, b.z, k); if (e) return e; } return null; }
   function bedMarks(cells, to) {
     actFlow(() => { let n = 0; for (const [x, y] of cells) { const b = bedAt(s.world, x, y); if (!b) continue; const e = setBed(s, b, to); if (e) return e; n++; } return n ? null : '畑がない'; }, `畑を${BED_NAME[to]}に`);
@@ -430,7 +449,6 @@ async function boot() {
     return p.point.clone();
   }
   const seg = (act0, items, cur) => `<div class="seg">${items.map(([k, label, dis]) => `<button data-act="${act0}:${k}" class="${k === cur ? 'on' : ''}" ${dis ? 'disabled title="まだ知らない"' : ''}>${label}</button>`).join('')}</div>`;
-  const knows = (id) => !id || s.known.includes(id);
   function buildingCard(b) {
     const w = s.world, id = W.bid(b), n = Object.keys(b.cells).length, bx = W.roofBox(b);
     const use = id === 'main' ? 'live' : (b.use || 'store'), U = W.USES[use];
@@ -446,6 +464,9 @@ async function boot() {
       : `<div class="row"><span>屋根の傾き</span><div class="step"><button data-act="pitch:-1">−</button><b>${W.PITCHES[Math.max(0, pi)][1]}</b><button data-act="pitch:1">＋</button></div></div>
          <div class="row"><span>軒の出</span><div class="step"><button data-act="eaves:-1">−</button><b>${W.eavesDepth(b).toFixed(1)}m</b><button data-act="eaves:1">＋</button></div></div>`;
     const furnOf = (g) => b.furn?.find(f => W.FURN[f.t].group === g)?.t;
+    const step = (k, label, val) => `<div class="row"><span>${label}</span><div class="step"><button data-act="${k}:-1">−</button><b>${val}</b><button data-act="${k}:1">＋</button></div></div>`;
+    const power = id !== 'main' ? '' : (knows('offgrid') ? step('pv', '太陽光', `${b.pv || 0}枚（${((b.pv || 0) * W.BLOCKS.pv.kw).toFixed(1)}kW）`) + step('batt', '蓄電池', `${b.batt || 0}台（${(b.batt || 0) * W.BLOCKS.batt.kwh}kWh）`) : '')
+      + (knows('deep') ? step('deep', '基礎', `${(b.eq?.depth || 0.3).toFixed(1)}m`) : '');
     const fixtures = use !== 'live' ? '' : `
       <div class="row"><span>トイレ</span>${seg('furn:toilet', [['toilet', '水洗'], ['ctoilet', 'コンポスト', !knows(W.FURN.ctoilet.learn)]], furnOf('toilet'))}</div>
       <div class="row"><span>シャワー</span>${seg('furn:shower', [['shower', 'ふつう'], ['shower2', '節水', !knows(W.FURN.shower2.learn)]], furnOf('shower'))}</div>
@@ -454,7 +475,7 @@ async function boot() {
       <p class="sub">${bx.X1 - bx.X0}×${bx.Y1 - bx.Y0}m · 床${n}m² · ${W.WALLS[b.wall].name}・${R.name}</p>
       ${id === 'main' ? '' : `<div class="row"><span>使い道</span>${seg('use', [['stay', '泊める'], ['store', 'しまう'], ['grow', '育てる']], use)}</div>`}
       <div class="row"><span>工法</span>${seg('method', [['local', 'この土地の工法'], ['ins', '断熱した', !knows('insulation')]], ins ? 'ins' : 'local')}</div>
-      ${roofRow}${fixtures}${rain}
+      ${roofRow}${fixtures}${power}${rain}
       <p class="note">${U.note}${!knows('insulation') ? ' 断熱は、季節を過ごして学ぶと選べる。' : ''}</p>`;
   }
   function renderCard() {
@@ -519,6 +540,15 @@ async function boot() {
     if (k === 'method') { const L = LOCAL[SITE] || LOCAL.med; act(() => { if (a === 'ins') Object.assign(d, INSUL); else Object.assign(d, { wall: L.wall, roof: L.roof, finish: L.finish }); return W.buildBuilding(s, d); }, a === 'ins' ? '断熱した壁と屋根に' : 'この土地の工法に'); return; }
     if (k === 'pitch') { const i = W.PITCHES.findIndex(([q]) => Math.abs(q - (b.pitch || 0.3)) < 0.01), j = Math.max(0, Math.min(W.PITCHES.length - 1, (i < 0 ? 1 : i) + +a)); if (j === i) return; act(() => { d.pitch = W.PITCHES[j][0]; d.roofShape = d.roofShape && d.roofShape !== 'flat' ? d.roofShape : 'gable'; return W.buildBuilding(s, d); }, `屋根を${W.PITCHES[j][1]}傾きに`); return; }
     if (k === 'eaves') { const i = W.EAVE_STEPS.findIndex(q => Math.abs(q - W.eavesDepth(b)) < 0.01), j = Math.max(0, Math.min(W.EAVE_STEPS.length - 1, (i < 0 ? 1 : i) + +a)); if (j === i) return; act(() => { d.eaves = W.EAVE_STEPS[j]; return W.buildBuilding(s, d); }, `軒を${W.EAVE_STEPS[j]}mに`); return; }
+    if (k === 'pv' || k === 'batt' || k === 'deep') {
+      act(() => {
+        if (k === 'pv') d.pv = Math.max(0, Math.min(Object.keys(d.cells).length, (d.pv || 0) + +a));
+        if (k === 'batt') d.batt = Math.max(0, Math.min(6, (d.batt || 0) + +a));
+        if (k === 'deep') { d.eq = d.eq || { depth: 0 }; d.eq.depth = Math.max(0.3, Math.min(3, Math.round(((d.eq.depth || 0.3) + 0.3 * +a) * 10) / 10)); }
+        return W.buildBuilding(s, d);
+      }, (spent) => (k === 'pv' ? `太陽光を${d.pv}枚に` : k === 'batt' ? `蓄電池を${d.batt}台に` : `基礎を${d.eq?.depth}mに`) + (spent > 0.05 ? `（−${yen(spent)}）` : ''));
+      return;
+    }
     if (k === 'furn') {
       act(() => {
         if (a === 'stove') { if (c === 'stove') { const err = W.placeStove(d); if (err) return err; d.stove = true; } else { W.removeStove(d); d.stove = false; } }
@@ -537,7 +567,7 @@ async function boot() {
     if (G.mode === 'near' && traces(G.tool)) {
       const n = ndcOf(e), p = stage.pick(n), sub = G.sub[G.tool];
       const noTrace = !p ? false : ['building', 'draft', 'tank'].includes(p.kind) || (G.tool === 'tree' && p.kind === 'trees');
-      const tapOnly = (G.tool === 'water' && sub === 'tank') || (G.tool === 'shed' && sub === 'coop');
+      const tapOnly = (G.tool === 'water' && (sub === 'tank' || sub === 'pump')) || (G.tool === 'shed' && sub === 'coop');
       if (!noTrace && !tapOnly) { const g = stage.groundAt(n); if (g) { down.trace = { a: cellOf(g), b: cellOf(g) }; canvas.setPointerCapture(e.pointerId); } }
     }
   });
@@ -565,9 +595,10 @@ async function boot() {
     if (p && p.kind === 'draft') { toast('下書き：［建てる］か［やめる］を押す'); return; }
     const sub = G.sub[G.tool], g = stage.groundAt(n), c = g ? cellOf(g) : null, one = c ? { a: c, b: c } : null;
     if (G.tool === 'water' && sub === 'tank') { placeTank(p, n); return; }
+    if (G.tool === 'water' && sub === 'pump') { if (c) actFlow(() => W.put(s, c.x, c.y, W.h(s.world, c.x, c.y), 'pump', 'hire'), 'ポンプを置いた'); return; }
     if (G.tool === 'erase') { erase(p); return; }
     if (G.tool === 'field') {
-      if (p && p.kind === 'beds') { const q = cellOf(p.point), b = bedAt(s.world, q.x, q.y); if (b) { bedMarks([[q.x, q.y]], NEXT_BED[bedState(b)]); return; } }
+      if (p && p.kind === 'beds') { const q = cellOf(p.point), b = bedAt(s.world, q.x, q.y); if (b) { cycleBeds([[q.x, q.y]], bedState(b)); return; } }
       if (one) setDraft(rectDraft(one)); return;
     }
     if (G.tool === 'tree') {
@@ -584,19 +615,74 @@ async function boot() {
   // なぞり終わり：道具ごとに下書きへ
   function traced(tr) {
     if (G.tool === 'house') { makeHouseDraft(tr); return; }
-    if (G.tool === 'field') { const b = bedAt(s.world, tr.a.x, tr.a.y); if (b) { bedMarks(rectCells(tr).out, NEXT_BED[bedState(b)]); return; } }
+    if (G.tool === 'field') { const b = bedAt(s.world, tr.a.x, tr.a.y); if (b) { cycleBeds(rectCells(tr).out, bedState(b)); return; } }
     if (G.tool === 'tree') { setDraft(treeDraft(tr)); return; }
     const dr = rectDraft(tr); if (dr) setDraft(dr);
   }
 
+  /* ---------- 季節を過ごす：3か月を進め、報告を出す ---------- */
+  const seasonLabel = () => { const q = E.SITES[s.site].quarters[s.q]; $('#season').textContent = `${q.split('・')[0]}を過ごす`; $('#where').textContent = innerWidth > 640 ? `${S.name} · ${E.SITES[s.site].quarters[s.q]}` : S.name; };
+  function runSeason() {
+    if (G.draft) setDraft(null);
+    const before = E.clone(s);
+    const { state, report } = E.advance(s);
+    let ns = state; const lessons = [];
+    for (const l of report.learn) { ns = E.learn(ns, l.id, l.why); lessons.push(l); }
+    const goodN = E.relations(ns).nodes.filter(x => x.good === true && x.v > 0.15).length;
+    const end = goodN >= BK.GOAL && ns.flags['done_' + ns.site] == null;
+    if (end) ns.flags['done_' + ns.site] = ns.turn;
+    for (const k of Object.keys(s)) delete s[k]; Object.assign(s, ns);   // 同じ入れ物のまま中身を入れ替える（舞台や道具が s を見ている）
+    G.undo = []; G.redo = []; fCache = { sig: null, f: null };
+    changed(); persist(); seasonLabel();
+    showReport(before, report, lessons, end);
+  }
+  function showReport(before, rep, lessons, end) {
+    const more = end && BK.nextLands(s).length, cm = more ? BK.chapterMail(s, rep) : null;
+    $('#reportBody').innerHTML = BK.reportHTML(s, before, rep, lessons, end);
+    $('#reportAct').innerHTML = (cm ? `<button id="rNext">${BK.esc(cm.go)}</button>` : '') + `<button class="yes" id="rBack">${cm ? BK.esc(cm.stay) : '土地に戻る'}</button>`;
+    $('#report').hidden = false; $('#rBack').focus();
+    $('#rBack').onclick = () => { $('#report').hidden = true; };
+    if ($('#rNext')) $('#rNext').onclick = () => { $('#report').hidden = true; toast('次の土地へ行くのは、もうすぐ移します'); };
+    $('#reportBody').querySelectorAll('[data-choice]').forEach(b2 => b2.onclick = () => {
+      const [k, v2] = b2.dataset.choice.split(':'); if (k === 'surplus') s.flags.surplus = v2; if (k === 'pest') s.flags.pestHand = v2 === 'hand'; persist();
+      b2.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b2));
+    });
+  }
+
+  /* ---------- ノート：めぐり・家計簿・予定・天気・ノート ---------- */
+  G.tab = 'web'; G.studied = -1;
+  const openBook = (tab) => { if (tab) G.tab = tab; renderBook(); $('#sheet').hidden = false; };
+  function renderBook() {
+    $('#tabs').innerHTML = BK.TABS.map(([k, n]) => `<button data-tab="${k}" class="${G.tab === k ? 'on' : ''}">${n}</button>`).join('');
+    const body = $('#sheetBody');
+    body.innerHTML = G.tab === 'web' ? BK.pageWeb(s) : G.tab === 'book' ? BK.pageBook(s) : G.tab === 'plan' ? BK.pagePlan(s) : G.tab === 'sky' ? BK.pageSky(s, G.studied !== s.turn) : BK.pageNote(s, []);
+    body.scrollTop = 0;
+  }
+  $('#bookBtn').onclick = () => openBook();
+  $('#sheetX').onclick = () => { $('#sheet').hidden = true; };
+  $('#sheet').onclick = (e) => { if (e.target.id === 'sheet') $('#sheet').hidden = true; };
+  $('#tabs').onclick = (e) => { const b2 = e.target.closest('[data-tab]'); if (!b2) return; G.tab = b2.dataset.tab; renderBook(); };
+  $('#sheetBody').onclick = (e) => {
+    const c = e.target.closest('[data-cell]');
+    if (c) { const [pi, di] = c.dataset.cell.split(',').map(Number), order = ['work', 'farm', 'rest'], v0 = s.persons[pi].week[di] === 'build' ? 'farm' : s.persons[pi].week[di];
+      s.persons[pi].week[di] = order[(order.indexOf(v0) + 1) % 3]; fCache = { sig: null, f: null }; persist(); const top = $('#sheetBody').scrollTop; renderBook(); $('#sheetBody').scrollTop = top; return; }
+    const st = e.target.closest('[data-study]');
+    if (st && !st.disabled) {
+      const id = st.dataset.study, ns = E.learn(s, id, 'foresight'); for (const k of Object.keys(s)) delete s[k]; Object.assign(s, ns);
+      G.studied = s.turn; persist(); renderBook();
+      $('#reportBody').innerHTML = BK.lessonMail({ id, why: 'foresight' }, BK.mailDate(s)); $('#reportAct').innerHTML = '<button class="yes" id="rBack">ノートに書いた</button>';
+      $('#report').hidden = false; $('#rBack').onclick = () => { $('#report').hidden = true; };
+    }
+  };
+
   /* ---------- はじめ：地図から ---------- */
-  $('#where').textContent = innerWidth > 640 ? `${S.name} · 4〜6月` : S.name;
+  seasonLabel();
   syncTop(); fitControls(); setTool(null);
   v.resize(); fitControls();
   v.lookAt(center, mapDist(), 50, 60); setMode('map');
   addEventListener('resize', () => { fitControls(); placeCard(); });
   v.start();
-  window.__next = { s, E, v, stage, setHour, G, act, toScreen, select, setTool, flyNear, toMap, center, house: () => s.world.house, traced, setDraft, flowsNow, setSub: (t, k) => { G.sub[t] = k; renderSubs(); setHint(); } };
+  window.__next = { s, E, v, stage, setHour, G, act, toScreen, select, setTool, flyNear, toMap, center, house: () => s.world.house, traced, setDraft, flowsNow, runSeason, openBook, setSub: (t, k) => { G.sub[t] = k; renderSubs(); setHint(); } };
 }
 
 /* 地球：東京からメデジンへ。昼と夜の境目は今の本物の太陽 */
