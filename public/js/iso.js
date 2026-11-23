@@ -601,16 +601,16 @@ export function createView(canvas, world, opt = {}) {
       const cells = Object.keys(hs.cells).map(k => k.split(',').map(Number)).sort((a, b) => b[1] - a[1] || a[0] - b[0]);
       const pvSet = new Set(cells.slice(0, Math.min(hs.pv || 0, cells.length)).map(c => c.join(',')));
       const box = roofBox(hs), E = eavesDepth(hs), has = (x, y) => !!hs.cells[`${x},${y}`], RZ = (px, py) => z + roofZ(hs, px, py, box) + 0.05;
-      // 屋根：1マスずつ傾いた板。外に面した辺は軒の出のぶん伸ばす（角も出る）
-      for (const [x, y] of cells) {
-        if (!inView(x, y)) continue;
-        const xa = x - (has(x - 1, y) ? 0 : E), xb = x + 1 + (has(x + 1, y) ? 0 : E), ya = y - (has(x, y - 1) ? 0 : E), yb = y + 1 + (has(x, y + 1) ? 0 : E);
-        const rd = roofDecor(hs.roof, x, y), pv = pvSet.has(`${x},${y}`), U = (wx, wy) => [(wx - xa) / (xb - xa), (wy - ya) / (yb - ya)];
-        const decor = (cx, t, g2) => { rd && rd(cx, t, g2); if (!pv) return; const q = [[x + 0.08, y + 0.08], [x + 0.92, y + 0.08], [x + 0.92, y + 0.92], [x + 0.08, y + 0.92]].map(([a1, b1]) => faceAt(t, ...U(a1, b1)));   // 太陽光パネル
-          cx.fillStyle = '#30476B'; cx.beginPath(); cx.moveTo(q[0][0], q[0][1]); for (const r of q) cx.lineTo(r[0], r[1]); cx.closePath(); cx.fill(); cx.strokeStyle = 'rgba(200,215,235,.45)'; cx.lineWidth = 1;
-          for (const f of [1 / 3, 2 / 3]) { const A = faceAt(t, ...U(x + 0.08 + 0.84 * f, y + 0.08)), B = faceAt(t, ...U(x + 0.08 + 0.84 * f, y + 0.92)); cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.stroke(); } };
-        slab(list, [[xa, ya], [xb, ya], [xb, yb], [xa, yb]], RZ, 0.15, R.color, { type: 'roof', x, y, decor });
+      // 屋根：家のマスを軒の出のぶん外へ広げた形（角も出る）を1枚の屋根にする。
+      // 重なりが出ないよう、すべての境い目の線で小さな長方形に切り分けて上面を描き、まわりの縁（鼻隠し）は外周だけに描く
+      const RT = roofTiles(hs, E), along = (hs.roofShape === 'mono' && ['e', 'w'].includes(hs.roofDir)) || (hs.roofShape === 'gable' && hs.roofDir === 'ew');
+      for (const T2 of RT.tiles) {
+        if (!inView(T2.cx, T2.cy)) continue;
+        const pv = pvSet.has(`${T2.cx},${T2.cy}`);
+        const decor = (cx, t) => roofSkin(cx, t, T2, hs.roof, along, pv);
+        slab(list, [[T2.x0, T2.y0], [T2.x1, T2.y0], [T2.x1, T2.y1], [T2.x0, T2.y1]], RZ, 0.15, R.color, { type: 'roof', x: T2.cx, y: T2.cy, decor, noSides: true });
       }
+      for (const sg of RT.edges) { if (inView(Math.floor(sg.mx), Math.floor(sg.my))) fascia(list, sg, RZ, 0.15, R.color); }
       // 妻壁：壁の上から屋根の下までの三角・台形の壁（傾いた屋根のとき）
       if ((hs.roofShape || 'flat') !== 'flat') for (const o of houseOuterEdges(hs)) {
         if (!inView(o.x, o.y)) continue;
@@ -627,15 +627,16 @@ export function createView(canvas, world, opt = {}) {
         cylinder(list, px, py, zt + 0.95, 0.13, 0.06, '#3C3C3C', { type: 'roof', x: sf.x, y: sf.y }, d0 + 0.001);
         if ((world.wood || 0) > 0.05) list.push({ depth: d0 + 0.002, draw: (cx, pc) => { if (pc) return; const g = geom(); [[0.05, 1.25, 0.13], [0.16, 1.55, 0.18], [0.3, 1.9, 0.24]].forEach(([dx, dz, r], i) => { const c = project(px + dx, py - dx * 0.5, zt + dz, g); cx.globalAlpha = 0.28 - i * 0.07; cx.fillStyle = '#F4F2EE'; cx.beginPath(); cx.arc(c[0], c[1], r * g.tw * 0.72, 0, 7); cx.fill(); }); cx.globalAlpha = 1; } });
       }
-      if (hs.gutter) {   // 雨樋：雨が落ちる軒の先にとい
-        const E3 = eavesDepth(hs) + 0.02, X = E3 + 0.1, dd = drainDirs(hs), bx = roofBox(hs);
-        for (const o of houseOuterEdges(hs)) {
-          if (!inView(o.x, o.y) || !dd.includes(o.dir)) continue;
-          const [, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number);
-          const rr = o.dir === 'n' ? [ex - X, ey - E3 - 0.1, ex + 1 + X, ey - E3] : o.dir === 's' ? [ex - X, ey + E3, ex + 1 + X, ey + E3 + 0.1] : o.dir === 'w' ? [ex - E3 - 0.1, ey - X, ex - E3, ey + 1 + X] : [ex + E3, ey - X, ex + E3 + 0.1, ey + 1 + X];
-          const gz = z + Math.min(roofZ(hs, rr[0], rr[1], bx), roofZ(hs, rr[2], rr[3], bx)) - 0.05;
-          const [gnx, gny] = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] }[o.dir], an = v.angle * Math.PI / 180, front = (gnx * Math.cos(an) - gny * Math.sin(an)) + (gnx * Math.sin(an) + gny * Math.cos(an)) > 0.01;
-          rbox(list, ...rr, gz, 0.1, '#A9B2B7', { type: 'roof', x: o.x, y: o.y, dbias: front ? 1.2 + 2 * E3 : 0 }, 1);
+      if (hs.gutter) {   // 雨樋：屋根の外周のうち、雨が落ちる向きの軒先にとい
+        const dd = drainDirs(hs), RT2 = roofTiles(hs, eavesDepth(hs)), g = geom();
+        for (const sg of RT2.edges) {
+          if (!dd.includes(sg.dir) || !inView(Math.floor(sg.mx), Math.floor(sg.my))) continue;
+          const o1 = 0.02, o2 = 0.12, [nx, ny] = sg.n;
+          const xs2 = [sg.a[0], sg.b[0], sg.a[0] + nx * o1, sg.a[0] + nx * o2], ys2 = [sg.a[1], sg.b[1], sg.a[1] + ny * o1, sg.a[1] + ny * o2];
+          const rr = nx ? [Math.min(xs2[2], xs2[3]), Math.min(sg.a[1], sg.b[1]), Math.max(xs2[2], xs2[3]), Math.max(sg.a[1], sg.b[1])] : [Math.min(sg.a[0], sg.b[0]), Math.min(ys2[2], ys2[3]), Math.max(sg.a[0], sg.b[0]), Math.max(ys2[2], ys2[3])];
+          const gz = Math.min(RZ(...sg.a), RZ(...sg.b)) - 0.1;
+          const dMax = Math.max(project(rr[0], rr[1], 0, g)[2], project(rr[2], rr[1], 0, g)[2], project(rr[0], rr[3], 0, g)[2], project(rr[2], rr[3], 0, g)[2]), dC = project((rr[0] + rr[2]) / 2, (rr[1] + rr[3]) / 2, 0, g)[2];
+          rbox(list, ...rr, gz, 0.1, '#A9B2B7', { type: 'roof', x: Math.floor(sg.mx - nx * 0.5), y: Math.floor(sg.my - ny * 0.5), dbias: dMax - dC + 0.03 }, 1);
         }
       }
     }
@@ -655,12 +656,62 @@ export function createView(canvas, world, opt = {}) {
     for (let i = 0; i < 4; i++) {
       const j = (i + 1) % 4, ex = cs[j][0] - cs[i][0], ey = cs[j][1] - cs[i][1], onx = ey, ony = -ex;   // 外向き（時計回りの角の並び）
       const rx = onx * Math.cos(an) - ony * Math.sin(an), ry = onx * Math.sin(an) + ony * Math.cos(an);
-      if (rx + ry > 0.01) { const l2 = Math.hypot(onx, ony) || 1; sides.push({ pts: [b[i], b[j], t[j], t[i]], fill: lightCol(color, (onx * S[0] + ony * S[1]) / l2, 1, 0.8, true), face: SIDE.findIndex(([sx, sy]) => sx === Math.sign(Math.round(onx / l2)) && sy === Math.sign(Math.round(ony / l2))) }); }
+      if (!meta?.noSides && rx + ry > 0.01) { const l2 = Math.hypot(onx, ony) || 1; sides.push({ pts: [b[i], b[j], t[j], t[i]], fill: lightCol(color, (onx * S[0] + ony * S[1]) / l2, 1, 0.8, true), face: SIDE.findIndex(([sx, sy]) => sx === Math.sign(Math.round(onx / l2)) && sy === Math.sign(Math.round(ony / l2))) }); }
     }
     list.push({ depth: Math.max(...b.map(q => q[2])) + 0.01 + (meta?.dbias || 0), meta, draw: (cx, pc) => {
       for (const sd of sides) poly(cx, sd.pts, pc ? pc(sd.face < 0 ? 0 : sd.face) : sd.fill, 1);
       poly(cx, t, pc ? pc(4) : topFill, 1); if (!pc && meta?.decor) meta.decor(cx, t, g);
     } });
+  }
+  /* 屋根の形：家のマスの外に面した辺を E だけ伸ばした長方形の集まり（重なりあり）を、
+     すべての境い目の座標で切り分けて、重ならない小さな長方形（tiles）と、外周の線（edges）にする */
+  function roofTiles(hs, E) {
+    const has = (x, y) => !!hs.cells[`${x},${y}`], rects = [];
+    for (const k in hs.cells) { const [x, y] = k.split(',').map(Number); rects.push([x - (has(x - 1, y) ? 0 : E), x + 1 + (has(x + 1, y) ? 0 : E), y - (has(x, y - 1) ? 0 : E), y + 1 + (has(x, y + 1) ? 0 : E), x, y]); }
+    const uniq = (a) => [...new Set(a.map(q => Math.round(q * 1000) / 1000))].sort((p, q) => p - q);
+    const XS = uniq(rects.flatMap(r => [r[0], r[1]])), YS = uniq(rects.flatMap(r => [r[2], r[3]]));
+    const nX = XS.length - 1, nY = YS.length - 1, own = new Array(nX * nY).fill(null), tiles = [];
+    for (let j = 0; j < nY; j++) for (let i = 0; i < nX; i++) {
+      const mx = (XS[i] + XS[i + 1]) / 2, my = (YS[j] + YS[j + 1]) / 2; let o = null;
+      for (const r of rects) if (mx > r[0] && mx < r[1] && my > r[2] && my < r[3]) { if (!o || (Math.floor(mx) === r[4] && Math.floor(my) === r[5])) o = r; }
+      if (!o) continue; own[j * nX + i] = o;
+      tiles.push({ x0: XS[i], x1: XS[i + 1], y0: YS[j], y1: YS[j + 1], cx: o[4], cy: o[5] });
+    }
+    const cov = (i, j) => i >= 0 && j >= 0 && i < nX && j < nY && !!own[j * nX + i], edges = [];
+    for (let j = 0; j < nY; j++) for (let i = 0; i < nX; i++) {
+      if (!cov(i, j)) continue; const x0 = XS[i], x1 = XS[i + 1], y0 = YS[j], y1 = YS[j + 1];
+      if (!cov(i, j - 1)) edges.push({ a: [x0, y0], b: [x1, y0], n: [0, -1], dir: 'n' });
+      if (!cov(i, j + 1)) edges.push({ a: [x1, y1], b: [x0, y1], n: [0, 1], dir: 's' });
+      if (!cov(i - 1, j)) edges.push({ a: [x0, y1], b: [x0, y0], n: [-1, 0], dir: 'w' });
+      if (!cov(i + 1, j)) edges.push({ a: [x1, y0], b: [x1, y1], n: [1, 0], dir: 'e' });
+    }
+    for (const e of edges) { e.mx = (e.a[0] + e.b[0]) / 2; e.my = (e.a[1] + e.b[1]) / 2; }
+    return { tiles, edges };
+  }
+  /* 屋根の縁（鼻隠し）：外周の線 a→b、上面の高さ Z、厚み th。カメラに向いた面だけ */
+  function fascia(list, sg, Z, th, color) {
+    const g = geom(), S = v.sun.dir, P = (px, py, pz) => project(px, py, pz, g), [nx, ny] = sg.n, an = v.angle * Math.PI / 180;
+    if ((nx * Math.cos(an) - ny * Math.sin(an)) + (nx * Math.sin(an) + ny * Math.cos(an)) <= 0.01 || v.top) return;
+    const za = Z(...sg.a), zb = Z(...sg.b), pts = [P(sg.a[0], sg.a[1], za - th), P(sg.b[0], sg.b[1], zb - th), P(sg.b[0], sg.b[1], zb), P(sg.a[0], sg.a[1], za)];
+    const fill = lightCol(color, nx * S[0] + ny * S[1], 1, 0.8, true), face = SIDE.findIndex(([sx, sy]) => sx === nx && sy === ny);
+    list.push({ depth: Math.max(pts[0][2], pts[1][2]) + 0.02, meta: { type: 'roof' }, draw: (cx, pc) => poly(cx, pts, pc ? pc(face) : fill, 1) });
+  }
+  /* 屋根の表面：トタンの波は流れの向き（along＝東西に流れる）に、世界の座標でそろえて引く。太陽光パネルとさびも */
+  function roofSkin(cx, t, T2, kind, along, pv) {
+    const U = (wx, wy) => faceAt(t, (wx - T2.x0) / (T2.x1 - T2.x0), (wy - T2.y0) / (T2.y1 - T2.y0));
+    const line = (A, B) => { cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.stroke(); };
+    if (kind === 'green') { const rd = roofDecor(kind, T2.cx, T2.cy); rd && rd(cx, t, geom()); }
+    else {
+      cx.lineWidth = 1 * v.dpr; const step = 1 / 12;
+      if (!along) { for (let k = Math.ceil(T2.x0 / step - 0.5); (k + 0.5) * step < T2.x1; k++) { const wx = (k + 0.5) * step; if (wx <= T2.x0) continue; cx.strokeStyle = k % 2 ? 'rgba(255,255,255,.22)' : 'rgba(30,40,45,.22)'; line(U(wx, T2.y0), U(wx, T2.y1)); } }
+      else { for (let k = Math.ceil(T2.y0 / step - 0.5); (k + 0.5) * step < T2.y1; k++) { const wy = (k + 0.5) * step; if (wy <= T2.y0) continue; cx.strokeStyle = k % 2 ? 'rgba(255,255,255,.22)' : 'rgba(30,40,45,.22)'; line(U(T2.x0, wy), U(T2.x1, wy)); } }
+      const x = T2.cx, y = T2.cy;   // 古いトタンには少しさび（家のマスの中心に）
+      if (kind === 'tin' && hash(x, y, 52) > 0.55) { const wx = x + 0.2 + hash(x, y, 53) * 0.6, wy = y + 0.2 + hash(x, y, 54) * 0.6; if (wx > T2.x0 && wx < T2.x1 && wy > T2.y0 && wy < T2.y1) { const [px, py] = U(wx, wy), q2 = U(wx + 0.35, wy), rr = Math.hypot(q2[0] - px, q2[1] - py), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, 'rgba(168,104,52,.17)'); gr.addColorStop(1, 'rgba(168,104,52,0)'); cx.fillStyle = gr; cx.beginPath(); cx.arc(px, py, rr, 0, 7); cx.fill(); } }
+    }
+    if (!pv) return;   // 太陽光パネル：家のマスの内側。切り分けた長方形にかかる部分だけ
+    const X0 = Math.max(T2.x0, T2.cx + 0.08), X1 = Math.min(T2.x1, T2.cx + 0.92), Y0 = Math.max(T2.y0, T2.cy + 0.08), Y1 = Math.min(T2.y1, T2.cy + 0.92); if (X1 <= X0 || Y1 <= Y0) return;
+    const q = [U(X0, Y0), U(X1, Y0), U(X1, Y1), U(X0, Y1)]; cx.fillStyle = '#30476B'; cx.beginPath(); cx.moveTo(q[0][0], q[0][1]); for (const r of q) cx.lineTo(r[0], r[1]); cx.closePath(); cx.fill();
+    cx.strokeStyle = 'rgba(200,215,235,.45)'; cx.lineWidth = 1; for (const f of [1 / 3, 2 / 3]) { const wx = T2.cx + 0.08 + 0.84 * f; if (wx > X0 && wx < X1) line(U(wx, Y0), U(wx, Y1)); }
   }
   /* 妻壁：壁の線 a→b、下は z0、上は za・zb（屋根の傾きにそう）。外向き dir の面だけ */
   function gableWall(list, a, b, z0, za, zb, dir, color, tex, meta) {
