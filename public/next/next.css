@@ -35,6 +35,16 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .tools button.later { opacity: .42; }
 .season { border: 0; border-radius: 999px; padding: 13px 26px; font-size: 16px; font-weight: 600; letter-spacing: .04em; color: #fff; background: #6E8B5B; box-shadow: 0 4px 14px rgba(40, 60, 40, .25); cursor: pointer; }
 
+/* 下書きの確認：なぞっただけでは建たない */
+.draftbar { display: flex; align-items: center; gap: 12px; max-width: min(620px, calc(100% - 16px)); background: var(--card); border: 1px solid rgba(184, 135, 62, .45); border-radius: 16px; padding: 9px 10px 9px 14px; box-shadow: 0 6px 22px rgba(30, 40, 35, .16); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); font-size: 13px; line-height: 1.5; }
+.draftbar #draftTxt b { font-weight: 600; }
+.draftbar #draftTxt .s { color: var(--sub); font-size: 12px; }
+.draftbar .btns { display: flex; gap: 6px; flex-shrink: 0; }
+.draftbar button { border: 1px solid var(--line); background: rgba(255, 255, 255, .7); border-radius: 999px; padding: 8px 14px; font-size: 13.5px; cursor: pointer; }
+.draftbar button.yes { background: #6E8B5B; border-color: #6E8B5B; color: #fff; font-weight: 600; }
+body.drafting .hint { display: none; }
+.icon[aria-pressed="true"] { background: var(--accent-soft); border-color: rgba(184, 135, 62, .5); color: #8A5E22; }
+
 /* 押した物の横のカード */
 .card { position: fixed; z-index: 5; width: 300px; max-height: calc(100vh - 160px); overflow: auto; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 14px 12px; box-shadow: 0 8px 28px rgba(30, 40, 35, .16); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); font-size: 13.5px; }
 .card h3 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
@@ -69,5 +79,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   .sun input { width: 100px; }
   .tools button { width: 46px; font-size: 10.5px; padding: 6px 0 5px; }
   .tools button svg { width: 22px; height: 22px; }
+  .draftbar { flex-direction: column; align-items: stretch; gap: 8px; }
+  .draftbar .btns button { flex: 1; }
   .card { left: 8px !important; right: 8px; top: auto !important; bottom: calc(max(10px, env(safe-area-inset-bottom)) + 84px); width: auto; max-height: 46vh; }
 }

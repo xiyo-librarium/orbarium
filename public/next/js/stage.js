@@ -12,7 +12,10 @@ const W = E.W;
 function dispose(o) { o.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) (Array.isArray(c.material) ? c.material : [c.material]).forEach(m => m.dispose()); }); }
 
 export function createStage(v, s, P) {
-  const N = W.N, st = { land: null, trees: null, houses: null, blocks: null, sig: {} };
+  const N = W.N, st = { land: null, trees: null, houses: null, blocks: null, sig: {}, cut: false, draft: null };
+  // 下書き：白い模型のように描く（まだ建っていない）
+  const ghostify = (g) => { const gm = new THREE.MeshStandardMaterial({ color: '#F3EFE6', roughness: 0.95, emissive: '#3A3630', emissiveIntensity: 0.08 });
+    g.traverse(o => { if (!o.isMesh) return; (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); o.material = gm; if (o.isInstancedMesh) o.instanceColor = null; }); };
   const ray = new THREE.Raycaster();
   const bedLevelOf = (w) => { const o = {}; for (const k in w.blocks) if (BLOCKS[w.blocks[k].t]?.kind === 'bed') { const [x, y, z] = k.split(',').map(Number); o[`${x},${y}`] = z; } return o; };
   const swap = (key, obj) => { if (st[key]) { v.scene.remove(st[key]); dispose(st[key]); } st[key] = obj; if (obj) v.scene.add(obj); };
@@ -22,27 +25,31 @@ export function createStage(v, s, P) {
     const w = s.world, bs = W.buildings(w);
     const blockedCell = new Set(Object.keys(w.blocks).map(k => k.split(',').slice(0, 2).join(',')));
     const bedLevel = bedLevelOf(w);
-    const sigLand = JSON.stringify([Array.from(w.H), bedLevel, w.H0 ? Array.from(w.H0).length : 0, [...blockedCell].sort(), bs.map(b => Object.keys(b.cells))]);
-    const sigHouse = JSON.stringify([bs, W.blocksOf(w, 'tank').map(t => [t.x, t.y, t.z])]);
+    const sigLand = JSON.stringify([Array.from(w.H), bedLevel, w.H0 ? Array.from(w.H0).length : 0, [...blockedCell].sort(), bs.map(b => [Object.keys(b.cells), b.z])]);
+    const sigHouse = JSON.stringify([bs, W.blocksOf(w, 'tank').map(t => [t.x, t.y, t.z]), st.cut, st.draft && [st.draft.d, st.draft.hideId]]);
     const sigBlocks = JSON.stringify(w.blocks) + sigLand.length;
-    const sigTrees = JSON.stringify([w.veg, [...blockedCell].sort(), bs.map(b => [Object.keys(b.cells), b.z])]);
+    const cutCells = new Set(st.draft ? st.draft.cut : []);
+    const sigTrees = JSON.stringify([w.veg, [...blockedCell].sort(), bs.map(b => [Object.keys(b.cells), b.z]), [...cutCells], st.draft && Object.keys(st.draft.d.cells)]);
     let changed = false;
     if (sigLand !== st.sig.land) {
-      const land = buildLand(w, N, P, { blocked: (x, y) => blockedCell.has(`${x},${y}`) || !!W.buildingAt(w, x, y), flat: (x, y) => bedLevel[`${x},${y}`] ?? null });
+      const land = buildLand(w, N, P, { blocked: (x, y) => blockedCell.has(`${x},${y}`) || !!W.buildingAt(w, x, y), flat: (x, y) => bedLevel[`${x},${y}`] ?? W.buildingAt(w, x, y)?.z ?? null });   // 畑と建物の床の下は平らに
       land.group.children[0].userData.ground = true;
       st.at = land.at; st.ground = land.ground; st.landObj = land; swap('land', land.group); st.sig.land = sigLand; changed = true;
     }
     if (sigHouse !== st.sig.house || changed) {
       const g = new THREE.Group();
       const tanks = W.blocksOf(w, 'tank').map(t => ({ x: t.x, y: t.y, z: t.z }));
-      for (const b of bs) { const hg = buildHouse(b, P, st.at, { tanks }); hg.userData.pick = { kind: 'building', id: W.bid(b) }; g.add(hg); }
+      for (const b of bs) { if (st.draft && W.bid(b) === st.draft.hideId) continue; const hg = buildHouse(b, P, st.at, { tanks, cut: st.cut }); hg.userData.pick = { kind: 'building', id: W.bid(b) }; g.add(hg); }
+      if (st.draft) { const hg = buildHouse(st.draft.d, P, st.at, { tanks, cut: st.cut }); ghostify(hg); hg.userData.pick = { kind: 'draft' }; g.add(hg); }
       swap('houses', g); st.sig.house = sigHouse;
     }
     if (sigTrees !== st.sig.trees || changed) {
       // 建物に枝がかかる木は、建てるときに切ったことにする（屋根を突き抜けないように）
       const hcs = bs.flatMap(b => Object.keys(b.cells).map(k => k.split(',').map(Number)));
       const nearHouse = (t) => t.kind !== 'shrub' && hcs.some(([x, y]) => Math.hypot(Math.max(x - t.x, 0, t.x - x - 1), Math.max(y - t.y, 0, t.y - y - 1)) < t.r * 1.1);
-      const tg = buildTrees(W.vegObjects(w), st.at, P, { skip: (t) => !!W.buildingAt(w, t.cx, t.cy) || blockedCell.has(`${t.cx},${t.cy}`) || nearHouse(t) });
+      const dc = st.draft ? Object.keys(st.draft.d.cells).map(k => k.split(',').map(Number)) : [];
+      const nearDraft = (t) => t.kind !== 'shrub' && dc.some(([x, y]) => Math.hypot(Math.max(x - t.x, 0, t.x - x - 1), Math.max(y - t.y, 0, t.y - y - 1)) < t.r * 1.1);
+      const tg = buildTrees(W.vegObjects(w), st.at, P, { skip: (t) => !!W.buildingAt(w, t.cx, t.cy) || blockedCell.has(`${t.cx},${t.cy}`) || nearHouse(t) || cutCells.has(`${t.cx},${t.cy}`) || nearDraft(t) });
       tg.userData.pick = { kind: 'trees' }; swap('trees', tg); st.sig.trees = sigTrees;
     }
     if (sigBlocks !== st.sig.blocks || changed) { swap('blocks', buildBlocks(w, st.landObj, P)); st.sig.blocks = sigBlocks; }

@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { matte, hash } from './look.js';
-import { HOUSE_H, roofZ, roofBox, eavesDepth, houseOuterEdges, drainDirs, ACCENTS, WALLS } from '/js/world.js';
+import { HOUSE_H, roofZ, roofBox, eavesDepth, houseOuterEdges, drainDirs, ACCENTS, WALLS, furnCells } from '/js/world.js';
 
 const T = 0.2;   // 壁の厚さ
 const DV = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] };
@@ -30,7 +30,7 @@ export function buildHouse(hs, P, at, opt = {}) {
   const floorMat = matte({ color: '#B0664A', vary: 0.12, freq: 3 });
   const mortarMat = matte({ color: '#8F897D', vary: 0.1, freq: 3, bump: 0.6, bumpFreq: 6 });
 
-  const z = hs.z, H = HOUSE_H, bx = roofBox(hs), E = eavesDepth(hs), drains = drainDirs(hs);
+  const z = hs.z, H = HOUSE_H, bx = roofBox(hs), E = eavesDepth(hs), drains = drainDirs(hs), cut = !!opt.cut, CUT = 1.05;
   const has = (x, y) => !!hs.cells[`${x},${y}`];
   const RZ = (px, py) => z + roofZ(hs, px, py, bx) + 0.15;   // 屋根の面（壁の上より少し上に乗せる）
   const cells = Object.keys(hs.cells).map(k => k.split(',').map(Number));
@@ -45,7 +45,12 @@ export function buildHouse(hs, P, at, opt = {}) {
     const [nx, ny] = DV[o.dir], op = hs.open[o.e];
     const cx = along ? ex + 0.5 : ex, cy = along ? ey : ey + 0.5, sx = along ? 1 : T, sy = along ? T : 1;
     const piece = (z0, z1) => box(wallMat, cx, cy, z + (z0 + z1) / 2, sx, sy, z1 - z0);
-    if (op === 'door') { piece(2.1, H); door(cx, cy, along, nx, ny); }
+    if (cut) {   // 壁を下げた見え方：腰の高さで切る。扉は開口だけ、窓は窓台まで
+      if (op === 'door') doorStep(cx, cy, along, nx, ny);
+      else if (op === 'window' || op === 'window2') { piece(0, 0.9); box(accentMat, cx + nx * 0.06, cy + ny * 0.06, z + 0.935, along ? 0.96 : T + 0.16, along ? T + 0.16 : 0.96, 0.07); }
+      else piece(0, CUT);
+    }
+    else if (op === 'door') { piece(2.1, H); door(cx, cy, along, nx, ny); }
     else if (op === 'window' || op === 'window2') { piece(0, 0.9); piece(2.2, H); win(cx, cy, along, nx, ny, op); }
     else piece(0, H);
     // 腰壁（ソカロ）：外側に 3cm 出た色の帯と、上の白い線
@@ -57,7 +62,7 @@ export function buildHouse(hs, P, at, opt = {}) {
     // 妻壁：屋根が壁より高い辺は、屋根の線まで壁をのばす（両端は角を覆うよう少し長く）
     const p0 = along ? [ex, ey] : [ex, ey], p1 = along ? [ex + 1, ey] : [ex, ey + 1];
     const r0 = RZ(p0[0], p0[1]) - z, r1 = RZ(p1[0], p1[1]) - z;
-    if (Math.max(r0, r1) > H + 0.25) gable(p0, p1, r0, r1, along);
+    if (!cut && Math.max(r0, r1) > H + 0.25) gable(p0, p1, r0, r1, along);
   }
   function gable(p0, p1, r0, r1, along) {
     const ext = T / 2, L = 1 + 2 * ext, k = (r1 - r0);
@@ -84,12 +89,13 @@ export function buildHouse(hs, P, at, opt = {}) {
     for (let k = 0; k < 5; k++) fb(-0.33 + k * 0.165, z + 1.01, 0.155, 2.0, 0.05, accentMat, 0.02);   // 縦の板
     fb(0, z + 0.45, 0.82, 0.08, 0.04, accentMat, 0.05); fb(0, z + 1.6, 0.82, 0.08, 0.04, accentMat, 0.05);
     fb(0.3, z + 1.0, 0.04, 0.04, 0.04, matte({ color: '#2A2522' }), 0.08);
-    box(mortarMat, cx + nx * 0.55, cy + ny * 0.55, Math.min(z, at(cx + nx * 0.55, cy + ny * 0.55)) + 0.02, along ? 0.8 : 0.5, along ? 0.5 : 0.8, 0.12);   // 踏み石
+    doorStep(cx, cy, along, nx, ny);
   }
+  function doorStep(cx, cy, along, nx, ny) { box(mortarMat, cx + nx * 0.55, cy + ny * 0.55, Math.min(z, at(cx + nx * 0.55, cy + ny * 0.55)) + 0.02, along ? 0.8 : 0.5, along ? 0.5 : 0.8, 0.12); }   // 踏み石
   // 出っぱった角：丸い柱で角を落とす（腰壁の角も丸く）
   for (const [x, y] of cells) for (const [px, py, a, b] of [[x, y, [-1, 0], [0, -1]], [x + 1, y, [1, 0], [0, -1]], [x, y + 1, [-1, 0], [0, 1]], [x + 1, y + 1, [1, 0], [0, 1]]]) {
     if (has(x + a[0], y + a[1]) || has(x + b[0], y + b[1])) continue;
-    cyl(wallMat, px, py, z, T / 2, H + 0.001);
+    cyl(wallMat, px, py, z, T / 2, (cut ? CUT : H) + 0.001);
     if (M.accent) { cyl(accentMat, px, py, z, T / 2 + 0.03, 0.9); cyl(trimMat, px, py, z + 0.9, T / 2 + 0.04, 0.03); }
   }
 
@@ -114,8 +120,26 @@ export function buildHouse(hs, P, at, opt = {}) {
     sm.castShadow = sm.receiveShadow = true; group.add(sm);
   }
 
-  // 屋根
-  roof();
+  // 屋根（壁を下げた見え方では、屋根の代わりに家具）
+  if (cut) furniture(); else roof();
+  // 家具：寝台・食卓・トイレ・シャワー・かまど。中が見えたときだけ
+  function furniture() {
+    const white = matte({ color: '#EFEDE6', vary: 0.04, freq: 3, rough: 0.6 }), cloth = matte({ color: '#D9D2C2', vary: 0.08, freq: 4, bump: 0.3, bumpFreq: 9 });
+    const blanket = matte({ color: '#C08A4E', vary: 0.12, freq: 3, bump: 0.25, bumpFreq: 8 }), brick = matte({ color: '#A85F45', vary: 0.18, freq: 5, bump: 0.6, bumpFreq: 8 });
+    const water = new THREE.MeshStandardMaterial({ color: '#9FC3CC', roughness: 0.25, transparent: true, opacity: 0.55 });
+    for (const f of hs.furn || []) {
+      const cs = furnCells(f), mx = cs.reduce((a, c) => a + c[0] + 0.5, 0) / cs.length, my = cs.reduce((a, c) => a + c[1] + 0.5, 0) / cs.length;
+      const long = cs.length > 1 && cs[0][0] !== cs[1][0];   // 2マスの家具が東西に長いか
+      const B = (mat, da, dl, z0, sw, sl, sz) => box(mat, mx + (long ? dl : da), my + (long ? da : dl), z + z0 + sz / 2, long ? sl : sw, long ? sw : sl, sz);   // da・sw＝横、dl・sl＝長さの向き
+      const head = cs.length > 1 ? [cs[0][0] - cs[1][0], cs[0][1] - cs[1][1]] : [0, -1];
+      if (f.t === 'bed') { B(woodMat, 0, 0, 0, 0.95, 1.9, 0.3); B(cloth, 0, 0, 0.3, 0.88, 1.84, 0.14); B(blanket, 0, -0.25 * (long ? head[0] : head[1]), 0.44, 0.9, 1.15, 0.06); box(white, mx + head[0] * 0.72, my + head[1] * 0.72, z + 0.5, 0.36, 0.36, 0.1); }
+      else if (f.t === 'table') { B(woodMat, 0, 0, 0.72, 0.85, 1.3, 0.05); for (const [a, b2] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B(woodMat, a * 0.36, b2 * 0.56, 0, 0.06, 0.06, 0.72); for (const sgn of [-1, 1]) { B(woodMat, sgn * 0.62, 0, 0, 0.36, 0.4, 0.45); B(woodMat, sgn * 0.78, 0, 0.45, 0.05, 0.4, 0.45); } }
+      else if (f.t === 'toilet') { box(white, mx, my, z + 0.2, 0.38, 0.5, 0.4); box(white, mx + head[0] * 0.22, my + head[1] * 0.22, z + 0.55, 0.4, 0.18, 0.35); }
+      else if (f.t === 'ctoilet') { box(woodMat, mx, my, z + 0.23, 0.55, 0.6, 0.46); box(woodMat, mx, my, z + 0.48, 0.5, 0.5, 0.04); box(cloth, mx + 0.32, my, z + 0.2, 0.14, 0.3, 0.4); }
+      else if (f.t === 'shower' || f.t === 'shower2') { box(white, mx, my, z + 0.03, 0.86, 0.86, 0.06); box(water, mx + 0.42, my, z + 0.6, 0.02, 0.86, 1.1); box(water, mx, my + 0.42, z + 0.6, 0.86, 0.02, 1.1); }
+      else if (f.t === 'stove') { box(brick, mx, my, z + 0.4, 0.8, 0.65, 0.8); box(matte({ color: '#3A332E' }), mx, my, z + 0.81, 0.6, 0.45, 0.03); cyl(brick, mx + 0.25, my + 0.18, z + 0.8, 0.11, 1.4, 10); }
+    }
+  }
   function inRoof(px, py, m = 0) {   // 屋根の形（家のマスを外へ E だけ広げた形）の中か
     for (const [x, y] of cells) {
       const x0 = x - (has(x - 1, y) ? 0 : E), x1 = x + 1 + (has(x + 1, y) ? 0 : E), y0 = y - (has(x, y - 1) ? 0 : E), y1 = y + 1 + (has(x, y + 1) ? 0 : E);

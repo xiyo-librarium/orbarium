@@ -69,14 +69,14 @@ async function boot() {
   v.focus.copy(center); v.span = 36;   // 影は敷地全体に
 
   /* ---------- 地図⇄近く ---------- */
-  const G = { mode: null, tool: null, sel: null, undo: [], redo: [] };
+  const G = { mode: null, tool: null, sel: null, undo: [], redo: [], draft: null };
   const portrait = () => v.camera.aspect < 1;
   const nearDist = () => 26 * (portrait() ? 1.4 : 1);
   const mapDist = () => 118 / Math.min(1, v.camera.aspect * 1.15);
   const setMode = (m) => {
     if (m === G.mode) return; G.mode = m;
     $('#toMap').hidden = m !== 'near'; $('#tools').hidden = m !== 'near'; $('#season').hidden = m !== 'map';
-    if (m === 'map') { setTool(null); select(null); }
+    if (m === 'map') { setTool(null); select(null); if (G.draft) setDraft(null); }
     setHint();
   };
   const fitControls = () => { v.controls.maxDistance = mapDist() * 1.15; v.controls.minDistance = 9; };
@@ -97,7 +97,7 @@ async function boot() {
   const restore = (j) => { const o = JSON.parse(j); s.world = o.world; s.cash = o.cash; };
   const syncTop = () => {
     $('#cash').textContent = `${innerWidth > 640 ? '所持金 ' : ''}${innerWidth > 640 ? yen(s.cash) : Math.round(s.cash) + '万円'}`;
-    $('#undo').disabled = !G.undo.length; $('#redo').disabled = !G.redo.length;
+    $('#undo').disabled = !G.undo.length && !G.draft; $('#redo').disabled = !G.redo.length;
   };
   const changed = () => { stage.rebuild(); syncTop(); if (G.sel) { if (!selExists(G.sel)) select(null); else renderCard(); } };
   // 変える：失敗したら元に戻して理由を出す。成功したら取り消しに積む
@@ -111,9 +111,12 @@ async function boot() {
     if (okMsg) toast(typeof okMsg === 'function' ? okMsg(spent) : okMsg + (Math.abs(spent) > 0.05 ? `（${spent > 0 ? '−' : '+'}${yen(Math.abs(spent))}）` : ''));
     return null;
   };
-  $('#undo').onclick = () => { if (!G.undo.length) return; G.redo.push(snap()); restore(G.undo.pop()); changed(); toast('取り消した'); };
+  $('#undo').onclick = () => { if (G.draft) { setDraft(null); toast('下書きをやめた'); return; } if (!G.undo.length) return; G.redo.push(snap()); restore(G.undo.pop()); changed(); toast('取り消した'); };
   $('#redo').onclick = () => { if (!G.redo.length) return; G.undo.push(snap()); restore(G.redo.pop()); changed(); toast('やり直した'); };
-  addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); (e.shiftKey ? $('#redo') : $('#undo')).click(); } if (e.key === 'Escape') { setTool(null); select(null); } });
+  addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); (e.shiftKey ? $('#redo') : $('#undo')).click(); } if (e.key === 'Escape') { if (G.draft) setDraft(null); else { setTool(null); select(null); } } if (e.key === 'Enter' && G.draft) $('#draftYes').click(); });
+
+  /* ---------- 壁を下げて中を見る ---------- */
+  $('#cut').onclick = () => { stage.cut = !stage.cut; $('#cut').setAttribute('aria-pressed', String(stage.cut)); stage.rebuild(); toast(stage.cut ? '壁を下げた。家具と水まわりが見える' : '壁を戻した'); };
 
   /* ---------- 短いお知らせ・指のそばの予告 ---------- */
   let toastT = 0;
@@ -129,6 +132,7 @@ async function boot() {
     setTool(G.tool === T.id ? null : T.id);
   };
   function setTool(id) {
+    if (G.draft && id !== 'house') setDraft(null);
     G.tool = id; for (const b of tools.children) b.classList.toggle('on', b.dataset.tool === id);
     if (id) select(null);
     // 家の道具では、1本指（左ボタン）はなぞる。回すのは2本指か右ボタン
@@ -179,21 +183,57 @@ async function boot() {
     if (e) tip(lines.join('<br>'), e.clientX, e.clientY);
   }
   const hideTrace = () => { prev.count = 0; v.req(); tip(null); };
-  function applyTrace(tr) {
+  /* 下書き：なぞっただけでは建てない。写しの世界で試しに建てて、白い模型で見せ、［建てる］で本物に */
+  const scratch = () => ({ ...s, world: JSON.parse(JSON.stringify(s.world)), cash: s.cash });
+  // 写しの世界で、木を切って design を建てる。できた世界とお金、建った建物を返す
+  function simulate(design, cuts) {
+    const t = scratch();
+    for (const [x, y] of cuts) { const err = W.cutTree(t, x, y); if (err) return { err }; }
+    if (design.id && /^b\d+$/.test(design.id)) t.world.nextB = Math.max(t.world.nextB || 0, +design.id.slice(1));
+    const err = W.buildBuilding(t, design); if (err) return { err };
+    autoGutter(t);
+    return { t, b: W.buildingById(t.world, W.bid(design)) };
+  }
+  function makeDraft(tr) {
     const D = draftFor(tr), w = s.world, good = D.out.filter((c, i) => D.st[i] === 'ok' || D.st[i] === 'tree');
     if (!good.length) { toast('ここには建てられない'); return; }
-    act(() => {
-      for (let i = 0; i < D.out.length; i++) if (D.st[i] === 'tree') { const err = W.cutTree(s, ...D.out[i]); if (err) return err; }
-      let d;
-      if (D.base) d = W.cloneHouse(D.base);
-      else { d = W.newAnnex(w, D.d.z, 'store'); Object.assign(d, LOCAL[SITE] || LOCAL.med); }
-      const r = W.draftAddRect(w, d, D.xa, D.ya, D.xb, D.yb);
-      if (!r.added) return '床を描けない（' + Object.keys(r.why).join('・') + '）';
-      if (!D.base) { if (Object.keys(d.cells).length < 4) return '床は4m²（2×2m）より広く'; autoOpen(d); }
-      const err = W.buildBuilding(s, d); if (err) return err;
-      autoGutter();
-      return null;
-    }, D.base ? '床を広げた' : '建てた。押すと使い道を選べる');
+    const cuts = D.out.filter((c, i) => D.st[i] === 'tree');
+    // 床の形を決める（木はもう切ったことにして）
+    const t = scratch(); for (const [x, y] of cuts) W.cutTree(t, x, y);
+    let d;
+    if (D.base) d = W.cloneHouse(D.base);
+    else { d = W.newAnnex(t.world, D.d.z, 'store'); Object.assign(d, LOCAL[SITE] || LOCAL.med); }
+    const r = W.draftAddRect(t.world, d, D.xa, D.ya, D.xb, D.yb);
+    if (!r.added) { toast('床を描けない（' + Object.keys(r.why).join('・') + '）'); return; }
+    if (!D.base) { if (Object.keys(d.cells).length < 4) { toast('床は4m²（2×2m）より広く'); return; } autoOpen(d); }
+    setDraft({ d, base: D.base ? W.bid(D.base) : null, cuts });
+  }
+  function setDraft(dr) {
+    if (!dr) { G.draft = null; stage.draft = null; $('#draft').hidden = true; document.body.classList.remove('drafting'); stage.rebuild(); syncTop(); return; }
+    const sim = simulate(dr.d, dr.cuts);
+    G.draft = { ...dr, sim, cost: sim.err ? null : s.cash - sim.t.cash };
+    stage.draft = { d: sim.b || dr.d, hideId: dr.base, cut: dr.cuts.map(c => c.join(',')) };
+    stage.rebuild();
+    const bx = W.roofBox(dr.d), n = Object.keys(dr.d.cells).length;
+    const what = dr.base ? `${dr.base === 'main' ? '母屋' : '建物'}を広げる（床${n}m²に）` : `新しい建物 ${bx.X1 - bx.X0}×${bx.Y1 - bx.Y0}m`;
+    $('#draftTxt').innerHTML = `<b>${what}</b> · ${sim.err ? `<span style="color:var(--bad)">${sim.err}</span>` : `約${yen(G.draft.cost)}`}${dr.cuts.length ? ` · 木とやぶを${dr.cuts.length}か所切る` : ''}<br><span class="s">まだ下書き。壁を押すと 壁→窓→扉、なぞり直すと形が変わる</span>`;
+    $('#draftYes').disabled = !!sim.err;
+    $('#draft').hidden = false; document.body.classList.add('drafting'); syncTop();
+  }
+  $('#draftNo').onclick = () => setDraft(null);
+  $('#draftYes').onclick = () => {
+    const D = G.draft; if (!D || D.sim.err) return;
+    const fresh = simulate(D.d, D.cuts); if (fresh.err) { toast(fresh.err); return; }
+    G.draft = null; stage.draft = null; $('#draft').hidden = true; document.body.classList.remove('drafting');
+    act(() => { s.world = fresh.t.world; s.cash = fresh.t.cash; return null; }, D.base ? '床を広げた' : '建てた。押すと使い道を選べる');
+  };
+  // 下書きの壁を押す：壁→窓→扉
+  function draftWallTap(p) {
+    const D = G.draft; if (!D) return;
+    const e = nearestEdge(D.d, p.point); if (!e) return;
+    const d = W.cloneHouse(D.d), cur = d.open[e], next = !cur ? 'window' : cur === 'window' || cur === 'window2' ? 'door' : null;
+    if (next) d.open[e] = next; else delete d.open[e];
+    setDraft({ ...D, d });
   }
   // 新しい建物の扉と窓：扉は母屋に向いた辺のまん中、窓は長い辺に間をあけて
   function autoOpen(d) {
@@ -205,29 +245,33 @@ async function boot() {
     outs.forEach((o, i) => { if (o !== best && i % 3 === 1) d.open[o.e] = 'window'; });
   }
   // 軒のそばにタンクがあれば雨どいをつける（雨どいを選ぶ道具はない）
-  function autoGutter() {
-    const w = s.world, tanks = W.blocksOf(w, 'tank');
+  function autoGutter(st = s) {
+    const w = st.world, tanks = W.blocksOf(w, 'tank');
     for (const b of W.buildings(w)) {
       if (b.gutter || W.ROOFS[b.roof]?.canales) continue;
       const near = W.drainEdges(b).some(o => tanks.some(t => Math.max(Math.abs(t.x - o.x), Math.abs(t.y - o.y)) <= 1 && t.z < b.z + W.HOUSE_H));
       if (!near) continue;
-      const d = W.cloneHouse(b); d.gutter = true; const err = W.buildBuilding(s, d); if (err) return err;
+      const d = W.cloneHouse(b); d.gutter = true; const err = W.buildBuilding(st, d); if (err) return err;
     }
     return null;
   }
-  // 壁を押す：壁→窓→扉→壁
-  function wallTap(p) {
-    const w = s.world, b = W.buildingById(w, p.id); if (!b) return;
-    const px = p.point.x, py = p.point.z;
-    if (p.point.y > b.z + W.HOUSE_H + 0.05) { select(p); return; }   // 屋根を押したらカード
-    let best = null, bd = 1e9;
+  // 押した点にいちばん近い外壁の辺（50cm 以内）
+  function nearestEdge(b, pt) {
+    const px = pt.x, py = pt.z; let best = null, bd = 1e9;
+    if (pt.y > b.z + W.HOUSE_H + 0.05) return null;
     for (const o of W.houseOuterEdges(b)) {
       const [t, r] = o.e.split(':'), [ex, ey] = r.split(',').map(Number);
       const [ax, ay, bx, by] = t === 'h' ? [ex, ey, ex + 1, ey] : [ex, ey, ex, ey + 1];
       const u = Math.max(0, Math.min(1, ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2)));
       const dd = Math.hypot(px - (ax + (bx - ax) * u), py - (ay + (by - ay) * u)); if (dd < bd) { bd = dd; best = o; }
     }
-    if (!best || bd > 0.5) { select(p); return; }
+    return best && bd <= 0.5 ? best.e : null;
+  }
+  // 壁を押す：壁→窓→扉→壁
+  function wallTap(p) {
+    const w = s.world, b = W.buildingById(w, p.id); if (!b) return;
+    const e = nearestEdge(b, p.point); if (!e) { select(p); return; }
+    const best = { e };
     const cur = b.open[best.e], next = !cur ? 'window' : cur === 'window' || cur === 'window2' ? 'door' : null;
     act(() => { const d = W.cloneHouse(b); const err = W.draftSetOpening(d, best.e, next); if (err) return err; return W.buildBuilding(s, d); }, next === 'window' ? '窓にした' : next === 'door' ? '扉にした' : '壁にした');
   }
@@ -357,7 +401,7 @@ async function boot() {
     down = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId, trace: null };
     if (G.mode === 'near' && G.tool === 'house') {
       const n = ndcOf(e), p = stage.pick(n);
-      if (!p || p.kind !== 'building') { const g = stage.groundAt(n); if (g) { down.trace = { a: cellOf(g), b: cellOf(g) }; canvas.setPointerCapture(e.pointerId); } }
+      if (!p || (p.kind !== 'building' && p.kind !== 'draft')) { const g = stage.groundAt(n); if (g) { down.trace = { a: cellOf(g), b: cellOf(g) }; canvas.setPointerCapture(e.pointerId); } }
     }
   });
   canvas.addEventListener('pointermove', (e) => {
@@ -371,7 +415,7 @@ async function boot() {
     if (!down || e.pointerId !== down.id) return;
     const d = down; down = null;
     const moved = Math.hypot(e.clientX - d.x, e.clientY - d.y), quick = performance.now() - d.t < 1500;
-    if (d.trace) { hideTrace(); if (e.type === 'pointerup' && (d.trace.a.x !== d.trace.b.x || d.trace.a.y !== d.trace.b.y)) { applyTrace(d.trace); return; } }
+    if (d.trace) { hideTrace(); if (e.type === 'pointerup' && (d.trace.a.x !== d.trace.b.x || d.trace.a.y !== d.trace.b.y)) { makeDraft(d.trace); return; } }
     if (e.type === 'pointerup' && moved < 8 && quick) onTap(e);
   };
   canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
@@ -379,7 +423,8 @@ async function boot() {
     const n = ndcOf(e), p = stage.pick(n);
     if (Q.has('debug')) console.log('tap', G.mode, G.tool, p && p.kind, p && p.id, p && p.point && [p.point.x.toFixed(2), p.point.y.toFixed(2), p.point.z.toFixed(2)].join(','));
     if (G.mode === 'map') { const g = stage.groundAt(n) || p?.point; if (g) flyNear(g); return; }
-    if (G.tool === 'house') { if (p && p.kind === 'building') wallTap(p); else toast('地面をなぞって床を描く'); return; }
+    if (G.tool === 'house') { if (p && p.kind === 'draft') draftWallTap(p); else if (p && p.kind === 'building') wallTap(p); else if (!G.draft) toast('地面をなぞって床を描く'); return; }
+    if (p && p.kind === 'draft') { toast('下書き：［建てる］か［やめる］を押す'); return; }
     if (G.tool === 'water') { placeTank(p, n); return; }
     if (G.tool === 'erase') { erase(p); return; }
     select(p);

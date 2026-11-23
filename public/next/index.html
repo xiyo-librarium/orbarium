@@ -16,6 +16,7 @@
     <div class="chip" id="where">読みこみ中…</div>
     <span class="grow"></span>
     <div class="chip num" id="cash"></div>
+    <button class="icon" id="cut" aria-label="壁を下げて中を見る" aria-pressed="false" title="壁を下げて中を見る"><svg viewBox="0 0 24 24"><path d="M4 20v-7h16v7z"/><path d="M4 9.5 12 4l8 5.5" stroke-dasharray="2.2 2.4"/><path d="M9 20v-3h3"/></svg></button>
     <button class="icon" id="undo" aria-label="取り消し" disabled><svg viewBox="0 0 24 24"><path d="M9 7H4v5"/><path d="M4.5 11.5A8 8 0 1 1 7 18"/></svg></button>
     <button class="icon" id="redo" aria-label="やり直し" disabled><svg viewBox="0 0 24 24"><path d="M15 7h5v5"/><path d="M19.5 11.5A8 8 0 1 0 17 18"/></svg></button>
   </div>
@@ -25,6 +26,7 @@
 <div id="tip" class="tip" hidden></div>
 <div id="toast" class="toast" hidden></div>
 <div class="bottom">
+  <div class="draftbar" id="draft" hidden><div id="draftTxt"></div><div class="btns"><button id="draftNo">やめる</button><button id="draftYes" class="yes">建てる</button></div></div>
   <p class="hint" id="hint"></p>
   <button class="season" id="season" hidden>季節を過ごす</button>
   <nav class="tools" id="tools" hidden></nav>
