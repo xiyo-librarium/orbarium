@@ -18,12 +18,24 @@ export function sunVector(lat, month, hour) {
 }
 export const dirName = (az) => ['北', '北東', '東', '南東', '南', '南西', '西', '北西'][Math.round(az / 45) % 8];
 const hex3 = (hex) => { const n = parseInt(hex.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
-const SUNC = [1.0, 0.95, 0.84], SKYC = [0.80, 0.87, 1.0];
+const SUNC = [1.0, 0.93, 0.80], SKYC = [0.86, 0.89, 0.96];   // 日差しはあたたかく、空の光はやわらかく少しだけ青い
 /* 日なたと日かげ：lam＝面と日差しの向きの合いぐあい、lit＝影にならない割合、ao＝くぼみの暗さ */
 const BOUNCE = [1.0, 0.95, 0.80];   // 地面からの照り返し（側面だけ、少し暖かい色）
+/* つや消し：色を少しだけくすませ（彩度を落とし）、日なたも白く飛ばさない。土・木・しっくいの、光を吸うような面に */
+const MATTE = 0.16;
+const matteRGB = (c) => { const L = c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11; return c.map(x => x * (1 - MATTE) + L * MATTE); };
+const lightK = (i, d, ao, side) => ao * (SKYC[i] * 0.70 + SUNC[i] * 0.36 * d + (side ? BOUNCE[i] * 0.08 : 0));
 function lightRGB(rgb, lam, lit, ao = 1, side = false) {
-  const d = Math.max(0, lam) * lit;
-  return rgb.map((c, i) => Math.round(Math.min(255, c * ao * (SKYC[i] * 0.72 + SUNC[i] * 0.40 * d + (side ? BOUNCE[i] * 0.09 : 0)))));
+  const d = Math.max(0, lam) * lit, m = matteRGB(rgb);
+  return m.map((c, i) => Math.round(Math.min(255, c * lightK(i, d, ao, side))));
+}
+/* 模様を描いた面（窓・腰壁・扉・布団）：素の色と模様を描いてから、面の光を「乗算」で重ねる。模様だけ明るく浮かないように */
+function lightMul(lam, lit, ao = 1, side = false) { const d = Math.max(0, lam) * lit; return `rgb(${[0, 1, 2].map(i => Math.round(Math.min(255, 255 * lightK(i, d, ao, side)))).join(',')})`; }
+const matteHex = (hex) => { const c = matteRGB(hex3(hex)); return `rgb(${c.map(Math.round).join(',')})`; };
+function litFace(cx, pts, raw, decor, mul) {
+  cx.save(); cx.beginPath(); cx.moveTo(pts[0][0], pts[0][1]); for (const q of pts) cx.lineTo(q[0], q[1]); cx.closePath(); cx.clip();
+  cx.fillStyle = raw; cx.fill(); decor();
+  cx.globalCompositeOperation = 'multiply'; cx.fillStyle = mul; cx.fill(); cx.restore();
 }
 function lightCol(hex, lam, lit, ao = 1, side = false) { const [r, g, b] = lightRGB(hex3(hex), lam, lit, ao, side); return `rgb(${r},${g},${b})`; }
 const hash = (x, y, k = 0) => { let n = (x * 374761393 + y * 668265263 + k * 2147483647) | 0; n = (n ^ (n >>> 13)) * 1274126177; return ((n ^ (n >>> 16)) >>> 0) / 4294967295; };
@@ -134,6 +146,7 @@ export function createView(canvas, world, opt = {}) {
     const topLam = meta?.slope ? (meta.slope[0] * S[0] + meta.slope[1] * S[1] + meta.slope[2] * S[2]) : S[2];
     const topLit = !L ? 1 : meta.type === 'terrain' ? (litAt(x0 + 0.27, y0 + 0.27, z + ht + 0.01) + litAt(x0 + 0.73, y0 + 0.27, z + ht + 0.01) + litAt(x0 + 0.27, y0 + 0.73, z + ht + 0.01) + litAt(x0 + 0.73, y0 + 0.73, z + ht + 0.01)) / 4 : litAt((x0 + x1) / 2, (y0 + y1) / 2, z + ht + 0.01);
     const topFill = L ? lightCol(color, topLam, topLit, meta.ao ?? 1) : shade(color, 1.0);
+    const topMul = L && meta.decor && alpha === 1 && meta.type !== 'terrain' ? lightMul(topLam, topLit, meta.ao ?? 1) : null;
     const a = v.angle * Math.PI / 180;
     const x = (x0 + x1) / 2 - 0.5, y = (y0 + y1) / 2 - 0.5;
     const P = (px, py, pz) => project(px, py, pz, g);
@@ -151,17 +164,19 @@ export function createView(canvas, world, opt = {}) {
       const rx = nx * Math.cos(a) - ny * Math.sin(a), ry = nx * Math.sin(a) + ny * Math.cos(a);
       if (rx + ry > 0.01) {
         const quad = i === 0 ? [1, 2] : i === 1 ? [2, 3] : i === 2 ? [3, 0] : [0, 1];
-        let fill;
+        let fill, mul = null;
         if (L) {   // 側面：世界の向き（東西南北）で日差しを受ける。影は面の中ほどから調べる
           const lam = nx * S[0] + ny * S[1], mx = nx > 0 ? x1 + 0.03 : nx < 0 ? x0 - 0.03 : (x0 + x1) / 2, my = ny > 0 ? y1 + 0.03 : ny < 0 ? y0 - 0.03 : (y0 + y1) / 2;
           const lit = lam > 0 ? litAt(mx, my, z + Math.min(ht, 3) * 0.5) : 0;
           fill = lightCol(meta.side || color, lam, lit, 0.94, true);
+          if (meta.sideDecor && alpha === 1) mul = lightMul(lam, lit, 0.94, true);
         } else fill = shade(color, 0.72 + 0.12 * (rx - ry > 0 ? 1 : 0));
-        sides.push({ pts: [c[quad[0]], c[quad[1]], t[quad[1]], t[quad[0]]], fill, face: i, q: quad });
+        sides.push({ pts: [c[quad[0]], c[quad[1]], t[quad[1]], t[quad[0]]], fill, face: i, q: quad, mul });
       }
     }
     list.push({ depth: depth + z * 0.001 + ht * 0.0005 + (meta?.dbias || 0), draw: (cx, pc) => {
       for (const sd of sides) {
+        if (!pc && sd.mul) { litFace(cx, sd.pts, matteHex(meta.side || color), () => meta.sideDecor(cx, sd.pts, sd.face), sd.mul); continue; }
         poly(cx, sd.pts, pc ? pc(sd.face) : sd.fill, alpha);
         if (!pc && meta?.sideDecor) meta.sideDecor(cx, sd.pts, sd.face);
         if (!pc && meta?.lip) {   // 地面の側面：上に草のふち、1mごとに地層の線
@@ -171,8 +186,8 @@ export function createView(canvas, world, opt = {}) {
           cx.globalAlpha = 1;
         }
       }
-      poly(cx, t, pc ? pc(4) : topFill, alpha);
-      if (!pc && meta?.decor) meta.decor(cx, t, g);
+      if (!pc && topMul) litFace(cx, t, matteHex(color), () => meta.decor(cx, t, g), topMul);
+      else { poly(cx, t, pc ? pc(4) : topFill, alpha); if (!pc && meta?.decor) meta.decor(cx, t, g); }
     }, meta });
   }
   /* 地面の柱：上の面の縁は、下が見えている辺だけ少しゆらがせ、出っぱった角は丸く落とす */
@@ -354,7 +369,7 @@ export function createView(canvas, world, opt = {}) {
     if (v.ghost) for (const gh of v.ghost.cells) box(list, gh[0], gh[1], gh[2], gh[3] ?? 1, v.ghost.ok ? '#F0A85A' : '#D9534F', { type: 'ghost' }, 0.5);
     list.sort((p, q) => p.depth - q.depth);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (!v.top) { const gr = ctx.createLinearGradient(0, 0, 0, canvas.height); gr.addColorStop(0, '#D6E8F2'); gr.addColorStop(0.6, '#F1F3EC'); gr.addColorStop(1, '#F6F0E2'); ctx.fillStyle = gr; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    if (!v.top) { const gr = ctx.createLinearGradient(0, 0, 0, canvas.height); gr.addColorStop(0, '#DCE5E4'); gr.addColorStop(0.55, '#EEEEE4'); gr.addColorStop(1, '#F3ECDD'); ctx.fillStyle = gr; ctx.fillRect(0, 0, canvas.width, canvas.height); }
     for (const it of list) it.draw(ctx);
     // ねらっているマス：木や家に隠れていても見えるよう、いちばん上に地面の高さで枠を描く
     if (v.aim && v.aim.length) {
@@ -667,7 +682,7 @@ export function createView(canvas, world, opt = {}) {
         const fr = o.dir === 'n' ? [ex - O2, ey - O2, ex + 1 + O2, ey] : o.dir === 's' ? [ex - O2, ey, ex + 1 + O2, ey + O2] : o.dir === 'w' ? [ex - O2, ey - O2, ex, ey + 1 + O2] : [ex, ey - O2, ex + O2, ey + 1 + O2];
         rbox(list, ...fr, gz - 0.05, z + 0.24 - gz + 0.05, '#A39C90', { type: 'found', nopick: true, sideDecor: stoneDecor(seed) }, 1);
       }
-      if (v.top || !full) { rbox(list, ...rect, z, v.top ? HOUSE_H : LOW, O ? O.color : Wm.color, { ...meta, sideDecor: v.top || O ? null : tex(0, LOW) }, alpha); continue; }
+      if (v.top || !full) { rbox(list, ...rect, z, v.top ? HOUSE_H : LOW, O && (O.door || v.top) ? O.color : Wm.color, { ...meta, sideDecor: v.top || O?.door ? null : tex(0, LOW) }, alpha); continue; }
       if (op === 'door') {
         rbox(list, ...rect, z, 2.1, O.color, { ...meta, sideDecor: (cx2, p2, fc) => doorDecor(cx2, p2, fc, accentOf(hs)) }, alpha); rbox(list, ...rect, z + 2.1, HOUSE_H - 2.1, Wm.color, { ...meta, sideDecor: tex(2.1, HOUSE_H) }, alpha);
         // 扉の前の踏み石
@@ -677,11 +692,11 @@ export function createView(canvas, world, opt = {}) {
         const isWin = (k) => ['window', 'window2'].includes(hs.open[k]) && outerDir[k] === o.dir;
         const cont = t === 'h' ? { lo: isWin(`h:${ex - 1},${ey}`), hi: isWin(`h:${ex + 1},${ey}`) } : { lo: isWin(`v:${ex},${ey - 1}`), hi: isWin(`v:${ex},${ey + 1}`) };
         rbox(list, ...rect, z, 0.9, Wm.color, { ...meta, sideDecor: tex(0, 0.9) }, alpha);
-        rbox(list, ...rect, z + 0.9, 1.3, O.color, { ...meta, sideDecor: windowDecor(op, t, { ...cont, frame: accentOf(hs) }) }, 1);
+        rbox(list, ...rect, z + 0.9, 1.3, accentOf(hs) || '#D6CCB8', { ...meta, sideDecor: windowDecor(op, t, { ...cont, frame: accentOf(hs) }) }, 1);
         rbox(list, ...rect, z + 2.2, HOUSE_H - 2.2, Wm.color, { ...meta, sideDecor: tex(2.2, HOUSE_H) }, alpha);
         // 窓台
         const SD = 0.1, s0 = cont.lo ? 0 : 0.12, s1 = cont.hi ? 1 : 0.88, sr = t === 'h' ? [ex + s0, ey - T / 2 - SD, ex + s1, ey + T / 2 + SD] : [ex - T / 2 - SD, ey + s0, ex + T / 2 + SD, ey + s1];
-        rbox(list, ...sr, z + 0.86, 0.05, '#F2EEE4', meta, 1);
+        rbox(list, ...sr, z + 0.86, 0.05, '#DCD3C2', meta, 1);
       }
       else rbox(list, ...rect, z, HOUSE_H, Wm.color, { ...meta, sideDecor: tex(0, HOUSE_H) }, alpha);
     }
@@ -844,13 +859,13 @@ export function createView(canvas, world, opt = {}) {
       const UQ = (p0, p1, q0, q1, f) => { const pts = along ? [U(q0, p0), U(q1, p0), U(q1, p1), U(q0, p1)] : [U(p0, q0), U(p1, q0), U(p1, q1), U(p0, q1)]; cx.fillStyle = f; cx.beginPath(); cx.moveTo(pts[0][0], pts[0][1]); for (const r of pts) cx.lineTo(r[0], r[1]); cx.closePath(); cx.fill(); };
       for (let k = Math.floor(a0 / P); k * P < a1; k++) {
         const p0 = Math.max(a0, k * P), p1 = Math.min(a1, (k + 1) * P), pm = Math.min(p1, Math.max(p0, k * P + P * 0.5)); if (p1 <= p0) continue;
-        for (let j = Math.floor(b0 / C); j * C < b1; j++) { const q0 = Math.max(b0, j * C), q1 = Math.min(b1, (j + 1) * C); if (q1 <= q0) continue; const tn = hash(k, j, 55) - 0.5; UQ(p0, p1, q0, q1, tn > 0 ? `rgba(255,190,150,${(tn * 0.25).toFixed(3)})` : `rgba(90,30,15,${(-tn * 0.25).toFixed(3)})`); UQ(p0, p1, q0, Math.min(q1, q0 + 0.035), 'rgba(70,22,8,.30)'); }
-        if (pm > p0) UQ(p0, pm, b0, b1, 'rgba(255,214,180,.20)');   // 山（上向きの瓦）は明るく
-        UQ(Math.max(p0, k * P + P * 0.5), Math.min(p1, k * P + P * 0.58), b0, b1, 'rgba(70,22,8,.32)');   // 谷との境の影
+        for (let j = Math.floor(b0 / C); j * C < b1; j++) { const q0 = Math.max(b0, j * C), q1 = Math.min(b1, (j + 1) * C); if (q1 <= q0) continue; const tn = hash(k, j, 55) - 0.5; UQ(p0, p1, q0, q1, tn > 0 ? `rgba(240,190,150,${(tn * 0.16).toFixed(3)})` : `rgba(90,40,20,${(-tn * 0.16).toFixed(3)})`); UQ(p0, p1, q0, Math.min(q1, q0 + 0.035), 'rgba(70,22,8,.30)'); }
+        if (pm > p0) UQ(p0, pm, b0, b1, 'rgba(245,214,180,.12)');   // 山（上向きの瓦）は明るく
+        UQ(Math.max(p0, k * P + P * 0.5), Math.min(p1, k * P + P * 0.58), b0, b1, 'rgba(70,32,16,.22)');   // 谷との境の影
       }
     }
     else if (kind === 'mud') {   // 土の平屋根：こてで均した泥。ところどころ明るく乾いたむら
-      for (let i = 0; i < 3; i++) { const wx = T2.cx + hash(T2.cx, T2.cy, 56 + i), wy = T2.cy + hash(T2.cx, T2.cy, 60 + i); if (wx <= T2.x0 || wx >= T2.x1 || wy <= T2.y0 || wy >= T2.y1) continue; const [px, py] = U(wx, wy), q2 = U(Math.min(T2.x1, wx + 0.3), wy), rr = Math.max(2, Math.hypot(q2[0] - px, q2[1] - py)), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, i % 2 ? 'rgba(230,195,150,.25)' : 'rgba(100,65,40,.18)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.beginPath(); cx.arc(px, py, rr, 0, 7); cx.fill(); }
+      for (let i = 0; i < 3; i++) { const wx = T2.cx + hash(T2.cx, T2.cy, 56 + i), wy = T2.cy + hash(T2.cx, T2.cy, 60 + i); if (wx <= T2.x0 || wx >= T2.x1 || wy <= T2.y0 || wy >= T2.y1) continue; const [px, py] = U(wx, wy), q2 = U(Math.min(T2.x1, wx + 0.3), wy), rr = Math.max(2, Math.hypot(q2[0] - px, q2[1] - py)), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, i % 2 ? 'rgba(225,192,150,.08)' : 'rgba(100,65,40,.08)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.beginPath(); cx.arc(px, py, rr, 0, 7); cx.fill(); }
       cx.strokeStyle = 'rgba(95,62,38,.16)'; cx.lineWidth = 0.8 * v.dpr; const wy = T2.cy + 0.3 + hash(T2.cx, T2.cy, 64) * 0.4; if (wy > T2.y0 && wy < T2.y1) line(U(Math.max(T2.x0, T2.cx + 0.1), wy), U(Math.min(T2.x1, T2.cx + 0.8), wy + 0.05));
     }
     else {
@@ -871,8 +886,8 @@ export function createView(canvas, world, opt = {}) {
     const an = v.angle * Math.PI / 180, rx = nx * Math.cos(an) - ny * Math.sin(an), ry = nx * Math.sin(an) + ny * Math.cos(an); if (rx + ry <= 0.01) return;
     const pts = [P(a[0], a[1], z0), P(b[0], b[1], z0), P(b[0], b[1], zb), P(a[0], a[1], za)];
     const lam = nx * S[0] + ny * S[1], lit = occ && lam > 0 ? litAt((a[0] + b[0]) / 2 + nx * 0.05, (a[1] + b[1]) / 2 + ny * 0.05, (z0 + Math.max(za, zb)) / 2) : 0;
-    const fill = lightCol(color, lam, lit, 0.94, true);
-    list.push({ depth: P((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, z0)[2] + z0 * 0.001 + 0.0006, meta, draw: (cx, pc) => { poly(cx, pts, pc ? pc(SIDE.findIndex(([sx, sy]) => sx === nx && sy === ny)) : fill, 1); if (!pc && tex) tex(cx, pts); } });
+    const fill = lightCol(color, lam, lit, 0.94, true), mul = lightMul(lam, lit, 0.94, true);
+    list.push({ depth: P((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, z0)[2] + z0 * 0.001 + 0.0006, meta, draw: (cx, pc) => { if (!pc && tex) { litFace(cx, pts, matteHex(color), () => tex(cx, pts), mul); return; } poly(cx, pts, pc ? pc(SIDE.findIndex(([sx, sy]) => sx === nx && sy === ny)) : fill, 1); } });
   }
   function flueXY(f) { const [fx, fy] = FDIR[(f.r || 0) % 4], sx = -fy, sy = fx, ox = f.x + 0.5 - fx * 0.5, oy = f.y + 0.5 - fy * 0.5; return [ox + fx * 0.2 + sx * -0.25, oy + fy * 0.2 + sy * -0.25]; }
   /* たてどい：雨樋のある屋根の軒から、そばのタンクの上へ */
@@ -901,12 +916,12 @@ export function createView(canvas, world, opt = {}) {
       if (pc) { cx.fillStyle = pc(4); cx.fill(); return; }
       cx.globalAlpha = alpha;
       const gr = cx.createRadialGradient(c[0] + sd[0] * R * 0.4, c[1] + sd[1] * R * 0.4 - R * 0.2, R * 0.1, c[0], c[1], R * 1.1);
-      gr.addColorStop(0, lightCol(col, 1, lit, 1.12)); gr.addColorStop(0.55, lightCol(col, 0.55, lit)); gr.addColorStop(1, lightCol(col, 0.05, lit, 0.72));
+      gr.addColorStop(0, lightCol(col, 1, lit, 1.05)); gr.addColorStop(0.6, lightCol(col, 0.62, lit, 1.01)); gr.addColorStop(1, lightCol(col, 0.2, lit, 0.93));   // 葉は光を通すので、日かげの側も暗く沈まない
       cx.fillStyle = gr; cx.fill();
-      const hi = lightCol(col, 1, lit, 1.32), lo = lightCol(col, 0, lit, 0.6);
+      const hi = lightCol(col, 1, lit, 1.13), lo = lightCol(col, 0.2, lit, 0.88);
       for (let i = 0; i < 10; i++) {
         const a = hash(seed, i, 11) * Math.PI * 2, dd = Math.sqrt(hash(seed, i, 12)) * R * 0.78, f = Math.cos(a) * sd[0] + Math.sin(a) * sd[1] - 0.2 * Math.sin(a);
-        cx.globalAlpha = alpha * 0.42; cx.fillStyle = f > 0 ? hi : lo; cx.beginPath(); cx.arc(c[0] + Math.cos(a) * dd, c[1] + Math.sin(a) * dd, R * (0.13 + hash(seed, i, 13) * 0.12), 0, 7); cx.fill();
+        cx.globalAlpha = alpha * 0.24; cx.fillStyle = f > 0 ? hi : lo; cx.beginPath(); cx.arc(c[0] + Math.cos(a) * dd, c[1] + Math.sin(a) * dd, R * (0.13 + hash(seed, i, 13) * 0.12), 0, 7); cx.fill();
       }
       cx.globalAlpha = 1;
     } });
@@ -927,7 +942,7 @@ export function createView(canvas, world, opt = {}) {
   function drawVeg(list, t, floorLv, tg) {
     const g = geom(), z = h(world, t.cx, t.cy), S = v.sun.dir, hl = Math.hypot(S[0], S[1]) || 1, seed = Math.floor(t.s * 1e6);
     const off = t.r + 0.6, lit = occ ? litAt(t.x + S[0] / hl * off, t.y + S[1] / hl * off, z + t.h * 0.85) : 1;   // 葉の日なた：木の外の日の側から調べる（自分の葉で影にしない）
-    const col = t.kind === 'pine' ? ['#3B5F3C', '#43683F'][seed % 2] : t.kind === 'euca' ? ['#7A9467', '#839C6C'][seed % 2] : t.kind === 'shrub' ? ['#5E8040', '#6A8A45', '#557A3C'][seed % 3] : ['#4D7A3E', '#55833F', '#467238', '#5E8A47'][seed % 4];
+    const col = t.kind === 'pine' ? ['#4A6646', '#526E4A'][seed % 2] : t.kind === 'euca' ? ['#8A9C74', '#93A47A'][seed % 2] : t.kind === 'shrub' ? ['#71904E', '#7C9853', '#6A8A4A'][seed % 3] : ['#6C9046', '#77994C', '#668B44', '#80A052'][seed % 4];
     if (v.top) {
       list.push({ depth: (z + t.h) * 10, draw: (cx, pc) => { if (pc) return; const c = project(t.x, t.y, z, g), R = t.r * g.s, gr = cx.createRadialGradient(c[0] - R * 0.3, c[1] - R * 0.3, R * 0.1, c[0], c[1], R); gr.addColorStop(0, lightCol(col, 1, lit, 1.12)); gr.addColorStop(1, lightCol(col, 0.2, lit, 0.8)); cx.globalAlpha = 0.7; cx.fillStyle = gr; cx.beginPath(); cx.arc(c[0], c[1], R, 0, 7); cx.fill(); cx.globalAlpha = 1; } });
       return;
@@ -1031,16 +1046,16 @@ export function createView(canvas, world, opt = {}) {
         if (!(z0 < 0.9 && accent)) return;
         band(0, 0.9, accent);
         const a = Math.max(0, fy(0.12)), b = Math.min(1, fy(0.78));
-        if (b > a) { Q(0.1, a, 0.9, b, 'rgba(255,255,255,.16)'); Q(0.13, a + (b - a) * 0.08, 0.87, b - (b - a) * 0.08, 'rgba(0,0,0,.10)');
+        if (b > a) { Q(0.1, a, 0.9, b, 'rgba(255,255,255,.08)'); Q(0.13, a + (b - a) * 0.08, 0.87, b - (b - a) * 0.08, 'rgba(0,0,0,.06)');
           const mid = (a + b) / 2, hh = (b - a) * 0.32, c0 = faceAt(p, 0.5, mid - hh), c1 = faceAt(p, 0.62, mid), c2 = faceAt(p, 0.5, mid + hh), c3 = faceAt(p, 0.38, mid);
-          cx.fillStyle = 'rgba(255,255,255,.55)'; cx.beginPath(); cx.moveTo(c0[0], c0[1]); cx.lineTo(c1[0], c1[1]); cx.lineTo(c2[0], c2[1]); cx.lineTo(c3[0], c3[1]); cx.closePath(); cx.fill(); }
-        band(0.88, 0.92, 'rgba(255,255,255,.7)');
+          cx.fillStyle = 'rgba(255,250,240,.22)'; cx.beginPath(); cx.moveTo(c0[0], c0[1]); cx.lineTo(c1[0], c1[1]); cx.lineTo(c2[0], c2[1]); cx.lineTo(c3[0], c3[1]); cx.closePath(); cx.fill(); }
+        band(0.88, 0.92, 'rgba(250,244,230,.55)');
       };
       if (kind === 'bahareque') {   // 土のまま：カブヤの繊維と石灰を混ぜた土塗りの、やわらかい色むら。下は色の腰壁
         const W = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]);
-        for (let i = 0; i < 6; i++) { const [px, py] = faceAt(p, hash(seed, i, 61), hash(seed, i, 62)), rr = W * (0.15 + hash(seed, i, 63) * 0.3), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, i % 3 ? 'rgba(236,214,176,.30)' : 'rgba(112,78,46,.18)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.fillRect(px - rr, py - rr, rr * 2, rr * 2); }
+        for (let i = 0; i < 6; i++) { const [px, py] = faceAt(p, hash(seed, i, 61), hash(seed, i, 62)), rr = W * (0.15 + hash(seed, i, 63) * 0.3), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, i % 3 ? 'rgba(220,196,158,.12)' : 'rgba(112,78,46,.10)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.fillRect(px - rr, py - rr, rr * 2, rr * 2); }
         cx.lineWidth = 0.7 * v.dpr;   // 土にまぜたカブヤの繊維
-        for (let i = 0; i < 30; i++) { const a = hash(seed, i, 64), b = hash(seed, i, 65), ang = hash(seed, i, 66) * 6.28, L = 0.03 + hash(seed, i, 67) * 0.05, A = faceAt(p, a, b), B = faceAt(p, Math.min(1, a + Math.cos(ang) * L), Math.min(1, Math.max(0, b + Math.sin(ang) * L * 1.6))); cx.strokeStyle = i % 2 ? 'rgba(244,228,192,.5)' : 'rgba(96,66,36,.28)'; lineOn(cx, A, B); }
+        for (let i = 0; i < 30; i++) { const a = hash(seed, i, 64), b = hash(seed, i, 65), ang = hash(seed, i, 66) * 6.28, L = 0.03 + hash(seed, i, 67) * 0.05, A = faceAt(p, a, b), B = faceAt(p, Math.min(1, a + Math.cos(ang) * L), Math.min(1, Math.max(0, b + Math.sin(ang) * L * 1.6))); cx.strokeStyle = i % 2 ? 'rgba(236,220,186,.26)' : 'rgba(96,66,36,.16)'; lineOn(cx, A, B); }
         zocalo();
       } else if (kind === 'bahareque_lime') {   // しっくいの白い壁。ところどころ土色がにじみ、下は色を塗った腰壁（ソカロ）に浮き彫りの模様
         const W = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]);
@@ -1066,7 +1081,7 @@ export function createView(canvas, world, opt = {}) {
         }
       } else if (kind === 'adobe') {   // アドベ：泥塗りのやわらかいむら。上のほうに梁（ビガ）の丸い木口が出る
         const W = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]);
-        for (let i = 0; i < 5; i++) { const [px, py] = faceAt(p, hash(seed, i, 46), hash(seed, i, 47)), rr = W * (0.18 + hash(seed, i, 48) * 0.3), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, i % 2 ? 'rgba(225,180,135,.22)' : 'rgba(110,70,40,.16)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.fillRect(px - rr, py - rr, rr * 2, rr * 2); }
+        for (let i = 0; i < 5; i++) { const [px, py] = faceAt(p, hash(seed, i, 46), hash(seed, i, 47)), rr = W * (0.18 + hash(seed, i, 48) * 0.3), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, i % 2 ? 'rgba(215,176,134,.12)' : 'rgba(110,70,40,.09)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.fillRect(px - rr, py - rr, rr * 2, rr * 2); }
         cx.strokeStyle = 'rgba(95,62,38,.14)'; cx.lineWidth = 0.8 * v.dpr; for (let i = 0; i < 3; i++) { const yy = hash(seed, i, 49); lineOn(cx, faceAt(p, 0.05, yy), faceAt(p, 0.4 + hash(seed, i, 50) * 0.5, yy + 0.03)); }   // こての跡
         const zv = HOUSE_H - 0.32; if (zv > z0 && zv < z1) { const c = faceAt(p, 0.5, fy(zv)), r0 = 0.065 * geom().tw; cx.fillStyle = 'rgba(40,25,14,.35)'; cx.beginPath(); cx.ellipse(c[0] + r0 * 0.35, c[1] + r0 * 0.45, r0, r0 * 0.8, 0, 0, 7); cx.fill(); cx.fillStyle = '#7A5636'; cx.beginPath(); cx.ellipse(c[0], c[1], r0, r0 * 0.8, 0, 0, 7); cx.fill(); cx.strokeStyle = 'rgba(40,25,14,.5)'; cx.lineWidth = 0.8 * v.dpr; cx.beginPath(); cx.ellipse(c[0], c[1], r0 * 0.55, r0 * 0.42, 0, 0, 7); cx.stroke(); }   // 梁の木口
       } else if (kind === 'strawbale') {   // わらの壁：厚い土塗りの、ふくらんだ段（ブロック1つ分ずつ）
@@ -1088,7 +1103,7 @@ export function createView(canvas, world, opt = {}) {
         }
       } else {   // 厚い壁：しっくい仕上げのやわらかいむら
         const W = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]);
-        for (let i = 0; i < 4; i++) { const [px, py] = faceAt(p, hash(seed, i, 34), hash(seed, i, 35)), rr = W * (0.2 + hash(seed, i, 36) * 0.25), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, `rgba(${i % 2 ? '255,250,238' : '150,125,90'},.18)`); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.beginPath(); cx.arc(px, py, rr, 0, 7); cx.fill(); }
+        for (let i = 0; i < 4; i++) { const [px, py] = faceAt(p, hash(seed, i, 34), hash(seed, i, 35)), rr = W * (0.2 + hash(seed, i, 36) * 0.25), gr = cx.createRadialGradient(px, py, 0, px, py, rr); gr.addColorStop(0, `rgba(${i % 2 ? '250,244,230' : '150,125,90'},.10)`); gr.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = gr; cx.beginPath(); cx.arc(px, py, rr, 0, 7); cx.fill(); }
       }
       if (z0 < 0.6) { const A = faceAt(p, 0.5, fy(0)), B2 = faceAt(p, 0.5, fy(0.6)), gr = cx.createLinearGradient(A[0], A[1], B2[0], B2[1]); gr.addColorStop(0, 'rgba(70,50,30,.24)'); gr.addColorStop(1, 'rgba(70,50,30,0)'); Q(0, 0, 1, 1, gr); }   // 雨の跳ね返りで少し暗い足元
       if (z1 > HOUSE_H - 0.7) { const A = faceAt(p, 0.5, fy(HOUSE_H)), B2 = faceAt(p, 0.5, fy(HOUSE_H - 0.7)), gr = cx.createLinearGradient(A[0], A[1], B2[0], B2[1]); gr.addColorStop(0, 'rgba(25,25,30,.32)'); gr.addColorStop(1, 'rgba(25,25,30,0)'); Q(0, 0, 1, 1, gr); }   // 軒の下の影
@@ -1108,18 +1123,20 @@ export function createView(canvas, world, opt = {}) {
       // 壁の長い面だけに描く（壁の端の細い面には描かない）。面の左（fx=0）がどちら向きかで、つながる側を決める
       if ((et === 'h' && face !== 1 && face !== 3) || (et === 'v' && face !== 0 && face !== 2)) return;
       const inc = (et === 'h' && face === 3) || (et === 'v' && face === 0), L = inc ? cont.lo : cont.hi, Rt = inc ? cont.hi : cont.lo;
-      const Q = (a0, b0, a1, b1, f) => quadOn(cx, p, a0, b0, a1, b1, f), FR = cont.frame || '#EFE9DD';
+      const Q = (a0, b0, a1, b1, f) => quadOn(cx, p, a0, b0, a1, b1, f), FR = cont.frame || '#E6DDCB';
       const g0 = L ? 0 : 0.13, g1 = Rt ? 1 : 0.87, f0 = L ? 0 : 0.06, f1 = Rt ? 1 : 0.94;
       Q(f0, 0.0, f1, 1.0, FR);   // 枠
       const A = faceAt(p, 0.5, 0.94), B = faceAt(p, 0.5, 0.06), gr = cx.createLinearGradient(A[0], A[1], B[0], B[1]);
-      gr.addColorStop(0, '#E3EFF6'); gr.addColorStop(0.45, op === 'window2' ? '#93B9D4' : '#A2C5DC'); gr.addColorStop(1, '#4F6E86');   // 空の映りこみ
+      // ガラス：昼の窓は外より暗い。空がうっすら映り、下へいくほど部屋の中の暗さ。つやの線は描かない
+      gr.addColorStop(0, '#8E9C9E'); gr.addColorStop(0.5, '#66726F'); gr.addColorStop(1, '#4A514C');
       Q(g0, 0.07, g1, 0.93, gr);
-      if (!L) Q(0.16, 0.1, 0.3, 0.88, 'rgba(236,222,190,.40)');   // 中のカーテン（連窓の端だけ）
-      if (!Rt && (L || !cont.lo && !cont.hi)) { if (L) Q(0.7, 0.1, 0.84, 0.88, 'rgba(236,222,190,.40)'); }
-      Q(g0, 0.84, g1, 0.93, 'rgba(25,35,45,.28)'); if (!L) Q(0.13, 0.07, 0.18, 0.93, 'rgba(25,35,45,.16)');   // 枠の奥の影
-      Q(0.485, 0.07, 0.515, 0.93, FR); if (L) Q(0, 0.07, 0.018, 0.93, FR); if (Rt) Q(0.982, 0.07, 1, 0.93, FR);   // 桟（つなぎ目は細く）
-      if (op === 'window2') Q(g0, 0.48, g1, 0.52, FR);
-      cx.strokeStyle = 'rgba(255,255,255,.6)'; cx.lineWidth = 1.6 * v.dpr; lineOn(cx, faceAt(p, 0.57, 0.32), faceAt(p, 0.7, 0.76)); lineOn(cx, faceAt(p, 0.64, 0.26), faceAt(p, 0.73, 0.48));
+      Q(g0, 0.07, g1, 0.36, 'rgba(70,52,34,.18)');   // 下のほうに部屋の中の木の色
+      if (!L) Q(0.15, 0.1, 0.27, 0.9, 'rgba(232,218,186,.55)');   // 中のカーテン（連窓の端だけ）
+      if (L && !Rt) Q(0.73, 0.1, 0.85, 0.9, 'rgba(232,218,186,.55)');
+      Q(g0, 0.85, g1, 0.93, 'rgba(30,26,22,.30)'); if (!L) Q(0.13, 0.07, 0.17, 0.93, 'rgba(30,26,22,.18)');   // 枠の奥の影（窓は壁の奥にある）
+      Q(0.488, 0.07, 0.512, 0.93, FR); if (L) Q(0, 0.07, 0.016, 0.93, FR); if (Rt) Q(0.984, 0.07, 1, 0.93, FR);   // 縦の桟（つなぎ目は細く）
+      for (const k of op === 'window2' ? [0.36, 0.64] : [0.58]) Q(g0, k - 0.018, g1, k + 0.018, FR);   // 横の桟：小さなガラスに分ける
+      Q(f0 - 0.02, 0.0, f1 + 0.02, 0.045, 'rgba(255,250,238,.35)'); // 窓台
     };
   }
   function doorDecor(cx, p, face, paint = null) {   // 板の扉：縦の板、横の桟と筋かい、黒い取っ手。paint：色を塗った扉（バハレケの家）
@@ -1205,7 +1222,7 @@ export function createView(canvas, world, opt = {}) {
       R(0.09, 0.15, 0.25, 0.35, b + 1.0, 0.1, '#9AA5AC');
       R(0.12, 0.38, 0.36, 0.4, b + 1.98, 0.035, '#B8C2C8');
       Cy(0.38, 0.38, b + 1.9, 0.08, 0.06, '#C9D2D7', { top: '#DDE5E9' });
-      R(0.04, 0.96, -0.47, -0.43, b + 0.06, 1.9, '#D9ECF5', { al: Math.min(alpha, 0.32) });
+      R(0.04, 0.96, -0.47, -0.43, b + 0.06, 1.9, '#DCE4E0', { al: Math.min(alpha, 0.28) });
       const towel = f.t === 'shower2' ? '#9FC7A8' : '#E8A79C';   // ガラスの上に掛けたタオル（外・上・内の3枚）
       R(0.3, 0.62, -0.5, -0.47, b + 1.66, 0.3, towel); R(0.3, 0.62, -0.5, -0.4, b + 1.96, 0.03, towel); R(0.3, 0.62, -0.43, -0.4, b + 1.7, 0.26, towel);
     } else if (f.t === 'stove') {   // 薪のかまど：レンガと土の台、鉄の天板に鍋とやかん、焚き口、天井へ抜ける煙突
@@ -1226,11 +1243,11 @@ export function createView(canvas, world, opt = {}) {
       R(0.0, 0.07, -0.47, 0.47, b + 0.84, 0.11, woodD);
       for (const k of [-0.24, -0.08, 0.08, 0.24]) R(0.018, 0.052, k - 0.055, k + 0.055, b + 0.3, 0.54, wood);
       R(0.08, 0.62, -0.42, 0.42, b + 0.3, 0.16, '#F3EFE6');
-      R(0.62, L - 0.04, -0.45, 0.45, b + 0.3, 0.2, '#88AACB', { decor: (cx, pt) => {
+      R(0.62, L - 0.04, -0.45, 0.45, b + 0.3, 0.2, '#8C9CA8', { decor: (cx, pt) => {
         fillQ(cx, pt, 0, 0, 0.1, 1, '#FBFAF4');
         for (const k of [0.33, 0.66]) ln(cx, pt(0.1, k), pt(1, k), 'rgba(40,60,90,.16)');
         for (const k of [0.35, 0.6]) ln(cx, pt(k, 0.02), pt(k, 0.98), 'rgba(40,60,90,.12)');
-        fillQ(cx, pt, 0.72, 0, 0.95, 1, '#D98E5A'); for (const k of [0.76, 0.91]) ln(cx, pt(k, 0), pt(k, 1), 'rgba(250,225,190,.8)', 1.4);
+        fillQ(cx, pt, 0.72, 0, 0.95, 1, '#C49070'); for (const k of [0.76, 0.91]) ln(cx, pt(k, 0), pt(k, 1), 'rgba(250,225,190,.8)', 1.4);
       } });
       R(0.12, 0.44, -0.3, 0.3, b + 0.46, 0.1, '#FFFFFF', { decor: (cx, pt) => { ln(cx, pt(0.5, 0.15), pt(0.5, 0.85), 'rgba(150,150,140,.35)'); const c = pt(0.35, 0.3); cx.fillStyle = 'rgba(255,255,255,.7)'; cx.beginPath(); cx.arc(c[0], c[1], 2.5 * v.dpr, 0, 7); cx.fill(); } });
     } else if (f.t === 'table') {

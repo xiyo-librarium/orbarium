@@ -33,7 +33,7 @@ export const BLOCKS = {
   floor_wood: { name: '木の床', kind: 'floor', u: 1.0, mass: 0, cost: 0.5, labor: 0.3, color: '#D7B98A', learn: null, overlay: true },
   floor_slab: { name: '土間', kind: 'floor', u: 1.2, mass: 2, cost: 1.0, labor: 0.5, color: '#A39A8C', learn: null, overlay: true },
   floor_ins: { name: '断熱した床', kind: 'floor', u: 0.3, mass: 0, cost: 1.0, labor: 0.4, color: '#E3CFA8', learn: 'insulation', overlay: true },
-  tank: { name: '雨水タンク 1m³', kind: 'tank', cap: 1000, cost: 2.7, labor: 0.2, life: 25, color: '#CFE1F2', learn: null },
+  tank: { name: '雨水タンク 1m³', kind: 'tank', cap: 1000, cost: 2.7, labor: 0.2, life: 25, color: '#B4B6A6', learn: null },
   pump: { name: 'ポンプ', kind: 'pump', cost: 5, labor: 0.3, life: 10, color: '#3A5F86', learn: null },
   bed: { local: true, name: '畑', kind: 'bed', cost: 0.1, labor: 0.05, color: '#8DB872', learn: null, overlay: true },
   tree: { local: true, name: '果樹', kind: 'tree', cost: 0.5, labor: 0.1, color: '#4E8F5B', learn: 'hedge' },
@@ -638,17 +638,17 @@ export const WALLS = {
   bahareque: { name: '竹と土壁（バハレケ）', home: 'med', note: 'グアドゥア竹の骨組みに割った竹を編み、カブヤの繊維と石灰を混ぜた土を塗る。軽くしなって地震に強い。雨に弱いので深い軒で守る。上は土のままか、しっくいか。下の腰壁（ソカロ）と窓枠は好きな色に。', u: 1.5, cost: 2.0, warm: 2, store: 2, mass: 1, quake: 0.9, wet: 0.8, color: '#F2EEE4', pat: 'bahareque', accent: true },
   brick: { name: '赤れんが（ラドリージョ）', home: 'med', hidden: true, note: '谷の窯で焼いた赤いれんがを、鉄筋コンクリートの枠で固めて積む。メデジンの町の色。重くて熱をためる。雨に強い。', u: 2.0, cost: 3.2, warm: 1, store: 3, mass: 1, quake: 0.65, wet: 0.05, color: '#B4593B', pat: 'brick' },
   tapia: { name: '版築（タピア・ピサダ）', home: 'med', hidden: true, note: '板の型枠に土を入れて突き固め、50cmずつ積み上げる。植民地時代の町の壁。とても重く熱をためるが、地震と雨に弱い。', u: 1.1, cost: 2.6, warm: 2, store: 4, mass: 2, quake: 0.25, wet: 0.65, color: '#D2A675', pat: 'tapia' },
-  adobe: { name: '日干しれんが（アドベ）', home: 'taos', note: '土とわらを型に入れて日に干したれんがを積み、泥を塗る。昼の日差しを夜まで溜める。外の泥は毎年塗り直す（手入れの日）。', u: 1.2, cost: 2.4, warm: 2, store: 4, mass: 2, quake: 0.3, wet: 0.55, upkeep: 0.08, color: '#D6AC7C', pat: 'adobe', vigas: true, frame: '#3B8FB2' },
+  adobe: { name: '日干しれんが（アドベ）', home: 'taos', note: '土とわらを型に入れて日に干したれんがを積み、泥を塗る。昼の日差しを夜まで溜める。外の泥は毎年塗り直す（手入れの日）。', u: 1.2, cost: 2.4, warm: 2, store: 4, mass: 2, quake: 0.3, wet: 0.55, upkeep: 0.08, color: '#D6AC7C', pat: 'adobe', vigas: true, frame: '#4D8299' },
   strawbale: { name: 'わらのブロックの壁', home: 'taos', hidden: true, learn: 'straw', note: 'わらのブロックを積んで土を塗る。壁そのものが厚い断熱。乾いた土地なら長持ちするが、濡れると腐る。', u: 0.15, cost: 3.6, warm: 5, store: 2, mass: 1, quake: 0.6, wet: 0.9, color: '#DCC394', pat: 'straw' }
 };
-export const ACCENTS = [['#2F8C8C', '青緑'], ['#D9573B', '朱'], ['#E7B53C', '山吹'], ['#3E6FB0', '群青'], ['#6E9A3A', '若草'], ['#7A3E6E', '葡萄']];
+export const ACCENTS = [['#4F8580', '青緑'], ['#B85E45', '朱'], ['#CDA24E', '山吹'], ['#4D6C90', '群青'], ['#748E4C', '若草'], ['#74506C', '葡萄']];   // 石灰の顔料で塗ったような、少しくすんだ色
 /* 土地の工法の値段：その土地なら地元の値段（お金も地域に）、よその土地なら1.6倍で材料は遠くから */
 export function regional(M, site) { if (!M.home || !site || M.home === site) return { cost: M.cost, local: M.home ? true : !!M.local, away: false }; return { cost: Math.round(M.cost * 1.6 * 10) / 10, local: false, away: true }; }
 export const ROOFS = {
   tin: { name: 'トタン屋根', note: '安くて雨をよく集める。日なたで焼けて、冷えた夜は裏に水滴がつく。', u: 3.0, absorb: 0.7, catch: 0.85, cost: 0.8, warm: 1, store: 1, color: '#8E979C', pat: 'tin' },
   tinins: { name: '断熱したトタン屋根', note: 'トタンの下に断熱材。雨はよく集めたまま、焼けも水滴も止まる。', u: 0.3, absorb: 0.7, catch: 0.85, cost: 1.6, warm: 4, store: 1, color: '#A9B1B5', pat: 'tin', learn: 'insulation' },
   green: { name: '草屋根', note: '土と草をのせる。夏に涼しく、雨はあまり集まらない。重いので柱を太く。', u: 1.0, absorb: 0.25, catch: 0.35, cost: 2.2, warm: 2, store: 3, local: true, color: '#6FA45F', pat: 'grass' },
-  teja: { name: '素焼きの瓦（テハ）', home: 'med', pitched: true, note: '谷の窯で焼いた半円の瓦を、上向き・下向きに重ねる。日に焼けにくく、雨の音もやわらか。傾けた屋根に（平らなら切妻にする）。重いので地震には少し弱くなる。', u: 2.0, absorb: 0.5, catch: 0.78, cost: 1.8, warm: 2, store: 2, mass: 1, heavy: 0.1, color: '#B9603F', pat: 'teja' },
+  teja: { name: '素焼きの瓦（テハ）', home: 'med', pitched: true, note: '谷の窯で焼いた半円の瓦を、上向き・下向きに重ねる。日に焼けにくく、雨の音もやわらか。傾けた屋根に（平らなら切妻にする）。重いので地震には少し弱くなる。', u: 2.0, absorb: 0.5, catch: 0.78, cost: 1.8, warm: 2, store: 2, mass: 1, heavy: 0.1, color: '#B06A4C', pat: 'teja' },
   mud: { name: '土の平屋根（ビガとラティージャ）', home: 'taos', flat: true, canales: true, note: '丸太の梁（ビガ）に小枝（ラティージャ）を並べ、土を厚くのせる。まわりを低い壁（パラペット）で囲み、木の樋（カナレ）から雨を落とす。雨樋は要らない。平らな屋根だけ。', u: 0.8, absorb: 0.6, catch: 0.7, cost: 1.5, warm: 3, store: 3, mass: 1, color: '#B48C66', pat: 'mud' }
 };
 export const FLOORS = {
@@ -658,8 +658,8 @@ export const FLOORS = {
   slab: { name: '土間（コンクリート）', note: '地面にじかに打つ。熱をためて、昼の日差しを夜まで持たせる。暑い日は日中ひんやり。足元は冷える。', u: 1.4, mass: 2, cost: 1.1, warm: 1, store: 4, color: '#A9A397', pat: 'slab' }
 };
 export const OPENINGS = {
-  window: { name: '窓', note: '光と風、冬の日差しの熱が入る。熱は逃げやすい。', u: 2.8, g: 0.75, cost: 3.0, warm: 1, color: '#A9CDEB' },
-  window2: { name: '二重窓', note: 'ガラスを2枚に。熱が逃げにくく、水滴もつかない。', u: 1.3, g: 0.6, cost: 5.5, warm: 3, color: '#8DBDE6', learn: 'insulation' },
+  window: { name: '窓', note: '光と風、冬の日差しの熱が入る。熱は逃げやすい。', u: 2.8, g: 0.75, cost: 3.0, warm: 1, color: '#9DB3BA' },
+  window2: { name: '二重窓', note: 'ガラスを2枚に。熱が逃げにくく、水滴もつかない。', u: 1.3, g: 0.6, cost: 5.5, warm: 3, color: '#87A2AE', learn: 'insulation' },
   door: { name: '扉', note: '出入り口。家に1つは要る。', u: 2.0, cost: 3.5, warm: 1, color: '#7A5A3A', door: true }
 };
 /* 家具と水まわり（最初からついている）。トイレとシャワーは同じ場所のまま種類を替えられる */
