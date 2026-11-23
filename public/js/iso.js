@@ -1,5 +1,5 @@
 /* 斜め上から見下ろす3D（アイソメトリック）。カメラは固定。回転ボタンを押したときだけ短くなめらかに回る */
-import { BLOCKS, N, h, at, WALLS, ROOFS, FLOORS, OPENINGS, FURN, FDIR, HOUSE_H, houseOuterEdges, furnCells, vegObjects } from './world.js';
+import { BLOCKS, N, h, at, WALLS, ROOFS, FLOORS, OPENINGS, FURN, FDIR, HOUSE_H, houseOuterEdges, furnCells, vegObjects, roofZ, roofBox, eavesDepth, drainDirs } from './world.js';
 export { vegObjects };
 
 const SIDE = [[1, 0], [0, 1], [-1, 0], [0, -1]];   // +x, +y, -x, -y
@@ -85,7 +85,7 @@ export function createView(canvas, world, opt = {}) {
     for (let y = occY0; y <= ye; y++) for (let x = occX0; x <= xe; x++) occ[(y - occY0) * occW + (x - occX0)] = h(world, x, y);
     const up = (x, y, z) => { if (x < occX0 || y < occY0 || x > xe || y > ye) return; const i = (y - occY0) * occW + (x - occX0); if (z > occ[i]) occ[i] = z; };
     for (const k in world.blocks) { const [x, y, z] = k.split(',').map(Number), d = BLOCKS[world.blocks[k].t]; if (d.overlay || d.pit) continue; up(x, y, z + (d.kind === 'roof' ? 0.35 : d.kind === 'pv' ? 0.12 : d.kind === 'tree' ? 2.2 : d.kind === 'heap' ? 2.35 : 1)); }
-    if (hs) { const top = v.wallMode === 'up' && !v.top ? HOUSE_H + 0.2 : 0.45; for (const k in hs.cells) { const [x, y] = k.split(',').map(Number); up(x, y, hs.z + top); } }
+    if (hs) { const up2 = v.wallMode === 'up' && !v.top, box = roofBox(hs); for (const k in hs.cells) { const [x, y] = k.split(',').map(Number); up(x, y, hs.z + (up2 ? roofZ(hs, x + 0.5, y + 0.5, box) + 0.2 : 0.45)); } }
     // 木と茂み：葉の広がりのマスを、その高さまでふさぐ（林の下は日かげになる）
     for (const t of vegObjects(world)) {
       if (hs && hs.cells[`${t.cx},${t.cy}`]) continue;
@@ -599,33 +599,77 @@ export function createView(canvas, world, opt = {}) {
     }
     if (v.wallMode === 'up' && !v.top) {
       const cells = Object.keys(hs.cells).map(k => k.split(',').map(Number)).sort((a, b) => b[1] - a[1] || a[0] - b[0]);
-      for (const [x, y] of cells) { if (!inView(x, y)) continue; rbox(list, x, y, x + 1, y + 1, z + HOUSE_H, 0.2, R.color, { type: 'roof', x, y, decor: roofDecor(hs.roof, x, y) }, 1); }
-      for (const o of houseOuterEdges(hs)) {   // 軒：ふだんは少し、庇をつけると深く
-        if (!inView(o.x, o.y)) continue;
-        const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number), E2 = hs.eaves ? 0.5 : 0.16;
-        const rect = o.dir === 'n' ? [ex, ey - E2, ex + 1, ey] : o.dir === 's' ? [ex, ey, ex + 1, ey + E2] : o.dir === 'w' ? [ex - E2, ey, ex, ey + 1] : [ex, ey, ex + E2, ey + 1];
-        rbox(list, ...rect, z + HOUSE_H + 0.06, 0.14, R.color, { type: 'roof', x: o.x, y: o.y, decor: roofDecor(hs.roof, o.x, o.y) }, 1);
+      const pvSet = new Set(cells.slice(0, Math.min(hs.pv || 0, cells.length)).map(c => c.join(',')));
+      const box = roofBox(hs), E = eavesDepth(hs), has = (x, y) => !!hs.cells[`${x},${y}`], RZ = (px, py) => z + roofZ(hs, px, py, box) + 0.05;
+      // 屋根：1マスずつ傾いた板。外に面した辺は軒の出のぶん伸ばす（角も出る）
+      for (const [x, y] of cells) {
+        if (!inView(x, y)) continue;
+        const xa = x - (has(x - 1, y) ? 0 : E), xb = x + 1 + (has(x + 1, y) ? 0 : E), ya = y - (has(x, y - 1) ? 0 : E), yb = y + 1 + (has(x, y + 1) ? 0 : E);
+        const rd = roofDecor(hs.roof, x, y), pv = pvSet.has(`${x},${y}`), U = (wx, wy) => [(wx - xa) / (xb - xa), (wy - ya) / (yb - ya)];
+        const decor = (cx, t, g2) => { rd && rd(cx, t, g2); if (!pv) return; const q = [[x + 0.08, y + 0.08], [x + 0.92, y + 0.08], [x + 0.92, y + 0.92], [x + 0.08, y + 0.92]].map(([a1, b1]) => faceAt(t, ...U(a1, b1)));   // 太陽光パネル
+          cx.fillStyle = '#30476B'; cx.beginPath(); cx.moveTo(q[0][0], q[0][1]); for (const r of q) cx.lineTo(r[0], r[1]); cx.closePath(); cx.fill(); cx.strokeStyle = 'rgba(200,215,235,.45)'; cx.lineWidth = 1;
+          for (const f of [1 / 3, 2 / 3]) { const A = faceAt(t, ...U(x + 0.08 + 0.84 * f, y + 0.08)), B = faceAt(t, ...U(x + 0.08 + 0.84 * f, y + 0.92)); cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.stroke(); } };
+        slab(list, [[xa, ya], [xb, ya], [xb, yb], [xa, yb]], RZ, 0.15, R.color, { type: 'roof', x, y, decor });
       }
-      for (let i = 0; i < Math.min(hs.pv || 0, cells.length); i++) { const [x, y] = cells[i]; rbox(list, x + 0.08, y + 0.08, x + 0.92, y + 0.92, z + HOUSE_H + 0.2, 0.06, '#30476B', { type: 'roof', x, y }, 1); }
+      // 妻壁：壁の上から屋根の下までの三角・台形の壁（傾いた屋根のとき）
+      if ((hs.roofShape || 'flat') !== 'flat') for (const o of houseOuterEdges(hs)) {
+        if (!inView(o.x, o.y)) continue;
+        const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number), off = 0.07, [ox2, oy2] = { n: [0, -off], s: [0, off], w: [-off, 0], e: [off, 0] }[o.dir];
+        const [pa, pb] = t === 'h' ? [[ex, ey], [ex + 1, ey]] : [[ex, ey], [ex, ey + 1]];
+        const ha = roofZ(hs, ...pa, box), hb = roofZ(hs, ...pb, box); if (Math.max(ha, hb) < HOUSE_H + 0.02) continue;
+        gableWall(list, [pa[0] + ox2, pa[1] + oy2], [pb[0] + ox2, pb[1] + oy2], z + HOUSE_H, z + ha, z + hb, o.dir, Wm.color, wallTexture(hs.wall, HOUSE_H, Math.max(ha, hb), (ex * 73 + ey * 151) | 0), { type: 'wall', e: o.e, x: o.x, y: o.y });
+      }
       // かまどの煙突：屋根から出る鉄の煙突と笠。木がとってあれば、うすい煙
       const sf = (hs.furn || []).find(f => f.t === 'stove');
       if (sf) {
-        const [px, py] = flueXY(sf), zt = z + HOUSE_H + 0.2, d0 = project(px, py, zt, geom())[2] + 0.6;
+        const [px, py] = flueXY(sf), zt = z + roofZ(hs, px, py) + 0.15, d0 = project(px, py, zt, geom())[2] + 1.2 + 2 * eavesDepth(hs);
         cylinder(list, px, py, zt, 0.07, 0.95, '#4A4A4A', { type: 'roof', x: sf.x, y: sf.y }, d0);
         cylinder(list, px, py, zt + 0.95, 0.13, 0.06, '#3C3C3C', { type: 'roof', x: sf.x, y: sf.y }, d0 + 0.001);
         if ((world.wood || 0) > 0.05) list.push({ depth: d0 + 0.002, draw: (cx, pc) => { if (pc) return; const g = geom(); [[0.05, 1.25, 0.13], [0.16, 1.55, 0.18], [0.3, 1.9, 0.24]].forEach(([dx, dz, r], i) => { const c = project(px + dx, py - dx * 0.5, zt + dz, g); cx.globalAlpha = 0.28 - i * 0.07; cx.fillStyle = '#F4F2EE'; cx.beginPath(); cx.arc(c[0], c[1], r * g.tw * 0.72, 0, 7); cx.fill(); }); cx.globalAlpha = 1; } });
       }
-      if (hs.gutter) {   // 雨樋：軒先にとい
-        const E3 = (hs.eaves ? 0.5 : 0.16) + 0.02, X = E3 + 0.1;
+      if (hs.gutter) {   // 雨樋：雨が落ちる軒の先にとい
+        const E3 = eavesDepth(hs) + 0.02, X = E3 + 0.1, dd = drainDirs(hs), bx = roofBox(hs);
         for (const o of houseOuterEdges(hs)) {
-          if (!inView(o.x, o.y)) continue;
+          if (!inView(o.x, o.y) || !dd.includes(o.dir)) continue;
           const [, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number);
           const rr = o.dir === 'n' ? [ex - X, ey - E3 - 0.1, ex + 1 + X, ey - E3] : o.dir === 's' ? [ex - X, ey + E3, ex + 1 + X, ey + E3 + 0.1] : o.dir === 'w' ? [ex - E3 - 0.1, ey - X, ex - E3, ey + 1 + X] : [ex + E3, ey - X, ex + E3 + 0.1, ey + 1 + X];
-          rbox(list, ...rr, z + HOUSE_H + 0.03, 0.1, '#A9B2B7', { type: 'roof', x: o.x, y: o.y }, 1);
+          const gz = z + Math.min(roofZ(hs, rr[0], rr[1], bx), roofZ(hs, rr[2], rr[3], bx)) - 0.05;
+          const [gnx, gny] = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] }[o.dir], an = v.angle * Math.PI / 180, front = (gnx * Math.cos(an) - gny * Math.sin(an)) + (gnx * Math.sin(an) + gny * Math.cos(an)) > 0.01;
+          rbox(list, ...rr, gz, 0.1, '#A9B2B7', { type: 'roof', x: o.x, y: o.y, dbias: front ? 1.2 + 2 * E3 : 0 }, 1);
         }
       }
     }
-    if (hs.gutter && !v.top) downpipes(list, Object.keys(hs.cells).map(k => k.split(',').map(Number)), z + HOUSE_H + 0.06, inView);
+    if (hs.gutter && !v.top) { const dd = drainDirs(hs), sh = hs.roofShape || 'flat'; downpipes(list, houseOuterEdges(hs).filter(o => dd.includes(o.dir)).map(o => [o.x, o.y]), z + HOUSE_H - (sh === 'flat' ? -0.06 : (hs.pitch || 0.3) * eavesDepth(hs)), inView); }
+  }
+  /* 傾いた板：4つの角（x,y）と、上面の高さを返す関数 Z(x,y)。厚み th。上面は傾きで日差しを受ける */
+  function slab(list, cs, Z, th, color, meta) {
+    const g = geom(), S = v.sun.dir, P = (px, py, pz) => project(px, py, pz, g);
+    const tz = cs.map(([px, py]) => Z(px, py)), t = cs.map(([px, py], i) => P(px, py, tz[i])), b = cs.map(([px, py], i) => P(px, py, tz[i] - th));
+    // 上面の向き（法線）：対角線の外積
+    const ux = cs[2][0] - cs[0][0], uy = cs[2][1] - cs[0][1], uz = tz[2] - tz[0], wx = cs[3][0] - cs[1][0], wy = cs[3][1] - cs[1][1], wz = tz[3] - tz[1];
+    let nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx; if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; } const nl = Math.hypot(nx, ny, nz) || 1;
+    const lam = (nx * S[0] + ny * S[1] + nz * S[2]) / nl, mx = (cs[0][0] + cs[2][0]) / 2, my = (cs[0][1] + cs[2][1]) / 2, mz = tz.reduce((a2, c2) => a2 + c2, 0) / 4;
+    const lit = occ ? litAt(mx, my, mz + 0.05) : 1, topFill = lightCol(color, lam, lit);
+    if (v.top) { list.push({ depth: mz * 10 + 0.4, meta, draw: (cx, pc) => { poly(cx, t, pc ? pc(4) : topFill, 1); if (!pc && meta?.decor) meta.decor(cx, t, g); } }); return; }
+    const an = v.angle * Math.PI / 180, sides = [];
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4, ex = cs[j][0] - cs[i][0], ey = cs[j][1] - cs[i][1], onx = ey, ony = -ex;   // 外向き（時計回りの角の並び）
+      const rx = onx * Math.cos(an) - ony * Math.sin(an), ry = onx * Math.sin(an) + ony * Math.cos(an);
+      if (rx + ry > 0.01) { const l2 = Math.hypot(onx, ony) || 1; sides.push({ pts: [b[i], b[j], t[j], t[i]], fill: lightCol(color, (onx * S[0] + ony * S[1]) / l2, 1, 0.8, true), face: SIDE.findIndex(([sx, sy]) => sx === Math.sign(Math.round(onx / l2)) && sy === Math.sign(Math.round(ony / l2))) }); }
+    }
+    list.push({ depth: Math.max(...b.map(q => q[2])) + 0.01 + (meta?.dbias || 0), meta, draw: (cx, pc) => {
+      for (const sd of sides) poly(cx, sd.pts, pc ? pc(sd.face < 0 ? 0 : sd.face) : sd.fill, 1);
+      poly(cx, t, pc ? pc(4) : topFill, 1); if (!pc && meta?.decor) meta.decor(cx, t, g);
+    } });
+  }
+  /* 妻壁：壁の線 a→b、下は z0、上は za・zb（屋根の傾きにそう）。外向き dir の面だけ */
+  function gableWall(list, a, b, z0, za, zb, dir, color, tex, meta) {
+    const g = geom(), S = v.sun.dir, P = (px, py, pz) => project(px, py, pz, g), [nx, ny] = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] }[dir];
+    const an = v.angle * Math.PI / 180, rx = nx * Math.cos(an) - ny * Math.sin(an), ry = nx * Math.sin(an) + ny * Math.cos(an); if (rx + ry <= 0.01) return;
+    const pts = [P(a[0], a[1], z0), P(b[0], b[1], z0), P(b[0], b[1], zb), P(a[0], a[1], za)];
+    const lam = nx * S[0] + ny * S[1], lit = occ && lam > 0 ? litAt((a[0] + b[0]) / 2 + nx * 0.05, (a[1] + b[1]) / 2 + ny * 0.05, (z0 + Math.max(za, zb)) / 2) : 0;
+    const fill = lightCol(color, lam, lit, 0.94, true);
+    list.push({ depth: P((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, z0)[2] + z0 * 0.001 + 0.0006, meta, draw: (cx, pc) => { poly(cx, pts, pc ? pc(SIDE.findIndex(([sx, sy]) => sx === nx && sy === ny)) : fill, 1); if (!pc && tex) tex(cx, pts); } });
   }
   function flueXY(f) { const [fx, fy] = FDIR[(f.r || 0) % 4], sx = -fy, sy = fx, ox = f.x + 0.5 - fx * 0.5, oy = f.y + 0.5 - fy * 0.5; return [ox + fx * 0.2 + sx * -0.25, oy + fy * 0.2 + sy * -0.25]; }
   /* たてどい：雨樋のある屋根の軒から、そばのタンクの上へ */
@@ -640,7 +684,7 @@ export function createView(canvas, world, opt = {}) {
       cylinder(list, px, py, z0, 0.045, eaveZ - z0, '#A9B2B7', { type: 'block', x: tx, y: ty, z: tz, b }, project(px, py, z0, g)[2] + 0.3);
     }
   }
-  const faceAt = (p, fx, fy) => [p[0][0] + (p[1][0] - p[0][0]) * fx + (p[3][0] - p[0][0]) * fy, p[0][1] + (p[1][1] - p[0][1]) * fx + (p[3][1] - p[0][1]) * fy];   // 面の中の位置（側面なら fx：横、fy：下→上。上面なら fx：x、fy：y）
+  const faceAt = (p, fx, fy) => [0, 1].map(i => p[0][i] + (p[1][i] - p[0][i]) * fx + (p[3][i] - p[0][i]) * fy + (p[2][i] - p[1][i] - p[3][i] + p[0][i]) * fx * fy);   // 面の中の位置（側面なら fx：横、fy：下→上。上面なら fx：x、fy：y）
   const quadOn = (cx, p, a0, b0, a1, b1, fill) => { const q = [faceAt(p, a0, b0), faceAt(p, a1, b0), faceAt(p, a1, b1), faceAt(p, a0, b1)]; cx.fillStyle = fill; cx.beginPath(); cx.moveTo(q[0][0], q[0][1]); for (const r of q) cx.lineTo(r[0], r[1]); cx.closePath(); cx.fill(); };
   const lineOn = (cx, A, B) => { cx.beginPath(); cx.moveTo(A[0], A[1]); cx.lineTo(B[0], B[1]); cx.stroke(); };
   const tone = (t, k) => t > 0 ? `rgba(255,244,222,${(t * k).toFixed(3)})` : `rgba(60,36,16,${(-t * k).toFixed(3)})`;
@@ -906,6 +950,8 @@ export function createView(canvas, world, opt = {}) {
       R(0.1, 0.92, -0.44, 0.44, b + 0.76, 0.05, '#34302D', { decor: (cx, pt) => { for (const [a, c] of [[0.35, 0.3], [0.68, 0.3]]) { const q = pt(a, c), e = pt(a, c + 0.22), rr = Math.hypot(e[0] - q[0], e[1] - q[1]); cx.strokeStyle = 'rgba(150,140,130,.6)'; cx.lineWidth = 1.2 * v.dpr; cx.beginPath(); cx.ellipse(q[0], q[1], rr, rr * 0.55, 0, 0, 7); cx.stroke(); } } });
       Cy(0.35, 0.13, b + 0.81, 0.13, 0.16, '#4B4642', { top: '#5A544F', lid: '#3A3633' });
       Cy(0.66, 0.15, b + 0.81, 0.09, 0.12, '#8A6A3A', { top: '#9B7A48' });
+      { const [kx, ky] = W(0.66, 0.15), [px2, py2] = W(0.35, 0.13);   // お湯がわいている：やかんと鍋から湯気
+        list.push({ depth: 0, bb: [kx - 0.1, kx + 0.1, ky - 0.1, ky + 0.1, b + 1.0, b + 1.5], draw: (cx, pc) => { if (pc || tint2) return; const gg = geom(); [[kx, ky, 1.02, 0.05], [kx + 0.03, ky - 0.02, 1.14, 0.07], [kx - 0.02, ky - 0.05, 1.3, 0.09], [px2, py2, 1.05, 0.07], [px2 + 0.04, py2 - 0.03, 1.22, 0.1]].forEach(([qx, qy, dz, r], i) => { const c = project(qx, qy, b + dz, gg); cx.globalAlpha = 0.42 - (i % 3) * 0.1; cx.fillStyle = '#FFFFFF'; cx.beginPath(); cx.arc(c[0], c[1], r * gg.tw * 0.72, 0, 7); cx.fill(); }); cx.globalAlpha = 1; } }); }
       R(0.9, 0.93, -0.16, 0.16, b + 0.12, 0.26, '#2A2522');
       R(0.905, 0.935, -0.1, 0.1, b + 0.16, 0.12, '#F08A3C');
       Cy(0.2, -0.25, b + 0.81, 0.07, HOUSE_H - 0.91, '#4A4A4A');

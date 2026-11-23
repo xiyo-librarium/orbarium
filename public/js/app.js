@@ -741,9 +741,14 @@ function houseBody(st) {
   if (st.tab === 'mat') body = `
     <h3>壁 <span class="small">家全体の壁を、この素材で張る</span></h3><div class="mcards">${Object.entries(E.W.WALLS).map(([k, M]) => matCard('wall', k, M, d.wall === k)).join('')}</div>
     <h3>屋根 <span class="small">雨を集める面にもなる</span></h3><div class="mcards">${Object.entries(E.W.ROOFS).map(([k, M]) => matCard('roof', k, M, d.roof === k)).join('')}</div>
+    <h3>屋根の形 <span class="small">傾けると雨と雪が1つの向きに落ちる。雨樋とタンクはその軒に</span></h3>
+    <div class="seg-o">${Object.entries(E.W.ROOF_SHAPES).map(([k, n]) => `<button class="opt${(d.roofShape || 'flat') === k ? ' on' : ''}" data-rshape="${k}">${n}</button>`).join('')}</div>
+    ${(d.roofShape || 'flat') === 'mono' ? `<div class="seg-o"><span class="small">下がる向き</span>${[['n', '北'], ['e', '東'], ['s', '南'], ['w', '西']].map(([k, n]) => `<button class="opt${(d.roofDir || 's') === k ? ' on' : ''}" data-rdir="${k}">${n}へ</button>`).join('')}</div>` : ''}
+    ${(d.roofShape || 'flat') === 'gable' ? `<div class="seg-o"><span class="small">下がる向き</span>${[['ns', '北と南'], ['ew', '東と西']].map(([k, n]) => `<button class="opt${(d.roofDir === 'ew' ? 'ew' : 'ns') === k ? ' on' : ''}" data-rdir="${k}">${n}へ</button>`).join('')}</div>` : ''}
+    ${(d.roofShape || 'flat') !== 'flat' ? `<div class="seg-o"><span class="small">傾き</span>${E.W.PITCHES.map(([p2, n]) => `<button class="opt${(d.pitch || 0.3) === p2 ? ' on' : ''}" data-rpitch="${p2}">${n}（${Math.round(Math.atan(p2) * 180 / Math.PI)}°）</button>`).join('')}</div>` : ''}
+    <div class="seg-o"><span class="step">軒の出 <button class="btn ghost" data-eave="-1" aria-label="短く">−</button><b>${E.W.eavesDepth(d).toFixed(1)}m</b><button class="btn ghost" data-eave="1" aria-label="長く">＋</button></span><span class="small">長いほど屋根が広く雨を集め、夏の日差しと壁の雨を防ぐ（屋根 ${Math.round(E.W.roofCatchArea(d))}m²）</span></div>
     <h3>床</h3><div class="mcards">${Object.entries(E.W.FLOORS).map(([k, M]) => matCard('floor', k, M, d.floor === k)).join('')}</div>
     <h3>そのほか</h3><div class="seg-o">
-      <button class="opt${d.eaves ? ' on' : ''}" data-eaves="1">庇${d.eaves ? 'あり' : 'をつける'}（夏の日差しと雨を防ぐ）</button>
       <button class="opt${d.gutter ? ' on' : ''}" data-gutter="1">雨樋${d.gutter ? 'あり' : `をつける（軒${E.W.housePerimeter(d)}m · ${E.W.gutterPrice(E.W.housePerimeter(d)).toFixed(1)}万円。屋根の雨を全部タンクへ）`}</button>
       <button class="opt${d.stove ? ' on' : ''}" data-stove="1">薪のかまど${d.stove ? 'あり' : 'をつける'}（${E.W.STOVE_PRICE}万円。切った木で料理と暖房、電気が減る）</button>
       ${knownTech('offgrid') ? `<span class="step">屋根の太陽光 <button class="btn ghost" data-pv="-1" aria-label="減らす">−</button><b>${d.pv}枚</b><button class="btn ghost" data-pv="1" aria-label="増やす">＋</button></span><span class="step">蓄電池 <button class="btn ghost" data-batt="-1" aria-label="減らす">−</button><b>${d.batt}台</b><button class="btn ghost" data-batt="1" aria-label="増やす">＋</button></span>` : ''}
@@ -764,7 +769,10 @@ function bindHouse(st, el) {
   el.querySelectorAll('[data-wall]').forEach(b => b.onclick = () => set(d => { d.wall = b.dataset.wall; }));
   el.querySelectorAll('[data-roof]').forEach(b => b.onclick = () => set(d => { d.roof = b.dataset.roof; }));
   el.querySelectorAll('[data-floor]').forEach(b => b.onclick = () => set(d => { d.floor = b.dataset.floor; }));
-  el.querySelectorAll('[data-eaves]').forEach(b => b.onclick = () => set(d => { d.eaves = !d.eaves; }));
+  el.querySelectorAll('[data-rshape]').forEach(b => b.onclick = () => set(d => { d.roofShape = b.dataset.rshape; if (d.roofShape === 'gable' && !['ns', 'ew'].includes(d.roofDir)) d.roofDir = 'ns'; if (d.roofShape === 'mono' && !['n', 'e', 's', 'w'].includes(d.roofDir)) d.roofDir = 's'; if (!d.pitch) d.pitch = 0.3; }));
+  el.querySelectorAll('[data-rdir]').forEach(b => b.onclick = () => set(d => { d.roofDir = b.dataset.rdir; }));
+  el.querySelectorAll('[data-rpitch]').forEach(b => b.onclick = () => set(d => { d.pitch = +b.dataset.rpitch; }));
+  el.querySelectorAll('[data-eave]').forEach(b => b.onclick = () => set(d => { const st2 = E.W.EAVE_STEPS, cur = E.W.eavesDepth(d); let i = st2.findIndex(x => x >= cur - 1e-6); if (i < 0) i = st2.length - 1; d.eaves = st2[Math.max(0, Math.min(st2.length - 1, i + +b.dataset.eave))]; }));
   el.querySelectorAll('[data-stove]').forEach(b => b.onclick = () => { let err = null; st.edit(d => { if (d.stove) { d.stove = false; E.W.removeStove(d); } else { err = E.W.placeStove(d); if (!err) d.stove = true; } }); st.msg = err || (st.draft.stove ? 'かまどを置いた（家具タブで動かせる）' : ''); st.redraw(); });
   el.querySelectorAll('[data-gutter]').forEach(b => b.onclick = () => set(d => { d.gutter = !d.gutter; }));
   el.querySelectorAll('[data-pv]').forEach(b => b.onclick = () => set(d => { d.pv = Math.max(st.base.pv, Math.min(Object.keys(d.cells).length, d.pv + +b.dataset.pv)); }));

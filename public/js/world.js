@@ -171,7 +171,7 @@ export function buildStone(s, x, y) {
 }
 /* 雨樋：屋根（家・小屋・堆肥小屋）の軒にとい、角にたてどい。ないと、軒から落ちる雨の一部しかタンクに入らない */
 export const GUTTER_PRICE = 0.35, DOWNPIPE_PRICE = 0.8;
-export function housePerimeter(hs) { return hs ? houseOuterEdges(hs).length : 0; }
+export function housePerimeter(hs) { return hs ? drainEdges(hs).length : 0; }   // 雨樋をつける軒の長さ（雨が落ちる軒だけ）
 /* 屋根のまとまり（小屋の屋根ブロック、堆肥小屋の区画）。そのマスを含むものを返す */
 export function roofStructAt(w, x, y) {
   let seed = null;
@@ -511,7 +511,11 @@ export function analyze(w, site, persons = 1) {
   const fedTanks = new Set(); let roofCatch = 0, roofLost = 0, noGutter = 0;
   const tankAt = new Map(tanks.map(t => [K(t.x, t.y, t.z), t]));
   const structs = [];
-  if (w.house) { const hs = w.house, hc = Object.keys(hs.cells).map(k => k.split(',').map(Number)); structs.push({ cells: hc, eave: hs.z + HOUSE_H, coef: ROOFS[hs.roof].catch, area: hc.length * ROOFS[hs.roof].catch, gut: !!hs.gutter }); }
+  if (w.house) {   // 家：雨が落ちる軒（片流れなら下がる側だけ）のそばのタンク
+    const hs = w.house, dc = new Set(); for (const o of drainEdges(hs)) dc.add(ck(o.x, o.y));
+    const hc = [...dc].map(k => k.split(',').map(Number)), E = eavesDepth(hs), sh = hs.roofShape || 'flat';
+    structs.push({ cells: hc, eave: hs.z + HOUSE_H + (sh === 'flat' ? 0 : -(hs.pitch || 0.3) * E) + 0.01, coef: ROOFS[hs.roof].catch, area: roofCatchArea(hs) * ROOFS[hs.roof].catch, gut: !!hs.gutter });
+  }
   for (const c of comp) {
     const exposed = c.filter(r => !at(w, r.x, r.y, r.z + 1) || BLOCKS[at(w, r.x, r.y, r.z + 1).t].kind === 'pv');
     structs.push({ cells: c.map(r => [r.x, r.y]), eave: Math.min(...c.map(r => r.z)), coef: 0.85, area: exposed.reduce((a, r) => a + BLOCKS[r.b.t].catch, 0), gut: c.every(r => r.b.gut), comp: c });
@@ -713,6 +717,33 @@ export function autoFurnish(d, items = ['shower', 'toilet', 'bed', 'table']) {
 }
 export const houseHas = (hs, t) => !!hs?.furn?.some(f => f.t === t);
 export const PV_PRICE = 5.5, BATT_PRICE = 15, EAVES_PRICE = 0.6;   // 太陽光1枚・蓄電池1台・庇は外周1mあたり
+/* 屋根の形と軒の出。
+   形：flat＝ほぼ平ら（どの軒からも雨が落ちる）／mono＝片流れ（roofDir の方へ下がり、雨はその軒だけに集まる）／
+       gable＝切妻（roofDir 'ns' なら北と南へ、'ew' なら東と西へ下がる）。pitch：1m進むと何m上がるか（雪の多い所は急に）
+   軒の出：壁から外へ張り出す長さ（m）。深いほど屋根が広くなって雨を多く集め、夏の日差しと壁の雨を防ぐ */
+export const ROOF_SHAPES = { flat: 'ほぼ平ら', mono: '片流れ', gable: '切妻' };
+export const PITCHES = [[0.15, 'ゆるい'], [0.3, 'ふつう'], [0.5, '急'], [0.8, 'とても急（雪を落とす）']];
+export const EAVE_STEPS = [0.16, 0.5, 0.9, 1.2, 1.5], EAVE_M2 = 1.0;   // 張り出し1m²あたり
+export const eavesDepth = (hs) => !hs ? 0 : typeof hs.eaves === 'number' ? hs.eaves : hs.eaves ? 0.5 : 0.16;
+const DV = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
+export function roofBox(hs) { let X0 = 1e9, X1 = -1e9, Y0 = 1e9, Y1 = -1e9; for (const k in hs.cells) { const [x, y] = k.split(',').map(Number); X0 = Math.min(X0, x); X1 = Math.max(X1, x + 1); Y0 = Math.min(Y0, y); Y1 = Math.max(Y1, y + 1); } return { X0, X1, Y0, Y1 }; }
+/* 屋根の上面の、床からの高さ（壁の上が HOUSE_H） */
+export function roofZ(hs, px, py, box = roofBox(hs)) {
+  const shape = hs.roofShape || 'flat', p = hs.pitch || 0.3;
+  if (shape === 'mono') { const [dx, dy] = DV[hs.roofDir || 's'], low = Math.max(box.X0 * dx, box.X1 * dx) + Math.max(box.Y0 * dy, box.Y1 * dy); return HOUSE_H + p * (low - (px * dx + py * dy)); }
+  if (shape === 'gable') { if (hs.roofDir === 'ew') { const c = (box.X0 + box.X1) / 2, hf = (box.X1 - box.X0) / 2; return HOUSE_H + p * (hf - Math.abs(px - c)); } const c = (box.Y0 + box.Y1) / 2, hf = (box.Y1 - box.Y0) / 2; return HOUSE_H + p * (hf - Math.abs(py - c)); }
+  return HOUSE_H;
+}
+/* 雨が落ちる軒の向き */
+export function drainDirs(hs) { const sh = hs.roofShape || 'flat'; return sh === 'mono' ? [hs.roofDir || 's'] : sh === 'gable' ? (hs.roofDir === 'ew' ? ['e', 'w'] : ['n', 's']) : ['n', 's', 'e', 'w']; }
+export function drainEdges(hs) { const ds = drainDirs(hs); return houseOuterEdges(hs).filter(o => ds.includes(o.dir)); }
+/* 屋根が受ける雨の面積（水平に見た広さ：床＋軒の出） */
+export function roofCatchArea(hs) {
+  const E = eavesDepth(hs), per = houseOuterEdges(hs).length, n = Object.keys(hs.cells).length;
+  let convex = 0; const has = (x, y) => !!hs.cells[ck(x, y)];
+  for (const k in hs.cells) { const [x, y] = k.split(',').map(Number); for (const [dx, dy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) if (!has(x + dx, y) && !has(x, y + dy)) convex++; }
+  return n + per * E + convex * E * E;
+}
 const LABOR = 0.4;   // 値段のうち人件費（近所に回るお金）の割合
 const ck = (x, y) => `${x},${y}`;
 export const edgeOf = (x, y, dir) => dir === 'n' ? `h:${x},${y}` : dir === 's' ? `h:${x},${y + 1}` : dir === 'w' ? `v:${x},${y}` : `v:${x + 1},${y}`;
@@ -823,7 +854,13 @@ export function estimate(w, cur, d) {
   let dig = 0, fil = 0; for (const k of newCells) { const [x, y] = k.split(',').map(Number); const g = h(w, x, y); if (g > d.z) dig += g - d.z; else if (g < d.z) fil += d.z - g; }
   add('地面を掘ってそろえる', dig, 'm³', 1.2, true);
   add('土を盛ってそろえる', fil, 'm³', 1.2 + (w.earth >= fil ? 0 : 0.8), true);
-  if (d.eaves && (!cur.eaves || newWalls)) add('庇', cur.eaves ? newWalls : outD.length, 'm', EAVES_PRICE, true);
+  { const e0 = eavesDepth(cur), e1 = eavesDepth(d), a0 = Math.max(0, e0 - 0.16) * houseOuterEdges(cur).length, a1 = Math.max(0, e1 - 0.16) * outD.length; if (a1 > a0 + 0.01) add('軒を伸ばす', Math.round((a1 - a0) * 10) / 10, 'm²', EAVE_M2, true); }
+  { const sh = (x) => `${x.roofShape || 'flat'}:${x.roofShape && x.roofShape !== 'flat' ? (x.pitch || 0.3) + ':' + (x.roofDir || 's') : ''}`;
+    if (sh(d) !== sh(cur) && (d.roofShape || 'flat') !== 'flat') {
+      const p = d.pitch || 0.3, n = Object.keys(d.cells).length; add(`屋根の形を${ROOF_SHAPES[d.roofShape]}に（傾き${Math.round(Math.atan(p) * 180 / Math.PI)}°）`, n, 'm²', ROOFS[d.roof].cost * Math.sqrt(1 + p * p) + 0.4, true);
+      const box = roofBox(d); let gw = 0; for (const o of outD) { const [t, r] = o.e.split(':'); const [ex, ey] = r.split(',').map(Number); const [a, b] = t === 'h' ? [[ex, ey], [ex + 1, ey]] : [[ex, ey], [ex, ey + 1]]; gw += (roofZ(d, ...a, box) + roofZ(d, ...b, box)) / 2 - HOUSE_H; }
+      if (gw > 0.05) add('屋根の下の壁（妻壁）', Math.round(gw * 10) / 10, 'm²', WALLS[d.wall].cost, true);
+    } }
   add('屋根の太陽光パネル', Math.max(0, d.pv - cur.pv), '枚', PV_PRICE, false);
   add('蓄電池', Math.max(0, d.batt - cur.batt), '台', BATT_PRICE, false);
   if (d.stove && !cur.stove) add('薪のかまど（煙突つき）', 1, 'つ', STOVE_PRICE, true);
@@ -909,7 +946,7 @@ export function houseModel(site, hs, n = 1) {
   const MASS = [{ eta: 0.5, damp: 0.3, name: '軽い' }, { eta: 0.7, damp: 0.5, name: 'ふつう' }, { eta: 0.85, damp: 0.7, name: '重い' }, { eta: 0.92, damp: 0.82, name: 'とても重い' }];
   return {
     A, V, UA, parts, wallNet: wallA, uWall: Wm.u, roofA: A, uRoof: R.u, absorb: R.absorb,
-    Aw, winFactor: Aw ? winGain / Aw : 0, mass: MASS[massLv], massLv, eavesShade: hs.eaves ? 0.6 : 0, rainGuard: hs.eaves ? 0.9 : 0,
+    Aw, winFactor: Aw ? winGain / Aw : 0, mass: MASS[massLv], massLv, eavesShade: Math.min(0.8, Math.max(0, eavesDepth(hs) - 0.16) * 0.9), rainGuard: Math.min(0.95, Math.max(0, eavesDepth(hs) - 0.16) * 1.4),
     ventAch: 2 + 40 * Math.min(0.3, Aw / Math.max(1, A)),
     // 結露：断熱していないトタン屋根の裏（冷えた夜に湿気が水滴になる）と、1枚ガラスの窓（寒い土地）
     condenseProne: hs.roof === 'tin', singleWin: wins ? single / wins : 0,

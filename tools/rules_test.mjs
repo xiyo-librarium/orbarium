@@ -91,4 +91,18 @@ check('林の落ち葉で炭素が足りる', S.compost.buy < 0.01);
   check('タンクは動かせる（手間賃だけ）', !W.moveBlock(s8, [bay[0], bay[1] + 1, tz], to) && !!W.at(w8, ...to) && cash - s8.cash < 0.5);
   check('畑は動かせない', !!W.moveBlock(s8, [0, 0, 0], to) || true);
 }
+// 屋根の形・軒の出：片流れは下がる側の軒にしか雨が落ちない。軒を伸ばすと屋根が広がる
+{
+  const s9 = E.newGame({ seed: 13 }), w9 = s9.world, hs = w9.house;
+  const hc = Object.keys(hs.cells).map(k => k.split(',').map(Number)), xs = hc.map(c => c[0]), ys = hc.map(c => c[1]);
+  let t = null, dir = null; for (const [x, y, d] of [[Math.max(...xs) + 1, Math.min(...ys), 'e'], [Math.min(...xs) - 1, Math.min(...ys), 'w'], [Math.min(...xs), Math.max(...ys) + 1, 's'], [Math.min(...xs), Math.min(...ys) - 1, 'n']]) { if (!W.put(s9, x, y, W.h(w9, x, y), 'tank', 'hire')) { t = [x, y]; dir = d; break; } }
+  const A0 = E.summarize(s9).A;
+  const d0 = W.cloneHouse(hs); d0.gutter = true; W.buildHouse(s9, d0); const A0g = E.summarize(s9).A; const d1 = W.cloneHouse(w9.house); d1.eaves = 1.2; W.buildHouse(s9, d1); const A1 = E.summarize(s9).A;
+  check(`軒を伸ばすと（雨樋つきの）屋根が広がる（${A0g.roofCatch.toFixed(1)}→${A1.roofCatch.toFixed(1)}m²）`, A1.roofCatch > A0g.roofCatch);
+  const opp = { e: 'w', w: 'e', n: 's', s: 'n' }[dir];
+  const d2 = W.cloneHouse(w9.house); d2.roofShape = 'mono'; d2.roofDir = dir; d2.pitch = 0.3; W.buildHouse(s9, d2); const A2 = E.summarize(s9).A;
+  const d3 = W.cloneHouse(w9.house); d3.roofDir = opp; W.buildHouse(s9, d3); const A3 = E.summarize(s9).A;
+  check(`片流れ：タンク側へ下げると雨が入り、反対へ下げると入らない（${A2.fedTanks}つ／${A3.fedTanks}つ）`, A2.fedTanks >= 1 && A3.fedTanks === 0);
+  check(`片流れの雨樋は下がる軒だけ（${W.housePerimeter(w9.house)}m／外周${W.houseOuterEdges(w9.house).length}m）`, W.housePerimeter(w9.house) < W.houseOuterEdges(w9.house).length);
+}
 console.log(ok.map(x => '  ✓ ' + x).join('\n')); if (ng.length) { console.log(ng.map(x => '  ✗ ' + x).join('\n')); process.exit(1); }
