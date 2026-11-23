@@ -82,7 +82,7 @@ async function boot() {
   const cs = Object.keys(w0.house.cells).map(k => k.split(',').map(Number)), xs = cs.map(c => c[0]), ys = cs.map(c => c[1]);
   try { const bxx = Math.min(...xs) - 1, byy = Math.max(...ys) + 3; W.prefabBeds(s, [bxx, byy], [bxx + 6, byy + 3], 'hire'); } catch { /* 置けなければなし */ }
   }
-  const persist = () => { if (MODE !== 'play') return; try { localStorage.setItem(SAVE, E.save(s)); } catch { /* 保存できない */ } };
+  const persist = () => { if (MODE !== 'play' || G.edit) return; try { localStorage.setItem(SAVE, E.save(s)); } catch { /* 保存できない */ } };
 
   const P = PALETTES[SITE] || PALETTES.med, N = W.N;
   const v = createView($('#c'), { keep: Q.has('shot') });
@@ -123,23 +123,46 @@ async function boot() {
   const snap = () => JSON.stringify({ world: s.world, cash: s.cash });
   const restore = (j) => { const o = JSON.parse(j); s.world = o.world; s.cash = o.cash; };
   const syncTop = () => {
-    $('#cash').textContent = `${innerWidth > 640 ? '所持金 ' : ''}${innerWidth > 640 ? yen(s.cash) : Math.round(s.cash) + '万円'}`;
-    $('#undo').disabled = !G.undo.length && !G.draft; $('#redo').disabled = !G.redo.length;
+    const wide = innerWidth > 640, c0 = G.edit ? G.edit.cash0 : s.cash, pend = G.edit && Math.abs(c0 - s.cash) > 0.05;   // 編集中は「今 → 決めたら」
+    $('#cash').textContent = wide ? `所持金 ${yen(c0)}${pend ? ` → ${yen(s.cash)}` : ''}` : `${Math.round(c0)}${pend ? `→${Math.round(s.cash)}` : ''}万円`;
+    $('#undo').disabled = !G.undo.length; $('#redo').disabled = !G.redo.length;
   };
-  const changed = () => { stage.rebuild(); syncTop(); if (G.sel) { if (!selExists(G.sel)) select(null); else renderCard(); } };
+  const changed = () => { stage.rebuild(); syncTop(); if (G.sel) { if (!selExists(G.sel)) select(null); else renderCard(); } renderEditBar(); };
   // 変える：失敗したら元に戻して理由を出す。成功したら取り消しに積む
   const act = (fn, okMsg) => {
+    const began = !G.edit; beginEdit();
     const before = snap(), cash0 = s.cash; let err;
     try { err = fn(); } catch (e) { console.error(e); err = 'うまくいかなかった'; }
-    if (err) { restore(before); stage.rebuild(); syncTop(); toast(err); return err; }
+    if (err) { restore(before); if (began) quitEdit(); stage.rebuild(); syncTop(); toast(err); return err; }
     G.undo.push(before); if (G.undo.length > 60) G.undo.shift(); G.redo = [];
     changed(); persist();
     const spent = cash0 - s.cash;
     if (okMsg) toast(typeof okMsg === 'function' ? okMsg(spent) : okMsg + (Math.abs(spent) > 0.05 ? `（${spent > 0 ? '−' : '+'}${yen(Math.abs(spent))}）` : ''));
     return null;
   };
-  $('#undo').onclick = () => { if (G.draft) { setDraft(null); toast('下書きをやめた'); return; } if (!G.undo.length) return; G.redo.push(snap()); restore(G.undo.pop()); changed(); persist(); toast('取り消した'); };
-  $('#redo').onclick = () => { if (!G.redo.length) return; G.undo.push(snap()); restore(G.redo.pop()); changed(); persist(); toast('やり直した'); };
+  $('#undo').onclick = () => {
+    if (!G.undo.length) return; G.redo.push(snap()); restore(G.undo.pop());
+    if (G.edit && G.undo.length <= G.edit.undoLen) quitEdit();   // 編集の始めまで戻った：何も変えていない
+    changed(); persist(); toast('取り消した');
+  };
+  $('#redo').onclick = () => { if (!G.redo.length) return; beginEdit(); G.undo.push(snap()); restore(G.redo.pop()); changed(); persist(); toast('やり直した'); };
+
+  /* ---------- 編集：何か変えた時点で編集中。変えた物はすぐ本物で見えるが、［決める］までは確定しない（お金もまとめて払う） ---------- */
+  function beginEdit() { if (G.edit) return; G.edit = { base: snap(), cash0: s.cash, undoLen: G.undo.length, f0: flowsNow() }; document.body.classList.add('editing'); }
+  function quitEdit() { G.edit = null; document.body.classList.remove('editing'); $('#draft').hidden = true; }
+  function endEdit(keep) {
+    const e = G.edit; if (!e) return;
+    if (keep) { const spent = e.cash0 - s.cash; G.undo.length = Math.min(G.undo.length, e.undoLen); G.undo.push(e.base); G.redo = []; quitEdit(); persist(); toast(Math.abs(spent) < 0.05 ? '決めた' : `決めた（${spent > 0 ? '−' : '+'}${yen(Math.abs(spent))}）`); }
+    else { restore(e.base); G.undo.length = Math.min(G.undo.length, e.undoLen); G.redo = []; quitEdit(); toast('編集前に戻した'); }
+    changed(); refreshPanels();
+  }
+  const flowChips = (A, B) => flowDelta(A, B).map(x => x.html).join('');
+  function renderEditBar() {
+    const e = G.edit; if (!e) { $('#draft').hidden = true; return; }
+    const cost = e.cash0 - s.cash;
+    $('#draftTxt').innerHTML = `<b class="ecost ${cost > 0.05 ? 'pay' : ''}">${Math.abs(cost) < 0.05 ? '±0円' : (cost > 0 ? '−' : '+') + yen(Math.abs(cost))}</b><span class="flowline">${flowChips(e.f0, flowsNow())}</span>`;
+    $('#draft').hidden = false;
+  }
   addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); (e.shiftKey ? $('#redo') : $('#undo')).click(); } if (e.key === 'Escape') { if (G.draft) setDraft(null); else { setTool(null); select(null); } } if (e.key === 'Enter' && G.draft) $('#draftYes').click(); });
 
   /* ---------- 壁を下げて中を見る ---------- */
@@ -233,7 +256,7 @@ async function boot() {
     cells.slice(0, 900).forEach(([x, y], i) => { m.makeTranslation(x + 0.5, Math.max(stage.at(x + 0.5, y + 0.5), W.h(w, x, y)) + 0.08, y + 0.5); prev.setMatrixAt(i, m); prev.setColorAt(i, W.buildingAt(w, x, y) ? COL.bad : col); });
     prev.instanceMatrix.needsUpdate = true; if (prev.instanceColor) prev.instanceColor.needsUpdate = true; v.req();
     const { xa, xb, ya, yb } = rectCells(tr);
-    tip(G.tool === 'tree' ? `${cells.length}本 · 離すと下書き` : `${xb - xa + 1}×${yb - ya + 1}m · 離すと下書き`, e.clientX, e.clientY);
+    tip(G.tool === 'tree' ? `${cells.length}本` : `${xb - xa + 1}×${yb - ya + 1}m`, e.clientX, e.clientY);
   }
   /* ---------- 流れの予告：1年を試しに過ごして、今とくらべる ---------- */
   // 建てる時に一度だけ払うお金は数えない（毎年の流れだけをくらべる）
@@ -261,9 +284,9 @@ async function boot() {
   const flowHTML = (A, B) => { const d = flowDelta(A, B); return d.length ? `<span class="flowline">1年で：${d.map(x => x.html).join('')}</span>` : '<span class="flowline">流れはほとんど変わらない</span>'; };
   const flowText = (A, B) => { const d = flowDelta(A, B, 3); return d.length ? ' · 1年で ' + d.map(x => x.text).join('、') : ''; };
   // すぐ置く物（タンク・木1本・小屋1つ）：置いたら1年の流れの変わり方を出す
-  const actFlow = (fn, label) => { const A = flowsNow(); return act(fn, (spent) => `${label}${spent >= 0.05 ? `（−${yen(spent)}）` : ''}${flowText(A, yearFlows(s))}`); };
+  const actFlow = (fn, label) => act(fn, label);   // 値段と1年の流れは下の帯に出る
 
-  /* ---------- 下書き：なぞっただけでは置かない。写しの世界で試しに置いて模型で見せ、［建てる］で本物に ---------- */
+  /* ---------- 写しの世界：なぞっている間の値段の予告や、選択肢の値段に使う ---------- */
   const scratch = () => ({ ...s, world: JSON.parse(JSON.stringify(s.world)), cash: s.cash });
   // dr = { what, apply(t) → 理由 or null, house?: {d, hideId}, cuts?, land?: 地形が変わるか, real?: 模型でなく本物の見た目, note?, ok? }
   function setDraft(dr) {
@@ -281,38 +304,19 @@ async function boot() {
     $('#draftYes').disabled = !!err; $('#draftYes').textContent = dr.ok || '建てる';
     $('#draft').hidden = false; document.body.classList.add('drafting'); syncTop();
   }
-  /* ---------- 改築の下書き：建物のカード・壁・家具の変更は、まず下書き（本物の見た目で描く）。［改築する］で初めて払う ---------- */
-  const remodelOf = (id) => (G.draft && G.draft.kind === 'remodel' && G.draft.rid === id ? G.draft : null);
-  const bOf = (id) => remodelOf(id)?.house.d || W.buildingById(s.world, id);
-  function remodelDraft(id, d) {
-    const cur = W.buildingById(s.world, id), est = W.estimate(s.world, cur, d), name = id === 'main' ? '母屋' : '建物';
-    const what = est.lines.length ? est.lines.slice(0, 3).map(l => l.label).join('・') + (est.lines.length > 3 ? ` ほか${est.lines.length - 3}件` : '') : '模様替え';
-    return { kind: 'remodel', rid: id, what: `${name}の改築：${what}`, house: { d, hideId: id }, real: true, cuts: [], ok: '改築する', done: `${name}を改築した`,
-      note: '試しているあいだはお金はかからない。［改築する］で払う。［やめる］で元どおり',
-      apply: (t) => { const err = W.buildBuilding(t, W.cloneHouse(d)); if (err) return err; return autoGutter(t); } };
-  }
+  /* ---------- 建物の変更（カード・壁・家具）も、ほかと同じく編集の中で ---------- */
+  const remodelOf = () => null;
+  const bOf = (id) => W.buildingById(s.world, id);
   const refreshPanels = () => { if (G.sel) renderCard(); if (PK) renderPick(); if (FS) renderFurn(); };
-  function remodel(id, fn) {
-    const base = bOf(id); if (!base) return 'その建物がない';
-    if (G.draft && !remodelOf(id)) { const was = G.draft.what; setDraft(null); toast(`下書き（${was}）をやめて、こちらを試す`); }
-    const d = W.cloneHouse(base), err = fn(d); if (err) { toast(err); return err; }
-    if (JSON.stringify(d) === JSON.stringify(W.buildingById(s.world, id))) setDraft(null);   // 元どおりに戻したら下書きは消える
-    else setDraft(remodelDraft(id, d));
-    refreshPanels(); return null;
+  // 建物を変える（カード・壁・家具）：写しを変えて建て直す。編集の中で
+  function remodel(id, fn, msg = null) {
+    const r = act(() => { const b = W.buildingById(s.world, id); if (!b) return 'その建物がない'; const d = W.cloneHouse(b); const e = fn(d); if (e) return e; return W.buildBuilding(s, d); }, msg);
+    refreshPanels(); return r;
   }
-  // お金のかからない変更（家具を動かす・回す）：下書きがあれば下書きに、なければその場で
-  function freeEdit(id, fn, msg) {
-    if (remodelOf(id)) return remodel(id, fn);
-    return act(() => { const d = W.cloneHouse(W.buildingById(s.world, id)); const e = fn(d); if (e) return e; return W.buildBuilding(s, d); }, msg);
-  }
-  $('#draftNo').onclick = () => { const r = G.draft?.kind === 'remodel'; setDraft(null); if (r) { refreshPanels(); toast('改築の下書きをやめた（元どおり）'); } };
-  $('#draftYes').onclick = () => {
-    const D = G.draft; if (!D || D.err) return;
-    const t = scratch(); const err = D.apply(t); if (err) { toast(err); return; }
-    setDraft(null);
-    act(() => { s.world = t.world; s.cash = t.cash; return null; }, D.done || '置いた');
-    if (D.kind === 'remodel') refreshPanels();
-  };
+  const freeEdit = (id, fn, msg) => remodel(id, fn, msg);
+  $('#draftNo').onclick = () => endEdit(false);
+  $('#draftYes').onclick = () => endEdit(true);
+
 
   /* 家の下書き */
   function houseDraft(d, base, cuts) {
@@ -334,7 +338,7 @@ async function boot() {
     const r = W.draftAddRect(t.world, d, D.xa, D.ya, D.xb, D.yb);
     if (!r.added) { toast('床を描けない（' + Object.keys(r.why).join('・') + '）'); return; }
     if (!D.base) { if (Object.keys(d.cells).length < 4) { toast('床は4m²（2×2m）より広く'); return; } autoOpen(d); }
-    setDraft(houseDraft(d, D.base ? W.bid(D.base) : null, cuts));
+    const dr = houseDraft(d, D.base ? W.bid(D.base) : null, cuts); act(() => dr.apply(s), D.base ? '広げた' : '建てた');
   }
   // 下書きの壁を押す：その場に選択肢
   function draftWallTap(p) {
@@ -485,7 +489,7 @@ async function boot() {
     }
     let moved = [];
     const e0 = PK.e; remodel(PK.id, (d) => { const err = W.draftSetOpening(d, e0, t); if (err) return err; moved = W.settleFurn(d).moved; return null; });
-    toast(`${name}にしてみた${moved.length ? `。${moved.join('・')}をよけた` : ''}（下の［改築する］で決まる）`);
+    if (moved.length) toast(`${moved.join('・')}をよけた`);
   };
 
   /* ---------- 家具：壁を下げているときに、押すと選ぶ（回す・種類）、引きずると動く ---------- */
@@ -605,11 +609,11 @@ async function boot() {
     if (!g) return;
     const { x, y } = cellOf(g), w = s.world, before = catchM3(), A = flowsNow(), z0 = W.h(w, x, y);
     act(() => { const err = W.put(s, x, y, W.h(w, x, y), 'tank', 'hire'); if (err) return err; return autoGutter(); },
-      (spent) => {
+      () => {
         const d = catchM3() - before, A2 = W.analyze(s.world, site(), s.persons.length), t = W.blocksOf(s.world, 'tank').find(o => o.x === x && o.y === y && o.z === z0);
-        if (d > 0) return `タンクを置いた。屋根の雨が年 +${d}m³ 集まる（−${yen(spent)}）${flowText(A, yearFlows(s))}`;
-        if (t && A2.fedKeys.includes(`${t.x},${t.y},${t.z}`)) return `タンクを置いた（−${yen(spent)}）。雨が入る。屋根の雨はもう集まっているので、ためられる量が1m³ふえる（雨の多い季節にあふれにくい）`;
-        return `タンクを置いた（−${yen(spent)}）。雨が入らない：${t ? tankWhy(t, A2) : ''}`;
+        if (d > 0) return `タンク：屋根の雨 +${d}m³/年`;
+        if (t && A2.fedKeys.includes(`${t.x},${t.y},${t.z}`)) return 'タンク：ためられる量 +1m³';
+        return `雨が入らない：${t ? tankWhy(t, A2) : ''}`;
       });
   }
 
@@ -821,7 +825,7 @@ async function boot() {
     if (G.tool === 'erase') { erase(p); return; }
     if (G.tool === 'field') {
       if (p && p.kind === 'beds') { const q = cellOf(p.point), b = bedAt(s.world, q.x, q.y); if (b) { cycleBeds([[q.x, q.y]], bedState(b)); return; } }
-      if (one) setDraft(rectDraft(one)); return;
+      if (one) { const dr = rectDraft(one); if (dr) act(() => dr.apply(s), dr.done); } return;
     }
     if (G.tool === 'tree') {
       if (p && p.kind === 'trees') { select(p); return; }
@@ -831,21 +835,21 @@ async function boot() {
     if (G.tool === 'shed' && sub === 'coop') {
       if (!c) return; actFlow(() => { const e2 = vegCut(s, c.x, c.y); if (e2) return e2; return W.put(s, c.x, c.y, W.h(s.world, c.x, c.y), 'coop', 'hire'); }, 'ニワトリ小屋を置いた'); return;
     }
-    if (G.tool && one) { const dr = rectDraft(one); if (dr) { setDraft(dr); return; } }
+    if (G.tool && one) { const dr = rectDraft(one); if (dr) { act(() => dr.apply(s), dr.done); return; } }
     select(p);
   }
   // なぞり終わり：道具ごとに下書きへ
   function traced(tr) {
     if (G.tool === 'house') { makeHouseDraft(tr); return; }
     if (G.tool === 'field') { const b = bedAt(s.world, tr.a.x, tr.a.y); if (b) { cycleBeds(rectCells(tr).out, bedState(b)); return; } }
-    if (G.tool === 'tree') { setDraft(treeDraft(tr)); return; }
-    const dr = rectDraft(tr); if (dr) setDraft(dr);
+    if (G.tool === 'tree') { const dt = treeDraft(tr); if (dt) act(() => dt.apply(s), dt.done); return; }
+    const dr = rectDraft(tr); if (dr) act(() => dr.apply(s), dr.done);
   }
 
   /* ---------- 季節を過ごす：3か月を進め、報告を出す ---------- */
   const seasonLabel = () => { const q = E.SITES[s.site].quarters[s.q]; $('#season').textContent = `${q.split('・')[0]}を過ごす`; $('#where').textContent = innerWidth > 640 ? `${S.name} · ${E.SITES[s.site].quarters[s.q]}` : S.name; };
   function runSeason() {
-    if (G.draft) setDraft(null);
+    if (G.edit) { toast('✓決める か ✕ のあとで'); return; }
     const before = E.clone(s);
     const { state, report } = E.advance(s);
     let ns = state; const lessons = [];

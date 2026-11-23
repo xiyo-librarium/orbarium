@@ -244,3 +244,15 @@ body.carded.remodel #draft { display: none; }
 .card .flow.remodel .bad { color: var(--bad); }
 @media (max-width: 640px) { body.drafting .pick { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 84px + 100px); } }
 .card .flow.remodel { position: sticky; top: -14px; z-index: 2; box-shadow: 0 6px 14px rgba(30, 40, 35, .08); }
+
+/* 編集中：画面のふちに色、所持金は仮の色、季節は隠す。下の帯は［✕］値段と流れ［✓ 決める］だけ */
+body.editing::after { content: ''; position: fixed; inset: 0; border: 3px solid rgba(214, 160, 62, .85); pointer-events: none; z-index: 4; }
+body.editing #cash { background: #FFF1D3; border-color: rgba(214, 160, 62, .6); }
+body.editing #season { display: none; }
+.draftbar.editbar { gap: 10px; padding: 7px 8px; border-color: rgba(214, 160, 62, .7); }
+.editbar #draftTxt { flex: 1; display: flex; align-items: center; gap: 4px 12px; flex-wrap: wrap; font-size: 12.5px; min-width: 0; }
+.editbar .ecost { font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; } .editbar .ecost.pay { color: #8A5E22; }
+.editbar button.no { width: 38px; height: 38px; padding: 0; border-radius: 50%; font-size: 16px; flex-shrink: 0; }
+.editbar button.yes { flex-shrink: 0; padding: 9px 16px; }
+@media (max-width: 640px) { .draftbar.editbar { flex-direction: row; align-items: center; } }
+@media (max-width: 640px) { body.editing .card, body.editing .pick { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 84px + 62px); } }
