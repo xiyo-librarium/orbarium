@@ -6,7 +6,7 @@
 公開先: https://orbarium.x1y0.net
 
 - 本番（/）は作り直した版（中身は public/next/ にあり、/next/ でも同じものが動く。下の「作り直し」の節）
-- 前の版は /classic/ に残す（public/classic/index.html が /js/app.js を読む。保存のキーは別）。下の「前の版の中身」はそちらの説明
+- 前の版は /classic/ に残す（画面からのリンクはなく、検索にも出さない。public/classic/index.html が /js/app.js を読む。保存のキーは別）。下の「前の版の中身」はそちらの説明
 
 ## 前の版の中身（/classic/）
 - 地形は1mのキューブ（等高線の1mごと＝1段）

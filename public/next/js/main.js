@@ -213,7 +213,7 @@ async function boot() {
   }
   function setHint() {
     const h = $('#hint');
-    if (G.mode === 'map') { h.innerHTML = `寄りたい所を押す · <a href="/classic/">前の版</a>`; return; }
+    if (G.mode === 'map') { h.innerHTML = `寄りたい所を押す`; return; }
     const T = G.tool && TOOLS.find(t => t.id === G.tool);
     if (!T) { h.textContent = stage.cut ? HINT_CUT : HINT_NEAR; return; }
     h.textContent = (T.hints ? T.hints[G.sub[T.id]] : T.hint) + (traces(T.id) ? (TOUCH ? '（回すのは2本指）' : '（回すのは右ボタン）') : '');
@@ -1185,7 +1185,7 @@ async function bootGlobe(mode = 'title') {
     const card = document.createElement('div'); card.className = 'title-card';
     card.innerHTML = `<h1>Orbarium</h1><p>本物の土地で、水・食べもの・エネルギー・お金をめぐらせる</p>
       <div class="btns">${saved ? `<button class="yes" id="cont">つづきから（${saved.year}年・${BK.esc(E.SITES[saved.site].name)}）</button>` : ''}<button class="${saved ? '' : 'yes'}" id="newg">はじめから</button><button id="atl">地球儀で学ぶ</button></div>
-      <p class="src">地形・気候・植生は実在の場所のデータ（標高：AWS Terrain Tiles／気候：Open-Meteo／植生：© ESA WorldCover／建物と道：© OpenStreetMap contributors） · <a href="/classic/">前の版</a></p>`;
+      <p class="src">地形・気候・植生は実在の場所のデータ（標高：AWS Terrain Tiles／気候：Open-Meteo／植生：© ESA WorldCover／建物と道：© OpenStreetMap contributors）</p>`;
     document.body.appendChild(card); hint.textContent = '';
     if (saved) $('#cont').onclick = () => { location.href = `${BASE}?play`; };
     $('#atl').onclick = () => { location.href = `${BASE}?globe=atlas`; };
