@@ -296,3 +296,10 @@ body.replaying .bottom, body.replaying .card, body.replaying .pick { opacity: 0;
 .rooms { display: flex; flex-wrap: wrap; gap: 4px; }
 .rooms i { font-style: normal; border: 1px solid var(--line); border-radius: 8px; padding: 2px 7px; font-size: 12px; color: var(--sub); }
 .rooms i b { color: var(--ink); font-weight: 600; } .rooms i em { font-style: normal; margin-left: 4px; color: #8A6A44; letter-spacing: 1px; }
+
+/* 机の地球儀（試験中：?look=desk）：暗い背景、横長ではカードを右に。寄りきったら行き先を中心に丸く閉じる */
+body.desk #where { background: rgba(255, 255, 255, .1); color: #E8E6DF; border-color: rgba(255, 255, 255, .14); }
+body.deskwide .title-card { left: auto; right: max(4vw, 24px); bottom: auto; top: 50%; transform: translateY(-50%); width: min(400px, 34vw); text-align: left; padding: 28px 28px 22px; }
+body.deskwide .title-card .btns { justify-content: flex-start; }
+.iris { position: fixed; z-index: 60; width: 300vmax; height: 300vmax; transform: translate(-50%, -50%); border-radius: 50%; box-shadow: 0 0 0 300vmax #1C2123; pointer-events: none; transition: width .7s cubic-bezier(.6, 0, .4, 1), height .7s cubic-bezier(.6, 0, .4, 1); }
+.iris.on { width: 0; height: 0; }

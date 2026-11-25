@@ -1148,7 +1148,10 @@ async function boot() {
 async function bootGlobe(mode = 'title') {
   const rings = await (await fetch('/data/land110.json')).json();
   const v = createView($('#c'), { keep: Q.has('shot') });
-  v.setPalette({ ...PALETTES.med, sky: ['#D9DEDB', '#EFEADF'] });
+  // 机の地球儀（試験中：&look=desk）。暗く沈んだ色から、めぐりができた土地が増えるほど明るく鮮やかに（&glow=0〜1 で上書き）
+  const DESK = Q.get('look') === 'desk';
+  v.setPalette({ ...PALETTES.med, sky: DESK ? ['#1C2123', '#2C3133'] : ['#D9DEDB', '#EFEADF'] });
+  if (DESK) document.body.classList.add('desk');
   v.scene.fog = null; v.scene.environmentIntensity = 0.45; v.ao.enabled = false; v.dof.enabled = false; v.sun.castShadow = false;
   for (const id of ['#cash', '#undo', '#redo', '#bookBtn', '#cut', '#toMap']) $(id).style.display = 'none';
   document.querySelector('.sun').style.display = 'none';
@@ -1170,16 +1173,37 @@ async function bootGlobe(mode = 'title') {
   if (mode === 'travel') pins.push({ ...at(toKey), main: true, color: PIN.lived, hidden: true, id: 'dest' });
   if (mode === 'atlas') { const read = atlasRead(); pins = pins.concat(ATLAS.map(a => ({ lat: a.lat, lon: a.lon, id: a.id, color: read.includes(a.id) ? PIN.read : PIN.unread }))); }
   const ss = subsolar(new Date()), sd = ll(ss.lat, ss.lon).normalize();
-  const globe = buildGlobe(rings, pins, route, { lived: LV, req: () => v.req(), sun: sd });
+  const GLOW = DESK ? (Q.has('glow') ? Math.max(0, Math.min(1, +Q.get('glow'))) : Math.min(1, LV.length / 5)) : 1;
+  if (DESK) v.setPalette({ ...PALETTES.med, sky: ['#' + new THREE.Color('#1C2123').lerp(new THREE.Color('#4A5250'), GLOW).getHexString(), '#' + new THREE.Color('#2C3133').lerp(new THREE.Color('#6B706A'), GLOW).getHexString()] });
+  const globe = buildGlobe(rings, pins, route, { lived: LV, req: () => v.req(), sun: sd, desk: DESK, glow: GLOW });
   v.scene.add(globe);
   const c = v.controls; c.enablePan = false; c.minDistance = 2.4; c.maxDistance = 7; c.minPolarAngle = 0.2; c.maxPolarAngle = Math.PI - 0.2; c.target.set(0, 0, 0); c.rotateSpeed = 0.5;
   v.camera.near = 0.05; v.camera.far = 50; v.camera.fov = 30; v.camera.updateProjectionMatrix();
   v.sun.position.copy(sd).multiplyScalar(10); v.sun.target.position.set(0, 0, 0); v.sun.color.set('#FFF1DE'); v.sun.intensity = 3.2;
   globe.userData.atm.material.uniforms.s.value.copy(sd);
-  const fit = () => { const a = v.camera.aspect || 1; return 1.3 / Math.tan(THREE.MathUtils.degToRad(v.camera.fov / 2)) / Math.min(1, a); };
+  // 机の地球儀：宇宙の太陽ではなく部屋の光。いつも見ている側の左上から、やわらかく。下には接地影
+  let gsh = null;
+  if (DESK) {
+    v.scene.environmentIntensity = 0.32 + 0.25 * GLOW; v.sun.intensity = 2.3 + 0.9 * GLOW; v.renderer.toneMappingExposure = 0.82 + 0.3 * GLOW; v.sun.color.set('#FFF3E4');
+    // 接地影：地球の少し下・少し奥に、こちらを向いた楕円の影（地球が手前を隠す）
+    const sc = document.createElement('canvas'); sc.width = sc.height = 128; const sx = sc.getContext('2d'), gr = sx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gr.addColorStop(0, 'rgba(0,0,0,.62)'); gr.addColorStop(0.55, 'rgba(0,0,0,.28)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); sx.fillStyle = gr; sx.fillRect(0, 0, 128, 128);
+    gsh = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(sc), transparent: true, depthWrite: false, opacity: 1 })); v.scene.add(gsh);
+    const r0 = v.render;
+    v.render = () => {
+      const cam = v.camera, up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion), rt = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion), back = cam.position.clone().sub(c.target).normalize();
+      v.sun.position.copy(c.target).add(back.clone().multiplyScalar(0.55).add(up.clone().multiplyScalar(0.75)).add(rt.multiplyScalar(-0.55)).normalize().multiplyScalar(10)); v.sun.target.position.copy(c.target);
+      gsh.position.copy(up).multiplyScalar(-1.08).addScaledVector(back, -0.5); gsh.scale.set(2.1, 0.32, 1);
+      r0();
+    };
+  }
+  const WIDE = () => DESK && (v.camera.aspect || 1) > 1.25;   // 横長の画面：地球を大きく、左へ寄せ、カードは右
+  const fit = () => { const a = v.camera.aspect || 1; return (WIDE() ? 1.2 : 1.3) / Math.tan(THREE.MathUtils.degToRad(v.camera.fov / 2)) / Math.min(1, a); };
+  let offX = 0.13;
   const look = (lat, lon, d = fit()) => { v.camera.position.copy(ll(lat, lon, 1).normalize().multiplyScalar(d)); v.camera.lookAt(0, 0, 0); c.update(); v.req(); };
   // 縦長の画面：下にカードが来るので、地球を少し上に寄せる
-  const lift = () => { const r = $('#c').getBoundingClientRect(), w = r.width, h = r.height; if (w / h < 0.8) v.camera.setViewOffset(w, h, 0, h * 0.15, w, h); else v.camera.clearViewOffset(); v.camera.updateProjectionMatrix(); v.req(); };
+  const lift = () => { const r = $('#c').getBoundingClientRect(), w = r.width, h = r.height; if (w / h < 0.8) v.camera.setViewOffset(w, h, 0, h * 0.15, w, h); else if (WIDE() && offX > 0.001) v.camera.setViewOffset(w, h, w * offX, 0, w, h); else v.camera.clearViewOffset(); v.camera.updateProjectionMatrix(); v.req(); };
+  if (DESK) document.body.classList.toggle('deskwide', (innerWidth / innerHeight) > 1.25);
   v.resize(); lift(); addEventListener('resize', () => setTimeout(lift, 0)); c.maxDistance = Math.max(7, fit() * 1.5);
   const hint = $('#hint');
   // 飛ぶ：大円にそって向きを移し、途中で少し引いて、最後に寄る
@@ -1195,6 +1219,35 @@ async function bootGlobe(mode = 'title') {
     };
     step();
   };
+  // 机の地球儀の寄り方：まず地球を回して行き先を正面に（引かない）。次に見る先を球の中心から行き先へ移しながら、
+  // 真上から土地の画面と同じ斜めの角度へ傾けて寄る。寄るほど行き先にピントが合い、まわりがぼける。最後は行き先を中心に丸く閉じる
+  const flyDesk = (A, B, ms, done) => {
+    const a = ll(A.lat, A.lon, 1).normalize(), b = ll(B.lat, B.lon, 1).normalize(), ang = Math.max(1e-4, a.angleTo(b)), d0 = v.camera.position.length(), t0 = performance.now(), T1 = ms * 0.55;
+    c.enabled = false; c.autoRotate = false; c.enableDamping = false; c.minDistance = 0.001; c.maxDistance = 100; c.minPolarAngle = 0; c.maxPolarAngle = Math.PI; v.camera.near = 0.004; v.camera.updateProjectionMatrix();   // 回す決まり（近さ・角度の制限）が寄るのを押し戻さないように
+    const P = b.clone(), east = new THREE.Vector3(0, 1, 0).cross(P).normalize(), north = P.clone().cross(east).normalize(), tilt = THREE.MathUtils.degToRad(50), dEnd = 0.3;
+    const endDir = P.clone().multiplyScalar(Math.cos(tilt)).addScaledVector(north, -Math.sin(tilt)).normalize(), off0 = offX;
+    const ease = (u) => u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+    const step = () => {
+      const t = performance.now() - t0;
+      if (t < T1) {
+        const e = ease(t / T1), dir = a.clone().multiplyScalar(Math.sin((1 - e) * ang)).add(b.clone().multiplyScalar(Math.sin(e * ang))).divideScalar(Math.sin(ang)).normalize();
+        v.camera.position.copy(dir.multiplyScalar(d0)); c.target.set(0, 0, 0); v.camera.lookAt(0, 0, 0);
+      } else {
+        const u = Math.min(1, (t - T1) / (ms - T1)), e = ease(u);
+        const tg = P.clone().multiplyScalar(e), od = P.clone().lerp(endDir, e).normalize(), r = d0 * Math.pow(dEnd / d0, e);
+        c.target.copy(tg); v.camera.position.copy(tg).addScaledVector(od, r); v.camera.lookAt(tg);
+        v.focusPoint = P; v.dof.enabled = e > 0.05; v.blur = 0.05 * e;
+        offX = off0 * (1 - e); lift(); if (gsh) gsh.material.opacity = 1 - Math.min(1, e * 2.5);
+      }
+      v.req(); if (t < ms) requestAnimationFrame(step); else done();
+    };
+    step();
+  };
+  const irisTo = (url, P) => {
+    const R = $('#c').getBoundingClientRect(), s2 = P.clone().project(v.camera), x = (s2.x + 1) / 2 * R.width, y = (1 - s2.y) / 2 * R.height;
+    const f = document.createElement('div'); f.className = 'iris'; f.style.left = x + 'px'; f.style.top = y + 'px'; document.body.appendChild(f);
+    requestAnimationFrame(() => requestAnimationFrame(() => f.classList.add('on'))); setTimeout(() => location.replace(url), 720);
+  };
   const fadeTo = (url) => { const f = document.createElement('div'); f.className = 'fade'; document.body.appendChild(f); requestAnimationFrame(() => f.classList.add('on')); setTimeout(() => location.replace(url), 650); };
   // 旅：出発地の上で、右上にメールの通知が届く。押すと画面の真ん中に広がって読める。［行く］で飛び、着いた所に虫ピンを刺す。
   // 着いた土地のデータは、読んでいるあいだに裏で取ってくる
@@ -1206,10 +1259,11 @@ async function bootGlobe(mode = 'title') {
     const go = () => {
       $('#where').textContent = `${E.SITES[from].name}から、${S2.name}へ`;
       globe.add(routeLine([E.SITES[from], S2])); v.req();
-      fly(E.SITES[from], S2, 3600, () => {
+      const out = () => DESK ? irisTo(url, ll(S2.lat, S2.lon, 1).normalize()) : fadeTo(url);
+      (DESK ? flyDesk : fly)(E.SITES[from], S2, Q.has('flyms') ? +Q.get('flyms') : DESK ? 4200 : 3600, () => {   // flyms：試験で動きを撮るときだけ長く
         $('#where').textContent = `${S2.name}・標高${S2.elev.toLocaleString()}m`;
         const dest = globe.userData.pins.find(m => m.userData.pin.id === 'dest');
-        if (dest) globe.userData.stick(dest, 700, () => setTimeout(() => fadeTo(url), 450)); else fadeTo(url);
+        if (dest) globe.userData.stick(dest, 700, () => setTimeout(out, 450)); else out();
       });
     };
     if (!mail) { setTimeout(go, 900); return; }
@@ -1274,7 +1328,7 @@ async function bootGlobe(mode = 'title') {
   } else {
     // はじまり：ゆっくり回る地球に題名。つづきから／はじめから／図鑑
     if (saved) look(E.SITES[saved.site].lat, E.SITES[saved.site].lon - 25); else look(28, 150); c.autoRotate = true; c.autoRotateSpeed = 0.35;
-    $('#where').textContent = '地球 · いまの太陽';
+    $('#where').textContent = DESK ? '地球' : '地球 · いまの太陽';
     const card = document.createElement('div'); card.className = 'title-card';
     card.innerHTML = `<h1>Orbarium</h1><p>本物の土地で、水・食べもの・エネルギー・お金をめぐらせる</p>
       <div class="btns">${saved ? `<button class="yes" id="cont">つづきから（${saved.year}年・${BK.esc(E.SITES[saved.site].name)}）</button>` : ''}<button class="${saved ? '' : 'yes'}" id="newg">はじめから</button><button id="atl">地球儀で学ぶ</button></div>

@@ -15,12 +15,12 @@ export function subsolar(date = new Date()) {
 }
 
 /* 海・陸・陸の型の3枚：海は浅瀬が少し明るい、陸は緯度で色を少し変えて極の氷をのせる。型は陸だけ白 */
-export function globeTextures(rings, W = 4096) {
+export function globeTextures(rings, W = 4096, desk = false) {
   const H = W / 2, X = (lon) => (lon + 180) / 360 * W, Y = (lat) => (90 - lat) / 180 * H;
   const canvas = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return [c, c.getContext('2d')]; };
   const path = (x, ring) => { x.beginPath(); ring.forEach(([lo, la], i) => { if (i && Math.abs(lo - ring[i - 1][0]) > 180) { x.moveTo(X(lo), Y(la)); return; } i ? x.lineTo(X(lo), Y(la)) : x.moveTo(X(lo), Y(la)); }); x.closePath(); };
   const [sc, sx] = canvas(); sx.fillStyle = '#6F9C9E'; sx.fillRect(0, 0, W, H);
-  sx.lineJoin = 'round'; sx.strokeStyle = 'rgba(140,186,182,.55)'; sx.lineWidth = W / 260; for (const r of rings) { path(sx, r); sx.stroke(); }
+  if (!desk) { sx.lineJoin = 'round'; sx.strokeStyle = 'rgba(140,186,182,.55)'; sx.lineWidth = W / 260; for (const r of rings) { path(sx, r); sx.stroke(); } }
   const [lc, lx] = canvas();
   const land = lx.createLinearGradient(0, 0, 0, H);
   land.addColorStop(0, '#B7BE9C'); land.addColorStop(0.3, '#9FAF78'); land.addColorStop(0.5, '#8FA76A'); land.addColorStop(0.7, '#9FAF78'); land.addColorStop(1, '#B7BE9C');
@@ -35,21 +35,26 @@ export function globeTextures(rings, W = 4096) {
 
 /* 住んだ所から色づく：はじめは紙のような灰色。住んだ所（lived：{lat, lon, years}）のまわりだけ本当の色に。
    住んだ年が長いほど広く（9°＋1年3°、28°まで）。ふちは少しにじませる */
-function colorize(m, lived, paper = '#E6E1D5', ref = 0.3) {
-  const L = lived.slice(0, 8), U = { uLP: { value: Array.from({ length: 8 }, (_, i) => { const q = L[i]; if (!q) return new THREE.Vector4(0, 0, 0, 0); const d = ll(q.lat, q.lon).normalize(), r = Math.min(28, 9 + 3 * (q.years || 0)) * Math.PI / 180; return new THREE.Vector4(d.x, d.y, d.z, r); }) }, uLN: { value: L.length }, uPaper: { value: new THREE.Color(paper) }, uRef: { value: ref } };
+function colorize(m, lived, paper = '#E6E1D5', ref = 0.3, glow = null) {
+  const L = lived.slice(0, 8), U = { uLP: { value: Array.from({ length: 8 }, (_, i) => { const q = L[i]; if (!q) return new THREE.Vector4(0, 0, 0, 0); const d = ll(q.lat, q.lon).normalize(), r = Math.min(28, 9 + 3 * (q.years || 0)) * Math.PI / 180; return new THREE.Vector4(d.x, d.y, d.z, r); }) }, uLN: { value: L.length }, uPaper: { value: new THREE.Color(paper) }, uRef: { value: ref }, uGlow: { value: glow ?? 1 }, uDesk: { value: glow == null ? 0 : 1 } };
   const prev = m.onBeforeCompile;
   m.onBeforeCompile = (sh, r) => {
     prev(sh, r); Object.assign(sh.uniforms, U);
-    sh.fragmentShader = 'uniform vec4 uLP[8]; uniform int uLN; uniform vec3 uPaper; uniform float uRef;\n' + sh.fragmentShader.replace('#include <alphamap_fragment>', `
+    sh.fragmentShader = 'uniform vec4 uLP[8]; uniform int uLN; uniform vec3 uPaper; uniform float uRef; uniform float uGlow; uniform float uDesk;\n' + sh.fragmentShader.replace('#include <alphamap_fragment>', `
       { vec3 gN = normalize(vWPos); float col = 0.0;
         for (int i = 0; i < 8; i++) { if (i >= uLN) break; float a = acos(clamp(dot(gN, uLP[i].xyz), -1.0, 1.0)) + 0.05 * (fbm(gN * 7.0) - 0.5);
           col = max(col, 1.0 - smoothstep(uLP[i].w * 0.55, uLP[i].w, a)); }
         float g = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
         vec3 mono = uPaper * clamp(0.82 + 0.35 * (g / uRef - 1.0), 0.6, 1.12);   // 紙の色に、もとの明るさの違い（浅瀬・氷）を少しだけ残す
-        diffuseColor.rgb = mix(mono, diffuseColor.rgb, col); }
+        vec3 real = diffuseColor.rgb;
+        if (uDesk > 0.5) {   // 机の地球儀：はじめは暗く沈んだ色。遊ぶほど明るく、住んだ所はいちばん鮮やかに
+          mono *= 0.34 + 0.66 * uGlow;
+          float rg = dot(real, vec3(0.299, 0.587, 0.114)); real = mix(vec3(rg), real, 0.55 + 0.45 * uGlow) * (0.62 + 0.38 * uGlow);
+        }
+        diffuseColor.rgb = mix(mono, real, col); }
       #include <alphamap_fragment>`);
   };
-  m.customProgramCacheKey = () => 'matte-globe-' + L.length;
+  m.customProgramCacheKey = () => 'matte-globe-' + L.length + (glow == null ? '' : '-desk');
   return m;
 }
 
@@ -95,11 +100,12 @@ function pinShadow(pin, sun) {
 }
 
 export function buildGlobe(rings, pins = [], route = null, opt = {}) {
-  const g = new THREE.Group(), T = globeTextures(rings), lived = opt.lived || [];
-  // 海：なめらかで少しつやがある。陸：紙粘土のようなつや消しで、海より少しだけ盛り上がる
-  const sea = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 64), colorize(matte({ vary: 0.03, freq: 5, rough: 0.42, spec: 0.8 }), lived, '#B4BCBC', 0.29));
+  const desk = !!opt.desk, glow = desk ? (opt.glow ?? 0) : null, g = new THREE.Group(), T = globeTextures(rings, 4096, desk), lived = opt.lived || [];
+  // 海：なめらかで少しつやがある。陸：紙粘土のようなつや消しで、海より少しだけ盛り上がる。
+  // 机の地球儀（試験中）：海も塗った紙のようなつや消しで、刷毛むらだけ。陸はもう少しでこぼこ
+  const sea = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 64), colorize(desk ? matte({ vary: 0.05, freq: 7, bump: 0.025, bumpFreq: 14, rough: 1, spec: 0.12 }) : matte({ vary: 0.03, freq: 5, rough: 0.42, spec: 0.8 }), lived, desk ? '#9FA7A6' : '#B4BCBC', 0.29, glow));
   sea.material.map = T.sea; sea.material.needsUpdate = true; g.add(sea);
-  const landM = colorize(matte({ vary: 0.09, freq: 11, bump: 0.16, bumpFreq: 26, rough: 1, spec: 0.35 }), lived, '#EAE5D8', 0.31);
+  const landM = colorize(matte({ vary: 0.09, freq: 11, bump: desk ? 0.28 : 0.16, bumpFreq: 26, rough: 1, spec: desk ? 0.2 : 0.35 }), lived, '#EAE5D8', 0.31, glow);
   landM.map = T.land; landM.alphaMap = T.mask; landM.alphaTest = 0.5; landM.needsUpdate = true;
   const landMesh = new THREE.Mesh(new THREE.SphereGeometry(1.0045, 192, 96), landM); g.add(landMesh);
   g.userData.earth = sea;
@@ -109,7 +115,7 @@ export function buildGlobe(rings, pins = [], route = null, opt = {}) {
     vertexShader: 'varying vec3 vN; varying vec3 vW; void main(){ vN = normalize(normalMatrix * normal); vW = normalize((modelMatrix * vec4(position,1.0)).xyz); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
     fragmentShader: 'uniform vec3 c; uniform vec3 s; varying vec3 vN; varying vec3 vW; void main(){ float f = pow(1.0 - abs(vN.z), 2.2); float day = smoothstep(-0.35, 0.4, dot(vW, normalize(s))); gl_FragColor = vec4(c * f * (0.25 + 0.9 * day), f * 0.8); }'
   }));
-  g.add(atm); g.userData.atm = atm;
+  g.add(atm); g.userData.atm = atm; atm.visible = !desk;   // 机の地球儀には大気の光る縁はない
   // 印：虫ピン。g.userData.pins に覚えておき、刺す動き（stick）に使う
   g.userData.pins = pins.map(p => { const m = insectPin(p, p.hidden ? 1.35 : 1); m.visible = !p.hidden; g.add(m); const sh = pinShadow(m, opt.sun); sh.visible = !p.hidden; m.userData.shadow = sh; g.add(sh); return m; });
   g.userData.stick = (pin, ms = 650, done) => {   // 上から刺さる
