@@ -133,6 +133,24 @@ export function buildHouse(hs, P, at, opt = {}) {
     sm.castShadow = sm.receiveShadow = true; group.add(sm);
   }
 
+  // 間仕切り（家の中の壁）：壁を下げた見え方のときだけ。薄い漆喰の壁を腰の高さで切る。中の扉は開口と枠だけ
+  if (cut) {
+    const TI = 0.1, inMat = matte({ color: P.lime, vary: 0.04, freq: 1.5, bump: 0.15, bumpFreq: 3 });
+    const inner = hs.inner || {}, isW = (k) => inner[k] === 'wall';
+    for (const k in inner) {
+      const [t2, r] = k.split(':'), [ex, ey] = r.split(',').map(Number), along = t2 === 'h';
+      const cx = along ? ex + 0.5 : ex, cy = along ? ey : ey + 0.5;
+      if (inner[k] === 'wall') {
+        // 線のつづきが間仕切りなら端まで、そうでなければ外壁や角とすき間なく少し長く
+        const nA = along ? isW(`h:${ex - 1},${ey}`) : isW(`v:${ex},${ey - 1}`), nB = along ? isW(`h:${ex + 1},${ey}`) : isW(`v:${ex},${ey + 1}`);
+        const a = nA ? -0.5 : -0.5 - TI / 2, b = nB ? 0.5 : 0.5 + TI / 2, L = b - a, m = (a + b) / 2;
+        box(inMat, cx + (along ? m : 0), cy + (along ? 0 : m), z + CUT / 2, along ? L : TI, along ? TI : L, CUT);
+      } else {   // 中の扉：両わきの柱と敷居
+        for (const s2 of [-1, 1]) box(woodMat, cx + (along ? s2 * 0.46 : 0), cy + (along ? 0 : s2 * 0.46), z + CUT / 2, along ? 0.08 : TI + 0.02, along ? TI + 0.02 : 0.08, CUT);
+        box(woodMat, cx, cy, z + 0.01, along ? 0.86 : TI + 0.04, along ? TI + 0.04 : 0.86, 0.02);
+      }
+    }
+  }
   // 屋根（壁を下げた見え方では、屋根の代わりに家具）
   if (cut) furniture(); else roof();
   // 家具：寝台・食卓・トイレ・シャワー・かまど。中が見えたときだけ
@@ -144,7 +162,7 @@ export function buildHouse(hs, P, at, opt = {}) {
       const cs = furnCells(f), xs = cs.map(c => c[0]), ys = cs.map(c => c[1]);
       const X0 = Math.min(...xs), X1 = Math.max(...xs) + 1, Y0 = Math.min(...ys), Y1 = Math.max(...ys) + 1;
       // 壁ぎわの辺は、壁の厚み（内へ 0.1m）とすき間のぶん内側へ寄せ、形もそのぶん縮める
-      const wall = (dx, dy) => cs.some(([x, y]) => !has(x + dx, y + dy)), G = T / 2 + 0.04, g0 = 0.02;
+      const wall = (dx, dy) => cs.some(([x, y]) => !has(x + dx, y + dy) || (hs.inner || {})[dx === 1 ? `v:${x + 1},${y}` : dx === -1 ? `v:${x},${y}` : dy === 1 ? `h:${x},${y + 1}` : `h:${x},${y}`] === 'wall'), G = T / 2 + 0.04, g0 = 0.02;
       const iw = wall(-1, 0) ? G : g0, ie = wall(1, 0) ? G : g0, inn = wall(0, -1) ? G : g0, is = wall(0, 1) ? G : g0;
       const mx = (X0 + iw + X1 - ie) / 2, my = (Y0 + inn + Y1 - is) / 2, kx = (X1 - X0 - iw - ie) / (X1 - X0), ky = (Y1 - Y0 - inn - is) / (Y1 - Y0);
       const fb = (mat, dx, dy, z0, sx, sy, sz) => box(mat, mx + dx * kx, my + dy * ky, z + z0 + sz / 2, sx * kx, sy * ky, sz);

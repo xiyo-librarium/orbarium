@@ -27,7 +27,7 @@
 ## 確かめる
 - 決まりごと：`node tools/rules_test.mjs`、自動で遊ぶ：`node tools/bots.mjs`
 - 新しい版をブラウザで（Playwright。実データは `tools/mock_real.py` が差し替える。画像は /tmp/orb_flow/）：
-  - `python3 tools/next/flow_test.py`（地球儀→メール→メデジン→季節→アレンテージョまで一周）、`invite_test.py`（章の終わりの招待→もう少しここにいる→［次の土地へ］→ノートのメール→ウブド）
+  - `python3 tools/next/flow_test.py`（地球儀→メール→メデジン→季節→アレンテージョまで一周）、`invite_test.py`（章の終わりの招待→もう少しここにいる→［次の土地へ］→ノートのメール→ウブド）、`room_test.py`（壁を下げて床の線をなぞる→間仕切りと自動の扉→間仕切りを押して扉に→✓）
   - `roof_test.py r1 alen` のように土地を渡すと、その土地の工法で試す
   - `edit_test.py`（編集モード：仮→✕で戻る／✓で一度に払う）、`season_test.py`、`move_test.py`、`batt_ui.py`、`pick_test.py`、`roof_test.py`、`contig.py`（連続した窓・生け垣）
   - 引数に `phone` を含めるとスマホの画面幅で試す（例：`python3 tools/next/flow_test.py phone1`）
@@ -46,5 +46,6 @@
 - ブロックは `{ t, at: s.turn }` を `"x,y,z"` のキーで持つ。置く・外す・動かすは `W.put` / `W.remove` / `W.moveBlock`。
 - 編集はすべて仮：`act()` が編集を始め、編集中は保存しない。`endEdit(true)` で元に戻す履歴を1つにまとめて払い、`endEdit(false)` で元に戻す。
 - 3Dで押した物は `userData.pick` の種類（building・tank・batt・pump・coop・beds…）で見分ける。家具や置いた物を引きずるときは、カメラが回らないよう捕捉の段階で止める。
+- 家の中の壁は建物の `inner`（`"h:x,y"` の辺に 'wall' か 'door'）。部屋は `W.rooms(d)`。壁を下げているとき、床の上のドラッグは間仕切り（家具の上なら家具、床の外なら視点）
 - 太陽光は屋根の向きと傾きで月ごとの割合（`pvFactor`）が変わり、engine で `pvF[d.m]` を掛ける。
 - 季節を進めると、その間の毎日の天気（`flags.weatherYear`）を早回しで見せてから報告を出す。

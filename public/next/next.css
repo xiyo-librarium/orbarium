@@ -292,3 +292,7 @@ body.replaying .bottom, body.replaying .card, body.replaying .pick { opacity: 0;
   .pill.mailb { padding: 6px 8px; } .pill.mailb .t { display: none; }
   .sheet-in nav button { padding: 8px 8px; font-size: 13px; }
 }
+/* 建物のカード：部屋ごとの広さとベッド（▭）の数 */
+.rooms { display: flex; flex-wrap: wrap; gap: 4px; }
+.rooms i { font-style: normal; border: 1px solid var(--line); border-radius: 8px; padding: 2px 7px; font-size: 12px; color: var(--sub); }
+.rooms i b { color: var(--ink); font-weight: 600; } .rooms i em { font-style: normal; margin-left: 4px; color: #8A6A44; letter-spacing: 1px; }

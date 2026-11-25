@@ -691,12 +691,15 @@ export function removeStove(d) { d.furn = d.furn.filter(f => f.t !== 'stove'); }
 export const FDIR = [[0, 1], [1, 0], [0, -1], [-1, 0]];
 export const furnCells = (f) => { if (FURN[f.t].d === 1) return [[f.x, f.y]]; const [dx, dy] = FDIR[(f.r || 0) % 4]; return [[f.x, f.y], [f.x + dx, f.y + dy]]; };
 /* 扉から入ってすぐのマス（家具を置かない） */
-function doorCells(d) { const out = new Set(); for (const e in d.open) if (d.open[e] === 'door') for (const [x, y] of edgeCells(e)) if (d.cells[ck(x, y)]) out.add(ck(x, y)); return out; }
+function doorCells(d) { const out = new Set(), inner = d.inner || {}; for (const m of [d.open, inner]) for (const e in m) if (m[e] === 'door') for (const [x, y] of edgeCells(e)) if (d.cells[ck(x, y)]) out.add(ck(x, y)); return out; }
 export function furnProblem(d, f, skip = -1) {
   const dc = doorCells(d);
   for (const [x, y] of furnCells(f)) {
     if (!d.cells[ck(x, y)]) return '床の外';
     if (dc.has(ck(x, y))) return '扉の前はあけておく';
+  }
+  { const cs = furnCells(f); if (cs.length > 1 && innerAt(d, cs[0][0], cs[0][1], cs[1][0] - cs[0][0], cs[1][1] - cs[0][1])) return '間仕切りをまたぐ'; }
+  for (const [x, y] of furnCells(f)) {
     for (let i = 0; i < d.furn.length; i++) { if (i === skip) continue; if (furnCells(d.furn[i]).some(([a, b]) => a === x && b === y)) return `${FURN[d.furn[i].t].name}と重なる`; }
   }
   return null;
@@ -854,9 +857,54 @@ export function houseOuterEdges(hs) {
 }
 export const cloneHouse = (hs) => JSON.parse(JSON.stringify(hs));
 export const STOVE_PRICE = 6;   // 近所の左官さんが土とレンガで作る
-export function newHouse(z) { return { z, cells: {}, wall: 'board', roof: 'tin', floor: 'wood', open: {}, eaves: false, pv: 0, batt: 0, furn: [], eq: { depth: 0 } }; }
+export function newHouse(z) { return { z, cells: {}, wall: 'board', roof: 'tin', floor: 'wood', open: {}, inner: {}, eaves: false, pv: 0, batt: 0, furn: [], eq: { depth: 0 } }; }
+/* 家の中の壁（間仕切り）：両側とも床のマスの辺に 'wall' か 'door'。部屋は間仕切りで分かれたマスのまとまり */
+export const PART_M = 1.2, PART_DOOR = 2.0, PART_OFF = 0.2;   // 間仕切り1mあたり・中の扉1つ・外す1mあたり（万円。近所の大工さん）
+export const isInnerEdge = (d, e) => edgeCells(e).every(([x, y]) => d.cells[ck(x, y)]);
+export function draftSetInner(d, e, t) {
+  if (!isInnerEdge(d, e)) return '家の中の線ではない';
+  d.inner = d.inner || {};
+  if (t) d.inner[e] = t; else delete d.inner[e];
+  return null;
+}
+// となりのマスとのあいだの辺
+const edgeBetween = (x, y, dx, dy) => dx === 1 ? `v:${x + 1},${y}` : dx === -1 ? `v:${x},${y}` : dy === 1 ? `h:${x},${y + 1}` : `h:${x},${y}`;
+export const innerAt = (d, x, y, dx, dy) => (d.inner || {})[edgeBetween(x, y, dx, dy)] || null;
+/* 部屋：間仕切り（壁も扉も）で分かれたマスのまとまり。ベッドの数と、外への扉があるか */
+export function rooms(d) {
+  const seen = new Set(), out = [], inner = d.inner || {};
+  for (const k of Object.keys(d.cells)) {
+    if (seen.has(k)) continue; const cells = [], st = [k]; seen.add(k);
+    while (st.length) { const c = st.pop(); cells.push(c); const [x, y] = c.split(',').map(Number);
+      for (const [, dx, dy] of DIRS) { const n = ck(x + dx, y + dy); if (d.cells[n] && !seen.has(n) && !inner[edgeBetween(x, y, dx, dy)]) { seen.add(n); st.push(n); } } }
+    const set = new Set(cells);
+    const beds = (d.furn || []).filter(f => f.t === 'bed' && furnCells(f).every(([x, y]) => set.has(ck(x, y)))).length;
+    const outDoor = houseOuterEdges(d).some(o => d.open[o.e] === 'door' && set.has(ck(o.x, o.y)));
+    out.push({ cells, beds, outDoor });
+  }
+  return out;
+}
+// 部屋どうしが扉でつながり、外への扉まで行けるか（行けない部屋の数）
+export function closedRooms(d) {
+  const rs = rooms(d), idOf = new Map(); rs.forEach((r, i) => r.cells.forEach(c => idOf.set(c, i)));
+  const adj = rs.map(() => new Set());
+  for (const e in d.inner || {}) if (d.inner[e] === 'door') { const [a, b] = edgeCells(e).map(([x, y]) => idOf.get(ck(x, y))); if (a != null && b != null) { adj[a].add(b); adj[b].add(a); } }
+  const ok = new Set(), st = []; rs.forEach((r, i) => { if (r.outDoor) { ok.add(i); st.push(i); } });
+  while (st.length) { const i = st.pop(); for (const j of adj[i]) if (!ok.has(j)) { ok.add(j); st.push(j); } }
+  return rs.length - ok.size;
+}
+/* 間仕切りで部屋を閉じたら、引いた線のまん中寄りに中の扉をつける（行けない部屋がなくなるまで） */
+export function autoInnerDoor(d, es) {
+  const mid = (es.length - 1) / 2, order = es.map((e, i) => [e, Math.abs(i - mid)]).sort((a, b) => a[1] - b[1]).map(x => x[0]);
+  for (const e of order) {
+    const before = closedRooms(d); if (!before) break;
+    if ((d.inner || {})[e] !== 'wall') continue;
+    d.inner[e] = 'door'; if (closedRooms(d) >= before) d.inner[e] = 'wall';
+  }
+}
 /* 外側でなくなった辺の窓・扉を外す */
 function tidy(d) {
+  for (const e of Object.keys(d.inner || {})) if (!isInnerEdge(d, e)) delete d.inner[e];   // 外壁になった・床がなくなった間仕切りは外す
   // 床を足して内側になった（または床を減らしてなくなった）辺の窓・扉は、同じ列のいちばん近い外壁へずらす。行き場がなければ外す
   const outer = new Set(houseOuterEdges(d).map(o => o.e));
   for (const e of Object.keys(d.open)) {
@@ -924,6 +972,7 @@ export function houseProblems(d) {
   if (n < 4) out.push('床が4m²より小さい');
   if (components(d).length > 1) out.push('家が2つ以上に分かれている（ひとつながりにする）');
   if (!Object.values(d.open).includes('door')) out.push('扉がない（出入りできない）');
+  else if (closedRooms(d)) out.push('扉のない部屋がある（出入りできない）');
   if (d.pv > n) out.push(`太陽光が屋根（${n}m²）に乗りきらない`);
   d.furn.forEach((f, i) => { const p = furnProblem(d, f, i); if (p) out.push(`${FURN[f.t].name}が${p === '床の外' ? '床の外に出ている（動かすか、床を戻す）' : p}`); });
   return out;
@@ -944,6 +993,10 @@ export function estimate(w, cur, d) {
   add(`壁（${W.name}${Wr.away ? '・遠くから' : ''}）`, d.wall === cur.wall ? newWalls : outD.length, 'm', Wr.cost, Wr.local);
   for (const t in OPENINGS) { const n = outD.filter(o => d.open[o.e] === t && cur.open[o.e] !== t).length; add(OPENINGS[t].name, n, 'つ', OPENINGS[t].cost, false); }
   add('壊して片づける', goneCells.length, 'm²', 0.4, true);
+  { const ci = cur.inner || {}, di = d.inner || {};
+    add('間仕切り', Object.keys(di).filter(e => !ci[e]).length, 'm', PART_M, true);
+    add('中の扉', Object.keys(di).filter(e => di[e] === 'door' && ci[e] !== 'door').length, 'つ', PART_DOOR, true);
+    add('間仕切りを外す', Object.keys(ci).filter(e => !di[e]).length, 'm', PART_OFF, true); }
   // 段をそろえる（掘る・盛る）
   let dig = 0, fil = 0; for (const k of newCells) { const [x, y] = k.split(',').map(Number); const g = h(w, x, y); if (g > d.z) dig += g - d.z; else if (g < d.z) fil += d.z - g; }
   add('地面を掘ってそろえる', dig, 'm³', 1.2, true);

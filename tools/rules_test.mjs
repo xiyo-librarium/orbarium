@@ -140,4 +140,20 @@ check('林の落ち葉で炭素が足りる', S.compost.buy < 0.01);
   const rl = W.regional(W.WALLS.taipa, 'alen'), rm = W.regional(W.WALLS.taipa, 'med');
   check(`白い土壁はアレンテージョで安く地域のお金（${rl.cost}万円 / メデジンなら${rm.cost}万円）`, rl.cost < rm.cost && rl.local && !rm.local);
 }
+// 家の中の壁：間仕切りで部屋が分かれ、行けない部屋は建てられない。閉じたら中の扉が自動でつく。ベッドは間仕切りをまたげない
+{
+  const d = W.newHouse(0); for (let y = 0; y < 3; y++) for (let x = 0; x < 4; x++) d.cells[`${x},${y}`] = 1; d.open['h:0,0'] = 'door'; d.furn = [{ t: 'bed', x: 3, y: 1, r: 1 }];
+  const es = ['v:2,0', 'v:2,1', 'v:2,2']; for (const e of es) W.draftSetInner(d, e, 'wall');
+  check(`間仕切りで2部屋（${W.rooms(d).map(r => r.cells.length + 'm²').join('・')}）`, W.rooms(d).length === 2);
+  check('扉のない部屋は建てられない', W.houseProblems(d).some(p => p.includes('扉のない部屋')));
+  W.autoInnerDoor(d, es); W.settleFurn(d);   // 扉の前のベッドはよける
+  check(`閉じたら中の扉がつく（${es.filter(e => d.inner[e] === 'door').join()}）`, W.houseProblems(d).length === 0 && d.inner['v:2,1'] === 'door');
+  check('外壁に間仕切りは立てない', !!W.draftSetInner(d, 'h:0,0', 'wall'));
+  check('ベッドは間仕切りをまたげない', W.furnProblem(d, { t: 'bed', x: 1, y: 2, r: 1 }) === '間仕切りをまたぐ');
+  const est = W.estimate({ site: 'med', H: new Float32Array(W.N * W.N) }, W.cloneHouse({ ...d, inner: {} }), d);
+  check(`間仕切りと中の扉の見積もり（${est.lines.filter(l => /間仕切り|中の扉/.test(l.label)).map(l => l.label + l.n).join('・')}）`, est.lines.some(l => l.label === '間仕切り' && l.n === 3) && est.lines.some(l => l.label === '中の扉' && l.n === 1));
+  delete d.cells['3,0']; delete d.cells['3,1']; delete d.cells['3,2']; delete d.cells['2,0']; delete d.cells['2,1']; delete d.cells['2,2'];
+  W.draftAddRect({ ...E.newGame({ seed: 1 }).world }, d, 0, 0, 0, 0);
+  check('床を減らすと、行き場のない間仕切りは外れる', Object.keys(d.inner).length === 0);
+}
 console.log(ok.map(x => '  ✓ ' + x).join('\n')); if (ng.length) { console.log(ng.map(x => '  ✗ ' + x).join('\n')); process.exit(1); }

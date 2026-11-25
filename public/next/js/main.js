@@ -60,7 +60,7 @@ const SUBLEARN = { tree: { tree: 'hedge', hedge: 'hedge' }, water: { tank: null,
 const SAVE = 'orbarium-next-1';
 const TOUCH = matchMedia('(pointer: coarse)').matches;
 const HINT_NEAR = TOUCH ? '物を押すと詳しく、引きずると動く。壁を押すと窓や扉に。1本指で回す・2本指で寄る' : '物を押すと詳しく、ドラッグで動く。壁を押すと窓や扉に。ドラッグで回す・ホイールで寄る';
-const HINT_CUT = TOUCH ? '家具を押すと回す・種類。家具を引きずると動く。壁を押すと窓や扉に' : '家具を押すと回す・種類。家具をドラッグすると動く。壁を押すと窓や扉に';
+const HINT_CUT = TOUCH ? '床の線をなぞると間仕切り。家具は引きずると動く。壁を押すと窓や扉に' : '床の線をなぞると間仕切り。家具はドラッグで動く。壁を押すと窓や扉に';
 
 async function boot() {
   // どの土地で、どこから始めるか
@@ -437,8 +437,15 @@ async function boot() {
     return best ? best.e : null;
   }
   // 壁を押す：その場に［壁｜窓｜二重窓｜扉］。外れたところ（床・屋根）は建物のカード
+  // 押した点にいちばん近い間仕切り（壁を下げているときだけ）
+  function nearestInner(b, pt) {
+    if (!stage.cut || pt.y > b.z + 1.2) return null; let best = null, bd = 0.13;
+    for (const e in b.inner || {}) { const m = edgeMid(b, e), d = m.along ? Math.hypot(Math.max(0, Math.abs(pt.x - m.x) - 0.5), pt.z - m.y) : Math.hypot(pt.x - m.x, Math.max(0, Math.abs(pt.z - m.y) - 0.5)); if (d < bd) { bd = d; best = e; } }
+    return best;
+  }
   function wallTap(p) {
     const b = bOf(p.id); if (!b) return;
+    { const ie = nearestInner(b, p.point); if (ie) { openPick({ id: p.id, e: ie, inner: true }); return; } }
     const e = nearestEdge(b, p.point, p.normal, stage.cut);
     if (!e) { if (stage.cut) { const h = furnHit(p); if (h) { selectFurn(h); return; } } select(p); return; }
     openPick({ id: p.id, e });
@@ -455,6 +462,17 @@ async function boot() {
   const edgeMid = (b, e) => { const [t, r] = e.split(':'), [ex, ey] = r.split(',').map(Number), along = t === 'h'; return { along, x: along ? ex + 0.5 : ex, y: along ? ey : ey + 0.5 }; };
   function openPick(o) { select(null); selectFurn(null); PK = o; renderPick(); }
   function closePick() { PK = null; pk.hidden = true; wallMark.visible = false; v.req(); }
+  const IOPTS = [['wall', '間仕切り', '部屋を分ける。'], ['door', '扉', '部屋と部屋を行き来する。'], ['none', '外す', 'ひとつの部屋に戻す。']];
+  function innerOptions(b, e) {
+    const cur = (b.inner || {})[e] || 'none';
+    return IOPTS.map(([t, name, note]) => {
+      const o = { t, name, note, cur: cur === t }; if (o.cur) return o;
+      const d = W.cloneHouse(b); W.draftSetInner(d, e, t === 'none' ? null : t); const st = W.settleFurn(d); o.moved = st.moved;
+      const pr = W.houseProblems(d); if (pr.length) { o.why = pr[0].replace('（出入りできない）', ''); return o; }
+      const tt = scratch(); const err = W.buildBuilding(tt, d); if (err) o.why = err; else o.cost = s.cash - tt.cash;
+      return o;
+    });
+  }
   function pickOptions(b, e) {
     const cur = b.open[e] || '';
     return OPTS.map(([t, name, note]) => {
@@ -468,16 +486,16 @@ async function boot() {
     });
   }
   function renderPick() {
-    const b = pkHouse(); if (!b || !W.houseOuterEdges(b).some(x => x.e === PK.e)) { closePick(); return; }
-    const opts = pickOptions(b, PK.e), cur = opts.find(o => o.cur) || opts[0];
+    const b = pkHouse(); if (!b || (PK.inner ? !(b.inner || {})[PK.e] : !W.houseOuterEdges(b).some(x => x.e === PK.e))) { closePick(); return; }
+    const opts = PK.inner ? innerOptions(b, PK.e) : pickOptions(b, PK.e), cur = opts.find(o => o.cur) || opts[0];
     const price = (o) => o.cur ? 'いま' : o.lock ? '🔒 まだ' : o.why ? '選べない' : PK.draft ? '' : Math.abs(o.cost) < 0.05 ? '±0円' : (o.cost > 0 ? '+' : '−') + yen(Math.abs(o.cost));
-    pk.innerHTML = `<div class="pick-h"><b>この壁</b><span class="sub">${PK.draft ? '下書き' : W.WALLS[b.wall].name}</span><button class="x" data-p="x" aria-label="閉じる">×</button></div>
+    pk.innerHTML = `<div class="pick-h"><b>${PK.inner ? '家の中の壁' : 'この壁'}</b><span class="sub">${PK.inner ? `${W.rooms(b).length}部屋` : PK.draft ? '下書き' : W.WALLS[b.wall].name}</span><button class="x" data-p="x" aria-label="閉じる">×</button></div>
       <div class="pick-o">${opts.map(o => `<button data-p="${o.t || 'wall'}" class="${o.cur ? 'on' : ''}" ${o.lock || o.why ? 'disabled' : ''} title="${BK.esc(o.why || o.note)}"><i class="op op-${o.t || 'wall'}"></i><b>${o.name}</b><span>${price(o)}</span></button>`).join('')}</div>
       <p class="pick-n">${BK.esc(cur.note)}${opts.filter(o => o.why && !o.lock).map(o => `<br><span class="bad">${o.name}：${BK.esc(o.why)}</span>`).join('')}${opts.find(o => o.t === 'door' && !o.cur && o.moved?.length && !o.why) ? `<br>扉にすると、${opts.find(o => o.t === 'door').moved.join('・')}を近くへよける` : ''}</p>
       ${PK.draft ? '' : '<button class="pick-more" data-p="more">建物ぜんたい（工法・屋根・設備）</button>'}`;
     pk.hidden = false;
-    const m = edgeMid(b, PK.e), h = stage.cut ? 1.12 : W.HOUSE_H + 0.04;
-    wallMark.scale.set(m.along ? 1.04 : 0.32, h, m.along ? 0.32 : 1.04); wallMark.position.set(m.x, b.z + h / 2, m.y); wallMark.visible = true; v.req();
+    const m = edgeMid(b, PK.e), h = stage.cut ? 1.12 : W.HOUSE_H + 0.04, th = PK.inner ? 0.2 : 0.32;
+    wallMark.scale.set(m.along ? 1.04 : th, h, m.along ? th : 1.04); wallMark.position.set(m.x, b.z + h / 2, m.y); wallMark.visible = true; v.req();
     placePick();
   }
   function placePick() {
@@ -492,6 +510,11 @@ async function boot() {
     const k = bt.dataset.p;
     if (k === 'x') { closePick(); return; }
     if (k === 'more') { const id = PK.id; closePick(); select({ kind: 'building', id }); return; }
+    if (PK.inner) {
+      const e0 = PK.e, t = k === 'none' ? null : k; let moved = [];
+      remodel(PK.id, (d) => { const err = W.draftSetInner(d, e0, t); if (err) return err; moved = W.settleFurn(d).moved; return null; }, t ? null : '間仕切りを外した');
+      if (moved.length) toast(`${moved.join('・')}をよけた`); if (!t) closePick(); return;
+    }
     const t = k === 'wall' ? null : k, name = OPTS.find(o => o[0] === (t || ''))[1];
     if (PK.draft) {
       const D = G.draft, d = W.cloneHouse(D.house.d); W.draftSetOpening(d, PK.e, t); const st = W.settleFurn(d);
@@ -563,7 +586,7 @@ async function boot() {
     if (FD && FD.pid !== e.pointerId) { FD = null; FS ? renderFurn() : fmarkG.clear(); return; }   // 2本目の指：つかむのをやめて、視点に任せる
     if (e.button !== 0 || G.mode !== 'near' || !stage.cut || G.draft || (G.tool && G.tool !== 'house')) return;
     const p = stage.pick(ndcOf(e)); if (!p || p.kind !== 'building') return;
-    const b = bOf(p.id); if (nearestEdge(b, p.point, p.normal, true)) return;
+    const b = bOf(p.id); if (nearestEdge(b, p.point, p.normal, true) || nearestInner(b, p.point)) return;
     const h = furnHit(p); if (!h) return;
     e.stopImmediatePropagation(); canvas.setPointerCapture(e.pointerId);
     const f = b.furn[h.i]; FD = { ...h, pid: e.pointerId, x: e.clientX, y: e.clientY, ts: e.timeStamp, dx: h.cell.x - f.x, dy: h.cell.y - f.y, z: b.z, drag: false, to: null };
@@ -591,6 +614,57 @@ async function boot() {
     selectFurn(d0);
   };
   canvas.addEventListener('pointerup', fup, { capture: true }); canvas.addEventListener('pointercancel', fup, { capture: true });
+
+  /* ---------- 間仕切り：壁を下げているとき、床の上をマス目の線に沿ってなぞる。なぞった線が全部もう間仕切りなら外す。
+     部屋を閉じたら、引いた線のまん中寄りに扉をつける ---------- */
+  const partG = new THREE.Group(); partG.renderOrder = 6; v.scene.add(partG);
+  const partGeo = new THREE.BoxGeometry(1, 1, 1), partAdd = new THREE.MeshBasicMaterial({ color: 0xF0B84A, transparent: true, opacity: 0.72, depthWrite: false }),
+    partOff = new THREE.MeshBasicMaterial({ color: 0xD0584A, transparent: true, opacity: 0.6, depthWrite: false });   // 立てる線は壁を選んだときと同じ黄、外す線は赤
+  let PD = null;
+  const partEdges = (b, a, c) => {
+    const out = [];
+    if (Math.abs(c.x - a.x) >= Math.abs(c.y - a.y)) for (let x = Math.min(a.x, c.x); x < Math.max(a.x, c.x); x++) out.push(`h:${x},${a.y}`);
+    else for (let y = Math.min(a.y, c.y); y < Math.max(a.y, c.y); y++) out.push(`v:${a.x},${y}`);
+    return out.filter(e => W.isInnerEdge(b, e));
+  };
+  const vertexAt = (e, z) => { ray.setFromCamera(ndcOf(e), v.camera); plane.set(new THREE.Vector3(0, 1, 0), -z); const q = ray.ray.intersectPlane(plane, new THREE.Vector3()); return q ? { x: Math.round(q.x), y: Math.round(q.z) } : null; };
+  function showPart(b, es, off) {
+    partG.clear();
+    for (const e of es) { const m = edgeMid(b, e), mesh = new THREE.Mesh(partGeo, off ? partOff : partAdd); mesh.scale.set(m.along ? 1 : 0.16, 1.1, m.along ? 0.16 : 1); mesh.position.set(m.x, b.z + 0.55, m.y); mesh.renderOrder = 6; partG.add(mesh); }
+    v.req();
+  }
+  canvas.addEventListener('pointerdown', (e) => {
+    if (PD && PD.pid !== e.pointerId) { PD = null; partG.clear(); v.req(); return; }   // 2本目の指：視点に任せる
+    if (e.button !== 0 || G.mode !== 'near' || !stage.cut || G.draft || G.placing || (G.tool && G.tool !== 'house')) return;
+    const p = stage.pick(ndcOf(e)); if (!p || p.kind !== 'building') return;
+    const b = bOf(p.id); if (!b || Math.abs(p.point.y - b.z) > 0.08) return;   // 床の上だけ
+    if (nearestEdge(b, p.point, p.normal, true) || nearestInner(b, p.point) || furnHit(p)) return;
+    e.stopImmediatePropagation(); canvas.setPointerCapture(e.pointerId);
+    PD = { id: p.id, z: b.z, pid: e.pointerId, x: e.clientX, y: e.clientY, ts: e.timeStamp, a: { x: Math.round(p.point.x), y: Math.round(p.point.z) }, drag: false, es: [], off: false };
+  }, { capture: true });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!PD || e.pointerId !== PD.pid) return; e.stopImmediatePropagation();
+    if (!PD.drag && Math.hypot(e.clientX - PD.x, e.clientY - PD.y) < 8) return;
+    if (!PD.drag) { PD.drag = true; closePick(); select(null); selectFurn(null); }
+    const b = bOf(PD.id), c = vertexAt(e, PD.z); if (!b || !c) return;
+    const es = partEdges(b, PD.a, c), off = es.length > 0 && es.every(k => (b.inner || {})[k]);
+    PD.es = es; PD.off = off; showPart(b, es, off);
+    if (es.length) tip(`${off ? '外す' : '間仕切り'} ${es.length}m`, e.clientX, e.clientY); else $('#tip').hidden = true;
+  }, { capture: true });
+  const pup = (e) => {
+    if (!PD || e.pointerId !== PD.pid) return; e.stopImmediatePropagation();
+    const d0 = PD; PD = null; partG.clear(); $('#tip').hidden = true; v.req();
+    if (!d0.drag) { if (e.type === 'pointerup' && e.timeStamp - d0.ts < 500) onTap(e); return; }
+    if (e.type !== 'pointerup' || !d0.es.length) return;
+    let moved = [];
+    remodel(d0.id, (d) => {
+      for (const k of d0.es) { const err = W.draftSetInner(d, k, d0.off ? null : ((d.inner || {})[k] || 'wall')); if (err) return err; }
+      if (!d0.off) W.autoInnerDoor(d, d0.es);
+      moved = W.settleFurn(d).moved; return null;
+    }, d0.off ? '間仕切りを外した' : '間仕切りを立てた');
+    if (moved.length) toast(`${moved.join('・')}をよけた`);
+  };
+  canvas.addEventListener('pointerup', pup, { capture: true }); canvas.addEventListener('pointercancel', pup, { capture: true });
 
   /* ---------- 置いた物を引きずって動かす（タンク・ポンプ・ニワトリ小屋・沈殿槽・蓄電池）。道具を持っていないとき ---------- */
   const MOVK = { tank: 'tank', pump: 'pump', coop: 'coop', settle: 'settle', batt: 'batt' };
@@ -761,6 +835,7 @@ async function boot() {
       ${remodelOf(id) ? `<div class="flow remodel">試している（まだお金はかからない）。${G.draft.err ? `<br><span class="bad">${BK.esc(G.draft.err)}</span>` : `改築すると約 <b>${yen(G.draft.cost || 0)}</b>。`}
         <div class="acts"><button data-act="rno">やめる（元どおり）</button><button class="yes" data-act="ryes" ${G.draft.err ? 'disabled' : ''}>改築する</button></div></div>` : ''}
       <div class="row"><span>工法</span>${seg('method', [['basic', '板とトタン'], ...(L ? [['local', 'この土地の工法']] : []), ['ins', '断熱した', !knows('insulation')]], method)}</div>
+      ${(() => { const rs = W.rooms(b); return rs.length > 1 ? `<div class="row"><span>部屋</span><div class="rooms">${rs.map(r => `<i title="${r.cells.length}m²・ベッド${r.beds}"><b>${r.cells.length}</b>m²${r.beds ? `<em>${'▭'.repeat(r.beds)}</em>` : ''}</i>`).join('')}</div></div>` : ''; })()}
       <div class="row"><span>中</span><div><button class="wide" data-act="inside">${stage.cut ? '壁を戻す' : '中を見る・家具を動かす'}</button></div></div>
       ${roofRow}${fixtures}${power}${rain}
       <p class="note">${U.note}${!knows('insulation') ? ' 断熱は、季節を過ごして学ぶと選べる。' : ''}</p>`;
