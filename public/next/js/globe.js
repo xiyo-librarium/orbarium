@@ -33,8 +33,8 @@ export function globeTextures(rings, W = 4096, desk = false) {
   return { sea: tex(sc, true), land: tex(lc, true), mask: tex(mc, false) };
 }
 
-/* 地球全体の標高（AWS Terrain Tiles、土地の画面と同じデータ。z=3 の 64 枚）を正距円筒の高さの画像にする。
-   陸だけ、低い所も起伏が見えるように平方根に近い曲線で。紙粘土らしく少しぼかす */
+/* 地球全体の標高（AWS Terrain Tiles、土地の画面と同じデータ。z=3 の 64 枚）から、陸の起伏の法線の画像（正距円筒）を作る。
+   陸だけ、低い所も起伏が見えるように平方根に近い曲線で。紙粘土らしく少しならす */
 export async function loadRelief(z = 3, W = 2048) {
   const N = 2 ** z, S = N * 256, mc = document.createElement('canvas'); mc.width = mc.height = S; const mx = mc.getContext('2d');
   await Promise.all(Array.from({ length: N * N }, (_, k) => new Promise((res) => {
@@ -42,20 +42,33 @@ export async function loadRelief(z = 3, W = 2048) {
     im.onload = () => { mx.drawImage(im, x * 256, y * 256); res(); }; im.onerror = () => res();
     im.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
   })));
-  const md = mx.getImageData(0, 0, S, S).data, H = W / 2, oc = document.createElement('canvas'); oc.width = W; oc.height = H;
-  const ox = oc.getContext('2d'), od = ox.createImageData(W, H);
+  const md = mx.getImageData(0, 0, S, S).data, H = W / 2, h = new Float32Array(W * H);
   for (let j = 0; j < H; j++) {
     const lat = Math.max(-85, Math.min(85, 90 - (j + 0.5) / H * 180)) * Math.PI / 180;
     const my = Math.min(S - 1, Math.max(0, Math.floor((1 - Math.log(Math.tan(Math.PI / 4 + lat / 2)) / Math.PI) / 2 * S)));
     for (let i = 0; i < W; i++) {
-      const mxp = Math.min(S - 1, Math.floor((i + 0.5) / W * S)), q = (my * S + mxp) * 4;
-      const e = md[q] * 256 + md[q + 1] + md[q + 2] / 256 - 32768, h = e > 0 ? Math.min(1, Math.pow(e / 5200, 0.55)) : 0, v8 = Math.round(h * 255), o = (j * W + i) * 4;
-      od.data[o] = od.data[o + 1] = od.data[o + 2] = v8; od.data[o + 3] = 255;
+      const q = (my * S + Math.min(S - 1, Math.floor((i + 0.5) / W * S))) * 4, e = md[q] * 256 + md[q + 1] + md[q + 2] / 256 - 32768;
+      h[j * W + i] = e > 0 ? Math.min(1, Math.pow(e / 5200, 0.55)) : 0;
+    }
+  }
+  // 少しならす（紙粘土らしく、段差を消す）：横・縦に3回ずつ
+  const tmp = new Float32Array(W * H);
+  for (let k = 0; k < 3; k++) {
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { const r = j * W; tmp[r + i] = (h[r + (i + W - 1) % W] + h[r + i] + h[r + (i + 1) % W]) / 3; }
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) h[j * W + i] = (tmp[Math.max(0, j - 1) * W + i] + tmp[j * W + i] + tmp[Math.min(H - 1, j + 1) * W + i]) / 3;
+  }
+  // 傾きから法線の画像を作る（凹凸＝bump と違い、寄っても薄まらない）。東西の間隔は緯度で縮むので割り戻す
+  const oc = document.createElement('canvas'); oc.width = W; oc.height = H; const ox = oc.getContext('2d'), od = ox.createImageData(W, H), K = W / 64;
+  for (let j = 0; j < H; j++) {
+    const cl = Math.max(0.2, Math.cos((90 - (j + 0.5) / H * 180) * Math.PI / 180));
+    for (let i = 0; i < W; i++) {
+      const dx = (h[j * W + (i + 1) % W] - h[j * W + (i + W - 1) % W]) / 2 / cl * K, dy = (h[Math.max(0, j - 1) * W + i] - h[Math.min(H - 1, j + 1) * W + i]) / 2 * K;
+      const nl = Math.hypot(dx, dy, 1), o = (j * W + i) * 4;
+      od.data[o] = Math.round((-dx / nl * 0.5 + 0.5) * 255); od.data[o + 1] = Math.round((-dy / nl * 0.5 + 0.5) * 255); od.data[o + 2] = Math.round((1 / nl * 0.5 + 0.5) * 255); od.data[o + 3] = 255;
     }
   }
   ox.putImageData(od, 0, 0);
-  const bc = document.createElement('canvas'); bc.width = W; bc.height = H; const bx = bc.getContext('2d'); bx.filter = 'blur(1.2px)'; bx.drawImage(oc, 0, 0);
-  const tex = new THREE.CanvasTexture(bc); tex.colorSpace = THREE.NoColorSpace; tex.anisotropy = 4; return tex;
+  const tex = new THREE.CanvasTexture(oc); tex.colorSpace = THREE.NoColorSpace; tex.anisotropy = 4; return tex;
 }
 
 /* 住んだ所から色づく：はじめは紙のような灰色。住んだ所（lived：{lat, lon, years}）のまわりだけ本当の色に。
@@ -144,7 +157,7 @@ export function buildGlobe(rings, pins = [], route = null, opt = {}) {
   }));
   g.add(atm); g.userData.atm = atm; atm.visible = !desk;
   // 実際の標高の起伏（loadRelief の結果）を陸に。あとから届いたらふっと出す
-  g.userData.setRelief = (tex, scale = 3) => { landM.bumpMap = tex; landM.bumpScale = scale; landM.needsUpdate = true; opt.req?.(); };   // 机の地球儀には大気の光る縁はない
+  g.userData.setRelief = (tex, scale = 1) => { landM.normalMap = tex; landM.normalScale.set(scale, scale); landM.needsUpdate = true; opt.req?.(); };   // 机の地球儀には大気の光る縁はない
   // 地球儀そのものを軸のまわりに回す（机の地球儀の寄り方）。色づきは世界の向きで計算しているので、住んだ所の向きも一緒に回す
   g.userData.setSpin = (a) => {
     g.rotation.y = a; if (desk) return;   // 机の地球儀は色づきも地球儀に貼りついている

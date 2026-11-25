@@ -1180,7 +1180,7 @@ async function bootGlobe(mode = 'title') {
   const GLOW = DESK ? (Q.has('glow') ? Math.max(0, Math.min(1, +Q.get('glow'))) : Math.min(1, LV.length / 5)) : 1;
   if (DESK) v.setPalette({ ...PALETTES.med, sky: ['#' + new THREE.Color('#1C2123').lerp(new THREE.Color('#4A5250'), GLOW).getHexString(), '#' + new THREE.Color('#2C3133').lerp(new THREE.Color('#6B706A'), GLOW).getHexString()] });
   const globe = buildGlobe(rings, pins, route, { lived: LV, req: () => v.req(), sun: sd, desk: DESK, glow: GLOW });
-  if (DESK) loadRelief().then(tex => globe.userData.setRelief(tex, +(Q.get('relief') || 3))).catch(() => null);   // 実際の標高の起伏（&relief= で強さを試す）
+  if (DESK) loadRelief().then(tex => globe.userData.setRelief(tex, +(Q.get('relief') || 1))).catch(() => null);   // 実際の標高の起伏（&relief= で強さを試す）
   v.scene.add(globe);
   const c = v.controls; c.enablePan = false; c.minDistance = 2.4; c.maxDistance = 7; c.minPolarAngle = 0.2; c.maxPolarAngle = Math.PI - 0.2; c.target.set(0, 0, 0); c.rotateSpeed = 0.5;
   v.camera.near = 0.05; v.camera.far = 50; v.camera.fov = 30; v.camera.updateProjectionMatrix();
