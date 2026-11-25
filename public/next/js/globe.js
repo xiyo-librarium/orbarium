@@ -33,6 +33,31 @@ export function globeTextures(rings, W = 4096, desk = false) {
   return { sea: tex(sc, true), land: tex(lc, true), mask: tex(mc, false) };
 }
 
+/* 地球全体の標高（AWS Terrain Tiles、土地の画面と同じデータ。z=3 の 64 枚）を正距円筒の高さの画像にする。
+   陸だけ、低い所も起伏が見えるように平方根に近い曲線で。紙粘土らしく少しぼかす */
+export async function loadRelief(z = 3, W = 2048) {
+  const N = 2 ** z, S = N * 256, mc = document.createElement('canvas'); mc.width = mc.height = S; const mx = mc.getContext('2d');
+  await Promise.all(Array.from({ length: N * N }, (_, k) => new Promise((res) => {
+    const x = k % N, y = Math.floor(k / N), im = new Image(); im.crossOrigin = 'anonymous';
+    im.onload = () => { mx.drawImage(im, x * 256, y * 256); res(); }; im.onerror = () => res();
+    im.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
+  })));
+  const md = mx.getImageData(0, 0, S, S).data, H = W / 2, oc = document.createElement('canvas'); oc.width = W; oc.height = H;
+  const ox = oc.getContext('2d'), od = ox.createImageData(W, H);
+  for (let j = 0; j < H; j++) {
+    const lat = Math.max(-85, Math.min(85, 90 - (j + 0.5) / H * 180)) * Math.PI / 180;
+    const my = Math.min(S - 1, Math.max(0, Math.floor((1 - Math.log(Math.tan(Math.PI / 4 + lat / 2)) / Math.PI) / 2 * S)));
+    for (let i = 0; i < W; i++) {
+      const mxp = Math.min(S - 1, Math.floor((i + 0.5) / W * S)), q = (my * S + mxp) * 4;
+      const e = md[q] * 256 + md[q + 1] + md[q + 2] / 256 - 32768, h = e > 0 ? Math.min(1, Math.pow(e / 5200, 0.55)) : 0, v8 = Math.round(h * 255), o = (j * W + i) * 4;
+      od.data[o] = od.data[o + 1] = od.data[o + 2] = v8; od.data[o + 3] = 255;
+    }
+  }
+  ox.putImageData(od, 0, 0);
+  const bc = document.createElement('canvas'); bc.width = W; bc.height = H; const bx = bc.getContext('2d'); bx.filter = 'blur(1.2px)'; bx.drawImage(oc, 0, 0);
+  const tex = new THREE.CanvasTexture(bc); tex.colorSpace = THREE.NoColorSpace; tex.anisotropy = 4; return tex;
+}
+
 /* 住んだ所から色づく：はじめは紙のような灰色。住んだ所（lived：{lat, lon, years}）のまわりだけ本当の色に。
    住んだ年が長いほど広く（9°＋1年3°、28°まで）。ふちは少しにじませる */
 function colorize(m, lived, paper = '#E6E1D5', ref = 0.3, glow = null) {
@@ -104,9 +129,10 @@ export function buildGlobe(rings, pins = [], route = null, opt = {}) {
   const desk = !!opt.desk, glow = desk ? (opt.glow ?? 0) : null, g = new THREE.Group(), T = globeTextures(rings, 4096, desk), lived = opt.lived || [];
   // 海：なめらかで少しつやがある。陸：紙粘土のようなつや消しで、海より少しだけ盛り上がる。
   // 机の地球儀（試験中）：海も塗った紙のようなつや消しで、刷毛むらだけ。陸はもう少しでこぼこ
-  const sea = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 64), colorize(desk ? matte({ vary: 0.05, freq: 7, bump: 0.025, bumpFreq: 14, rough: 1, spec: 0.12 }) : matte({ vary: 0.03, freq: 5, rough: 0.42, spec: 0.8 }), lived, desk ? '#9FA7A6' : '#B4BCBC', 0.29, glow));
+  // 机の地球儀：むらは地球儀に貼りつける（local。回しても流れない）。陸の起伏は作り物のむらではなく実際の標高（setRelief）
+  const sea = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 64), colorize(desk ? matte({ vary: 0.05, freq: 7, rough: 1, spec: 0.12, local: true }) : matte({ vary: 0.03, freq: 5, rough: 0.42, spec: 0.8 }), lived, desk ? '#9FA7A6' : '#B4BCBC', 0.29, glow));
   sea.material.map = T.sea; sea.material.needsUpdate = true; g.add(sea);
-  const landM = colorize(matte({ vary: 0.09, freq: 11, bump: desk ? 0.28 : 0.16, bumpFreq: 26, rough: 1, spec: desk ? 0.2 : 0.35 }), lived, '#EAE5D8', 0.31, glow);
+  const landM = colorize(desk ? matte({ vary: 0.07, freq: 11, rough: 1, spec: 0.2, local: true }) : matte({ vary: 0.09, freq: 11, bump: 0.16, bumpFreq: 26, rough: 1, spec: 0.35 }), lived, '#EAE5D8', 0.31, glow);
   landM.map = T.land; landM.alphaMap = T.mask; landM.alphaTest = 0.5; landM.needsUpdate = true;
   const landMesh = new THREE.Mesh(new THREE.SphereGeometry(1.0045, 192, 96), landM); g.add(landMesh);
   g.userData.earth = sea;
@@ -116,10 +142,13 @@ export function buildGlobe(rings, pins = [], route = null, opt = {}) {
     vertexShader: 'varying vec3 vN; varying vec3 vW; void main(){ vN = normalize(normalMatrix * normal); vW = normalize((modelMatrix * vec4(position,1.0)).xyz); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
     fragmentShader: 'uniform vec3 c; uniform vec3 s; varying vec3 vN; varying vec3 vW; void main(){ float f = pow(1.0 - abs(vN.z), 2.2); float day = smoothstep(-0.35, 0.4, dot(vW, normalize(s))); gl_FragColor = vec4(c * f * (0.25 + 0.9 * day), f * 0.8); }'
   }));
-  g.add(atm); g.userData.atm = atm; atm.visible = !desk;   // 机の地球儀には大気の光る縁はない
+  g.add(atm); g.userData.atm = atm; atm.visible = !desk;
+  // 実際の標高の起伏（loadRelief の結果）を陸に。あとから届いたらふっと出す
+  g.userData.setRelief = (tex, scale = 3) => { landM.bumpMap = tex; landM.bumpScale = scale; landM.needsUpdate = true; opt.req?.(); };   // 机の地球儀には大気の光る縁はない
   // 地球儀そのものを軸のまわりに回す（机の地球儀の寄り方）。色づきは世界の向きで計算しているので、住んだ所の向きも一緒に回す
   g.userData.setSpin = (a) => {
-    g.rotation.y = a; const Y = new THREE.Vector3(0, 1, 0), tmp = new THREE.Vector3();
+    g.rotation.y = a; if (desk) return;   // 机の地球儀は色づきも地球儀に貼りついている
+    const Y = new THREE.Vector3(0, 1, 0), tmp = new THREE.Vector3();
     for (const mat of [sea.material, landM]) { const U2 = mat.userData.lp, live = mat.userData.uLP; if (!U2 || !live) continue;
       U2.forEach((v4, i) => { tmp.set(v4.x, v4.y, v4.z).applyAxisAngle(Y, a); live.value[i].set(tmp.x, tmp.y, tmp.z, v4.w); }); }
   };

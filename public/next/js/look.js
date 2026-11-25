@@ -27,7 +27,7 @@ export function matte(o = {}) {
       #ifdef USE_INSTANCING
         vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
       #else
-        vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vWPos = ${o.local ? 'transformed' : '(modelMatrix * vec4(transformed, 1.0)).xyz'};   // local：物に貼りついたむら（回しても流れない）
       #endif`);
     sh.fragmentShader = `varying vec3 vWPos; uniform float uVary, uFreq, uPatchAt, uBump, uBumpFreq, uSpec; uniform vec3 uPatch;\n${NOISE}\n` + sh.fragmentShader
       .replace('#include <color_fragment>', `#include <color_fragment>

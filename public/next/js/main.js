@@ -7,7 +7,7 @@ import { sunVector, dirName } from '/js/iso.js';
 import { PALETTES } from './look.js';
 import { createView } from './view.js';
 import { createStage } from './stage.js';
-import { buildGlobe, subsolar, ll, routeLine } from './globe.js';
+import { buildGlobe, subsolar, ll, routeLine, loadRelief } from './globe.js';
 import * as BK from './book.js';
 import { ATLAS, NOTES, INVITE } from '/js/content.js';
 
@@ -17,7 +17,7 @@ const BASE = location.pathname.startsWith('/next') ? '/next/' : '/';   // 本番
 // 開き方：proto＝見た目の試作（?shot・?proto）、play＝遊ぶ（?play、?play&new=med で新しく）、それ以外は地球（はじまり・旅・図鑑）
 const MODE = Q.has('globe') || Q.has('travel') ? 'globe' : Q.has('shot') || Q.has('proto') ? 'proto' : Q.has('play') ? 'play' : 'globe';
 // 机の地球儀から来たとき（試験中）：読み込みのあいだから、地球儀が閉じたのと同じ暗がりで覆っておき、最初に描けたら明ける
-if (MODE === 'play' && Q.get('look') === 'desk') { const cv = document.createElement('div'); cv.className = 'fade dark on'; cv.id = 'deskIn'; document.body.appendChild(cv); }
+if (MODE === 'play' && Q.get('look') === 'desk') { const cv = document.createElement('div'); cv.className = 'fade black on'; cv.id = 'deskIn'; document.body.appendChild(cv); }
 const CARRY = 'orbarium-next-carry', ATLAS_READ = 'orbarium-next-atlas';
 let SITE = Q.get('site') || 'med';
 const loadSave = () => { try { const v0 = localStorage.getItem('orbarium-next-1'); return v0 ? E.load(v0) : null; } catch { return null; } };
@@ -1180,6 +1180,7 @@ async function bootGlobe(mode = 'title') {
   const GLOW = DESK ? (Q.has('glow') ? Math.max(0, Math.min(1, +Q.get('glow'))) : Math.min(1, LV.length / 5)) : 1;
   if (DESK) v.setPalette({ ...PALETTES.med, sky: ['#' + new THREE.Color('#1C2123').lerp(new THREE.Color('#4A5250'), GLOW).getHexString(), '#' + new THREE.Color('#2C3133').lerp(new THREE.Color('#6B706A'), GLOW).getHexString()] });
   const globe = buildGlobe(rings, pins, route, { lived: LV, req: () => v.req(), sun: sd, desk: DESK, glow: GLOW });
+  if (DESK) loadRelief().then(tex => globe.userData.setRelief(tex, +(Q.get('relief') || 3))).catch(() => null);   // 実際の標高の起伏（&relief= で強さを試す）
   v.scene.add(globe);
   const c = v.controls; c.enablePan = false; c.minDistance = 2.4; c.maxDistance = 7; c.minPolarAngle = 0.2; c.maxPolarAngle = Math.PI - 0.2; c.target.set(0, 0, 0); c.rotateSpeed = 0.5;
   v.camera.near = 0.05; v.camera.far = 50; v.camera.fov = 30; v.camera.updateProjectionMatrix();
@@ -1225,7 +1226,7 @@ async function bootGlobe(mode = 'title') {
   };
   // 机の地球儀の寄り方：手で回す地球儀。地球儀そのものが軸のまわりに勢いよく回り出し、少し行き過ぎて戻る。
   // 回りきる前から顔を近づけ始め、行き先を画面の中心に置いたまま寄る。斜めに傾けるのは最後の3割だけ。
-  // 寄りきる少し前にピンが刺さり、行き先へ向かって、ふちのぼけた暗がりが閉じる（土地の画面は同じ暗がりから明ける）
+  // 寄りきる少し前にピンが刺さり、暗転する（土地の画面は同じ暗がりから明ける）
   const flyDesk = (A, B, ms, done) => {
     c.enabled = false; c.autoRotate = false; c.enableDamping = false; c.minDistance = 0.001; c.maxDistance = 100; c.minPolarAngle = 0; c.maxPolarAngle = Math.PI;   // 回す決まりが寄るのを押し戻さないように
     v.camera.near = 0.004; v.camera.updateProjectionMatrix();
@@ -1253,17 +1254,10 @@ async function bootGlobe(mode = 'title') {
     };
     step();
   };
-  // ふちのぼけた暗がりが、行き先へ向かって閉じる
-  const irisTo = (url, P) => {
-    const R = $('#c').getBoundingClientRect(), s2 = P.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), globe.rotation.y).project(v.camera), x = (s2.x + 1) / 2 * R.width, y = (1 - s2.y) / 2 * R.height;
-    const f = document.createElement('div'); f.className = 'iris'; document.body.appendChild(f);
-    const M = Math.hypot(innerWidth, innerHeight) * 1.1, t0 = performance.now(), T = 950;
-    const step = () => {
-      const u = Math.min(1, (performance.now() - t0) / T), e = u * u * (3 - 2 * u), rr = M * (1 - e), fe = 40 + M * 0.35 * (1 - e);
-      f.style.background = `radial-gradient(circle at ${x}px ${y}px, rgba(28,33,35,0) ${Math.max(0, rr - fe)}px, rgba(28,33,35,${0.35 + 0.65 * e}) ${rr}px)`;
-      if (u < 1) requestAnimationFrame(step); else location.replace(url + '&look=desk');
-    };
-    step();
+  // 暗転（フェードトゥブラック）。土地の画面は同じ暗がりから明ける
+  const irisTo = (url) => {
+    const f = document.createElement('div'); f.className = 'fade black'; document.body.appendChild(f);
+    requestAnimationFrame(() => requestAnimationFrame(() => f.classList.add('on'))); setTimeout(() => location.replace(url + '&look=desk'), 900);
   };
   const fadeTo = (url) => { const f = document.createElement('div'); f.className = 'fade'; document.body.appendChild(f); requestAnimationFrame(() => f.classList.add('on')); setTimeout(() => location.replace(url), 650); };
   // 旅：出発地の上で、右上にメールの通知が届く。押すと画面の真ん中に広がって読める。［行く］で飛び、着いた所に虫ピンを刺す。
@@ -1276,7 +1270,7 @@ async function bootGlobe(mode = 'title') {
     const go = () => {
       $('#where').textContent = `${E.SITES[from].name}から、${S2.name}へ`;
       globe.add(routeLine([E.SITES[from], S2])); v.req();
-      const out = () => DESK ? irisTo(url, ll(S2.lat, S2.lon, 1).normalize()) : fadeTo(url);
+      const out = () => DESK ? irisTo(url) : fadeTo(url);
       (DESK ? flyDesk : fly)(E.SITES[from], S2, Q.has('flyms') ? +Q.get('flyms') : DESK ? 4200 : 3600, () => {   // flyms：試験で動きを撮るときだけ長く
         $('#where').textContent = `${S2.name}・標高${S2.elev.toLocaleString()}m`;
         const dest = globe.userData.pins.find(m => m.userData.pin.id === 'dest');
