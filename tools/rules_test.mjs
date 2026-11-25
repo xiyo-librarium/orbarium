@@ -122,4 +122,22 @@ check('林の落ち葉で炭素が足りる', S.compost.buy < 0.01);
     check(`土の平屋根はカナレで屋根全部の雨を集める（${A0.roofCatch.toFixed(1)}→${A1.roofCatch.toFixed(1)}m²）`, A1.roofCatch > A0.roofCatch);
   }
 }
+// 次の土地への招待：メデジンを終えるとウブドとアレンテージョ、どちらかを終えると八ヶ岳の麓、タオスは節水と温室を覚えてから
+{
+  const s = E.newGame({ seed: 31 });
+  check('めぐりができる前は招待が来ない', E.invitesDue(s).length === 0);
+  s.flags.done_med = 4;
+  check(`メデジンを終えると2通（${E.invitesDue(s).join('・')}）`, E.invitesDue(s).join() === 'ubud,alen');
+  s.flags.invites = [{ land: 'ubud' }, { land: 'alen' }];
+  check('同じ招待は二度届かない', E.invitesDue(s).length === 0 && E.openInvites(s).length === 2);
+  const u = E.newGame({ site: 'ubud', seed: 32, flags: { history: [{ site: 'med' }], invites: s.flags.invites } }); u.flags.done_ubud = 4;
+  check(`ウブドを終えると八ヶ岳の麓、行かなかったアレンテージョは残る（${E.invitesDue(u).join('・')}／${E.openInvites(u).map(i => i.land).join('・')}）`, E.invitesDue(u).join() === 'yama' && E.openInvites(u).map(i => i.land).join() === 'alen');
+  u.known.push('saving');
+  check('節水だけではタオスは開かない', !E.invitesDue(u).includes('taos'));
+  u.known.push('greenhouse');
+  check('節水と温室を覚えるとタオスの招待', E.invitesDue(u).includes('taos'));
+  check('節水はアレンテージョで覚えられる（水を運んでもらう土地）', E.SITES.alen.haul && E.foresight(E.newGame({ site: 'alen', seed: 33 })).some(f => f.id === 'saving'));
+  const rl = W.regional(W.WALLS.taipa, 'alen'), rm = W.regional(W.WALLS.taipa, 'med');
+  check(`白い土壁はアレンテージョで安く地域のお金（${rl.cost}万円 / メデジンなら${rm.cost}万円）`, rl.cost < rm.cost && rl.local && !rm.local);
+}
 console.log(ok.map(x => '  ✓ ' + x).join('\n')); if (ng.length) { console.log(ng.map(x => '  ✗ ' + x).join('\n')); process.exit(1); }

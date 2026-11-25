@@ -61,6 +61,30 @@ export const PALETTES = {
     soil: '#9C7552', soilDark: '#7A5A3E', grass: '#A79F68', grassTip: '#C6BC86',
     leaf: ['#6E7F4E', '#7A8A55', '#66784A', '#828F5A'], pine: '#56684C', euca: '#87936E', trunk: '#5E4936', bark: '#B8AA92',
     plaster: '#C99E74', plasterPatch: '#B58A60', lime: '#EDE3D1', limePatch: '#CDB08C', stone: '#ADA392', tile: '#B26A4B', wood: '#7E5E40', glass: '#3E4A4A'
+  },
+  // ウブド：湿った空気、濃い緑、火山の赤茶の土
+  ubud: {
+    sky: ['#BFD0CF', '#ECE8DA'], fog: '#E2E4D6', hemiSky: '#C4D6D8', hemiGround: '#8A8A58',
+    ground: { 10: '#46743A', 20: '#6E9A46', 30: '#7DA84C', 40: '#8DAE52', 50: '#A0988A', 60: '#AC9070', 80: '#62868C', 90: '#679253', 95: '#46743A', 100: '#7DA84C' },
+    soil: '#7E5A3E', soilDark: '#5E412C', grass: '#62953C', grassTip: '#A3C25A',
+    leaf: ['#4A7A32', '#578638', '#45702E', '#64923E'], pine: '#46664A', euca: '#6F8A5C', trunk: '#574231', bark: '#B6AA94',
+    plaster: '#C0A07C', plasterPatch: '#AE8C66', lime: '#ECE5D6', limePatch: '#CCB89A', stone: '#9C9688', tile: '#B06A4C', wood: '#86603E', glass: '#3E4A4A'
+  },
+  // アレンテージョ：乾いた金色の草、くすんだ緑のコルクガシとオリーブ、黄土の土、石灰の白
+  alen: {
+    sky: ['#C3D4DE', '#F2E9D8'], fog: '#EEE6D4', hemiSky: '#C8D8E4', hemiGround: '#B49A62',
+    ground: { 10: '#6E7650', 20: '#B4A468', 30: '#C2B072', 40: '#BEAA6E', 50: '#B2A492', 60: '#C9A878', 80: '#7896A0', 90: '#8E9266', 95: '#6E7650', 100: '#C2B072' },
+    soil: '#A57A50', soilDark: '#82603E', grass: '#B3A466', grassTip: '#D3C48A',
+    leaf: ['#5E6E46', '#68784C', '#56653F', '#727F52'], pine: '#52634A', euca: '#879170', trunk: '#4E3E30', bark: '#A49884',
+    plaster: '#CDA67A', plasterPatch: '#B98F64', lime: '#F3EFE6', limePatch: '#DCD3C2', stone: '#B0A592', tile: '#B4684A', wood: '#7A5A3E', glass: '#3E4A4A'
+  },
+  // 八ヶ岳の麓：すこし青みの緑、カラマツ、黒い火山の土
+  yama: {
+    sky: ['#C2D3DF', '#EDEAE0'], fog: '#E3E5DE', hemiSky: '#C6D7E2', hemiGround: '#7E7A5C',
+    ground: { 10: '#4C6E40', 20: '#7C944E', 30: '#86A056', 40: '#94A05C', 50: '#A09A8E', 60: '#A8987C', 80: '#6A8C98', 90: '#6A8C5E', 95: '#4C6E40', 100: '#86A056' },
+    soil: '#5E4C3C', soilDark: '#43362B', grass: '#6E9046', grassTip: '#A6B862',
+    leaf: ['#56783C', '#5F8142', '#4E6E38', '#6A8A46'], pine: '#4A6446', euca: '#7A8E68', trunk: '#584434', bark: '#B4AA98',
+    plaster: '#BFA684', plasterPatch: '#AA906C', lime: '#EEE9DE', limePatch: '#CFC2AA', stone: '#A29E94', tile: '#5E6266', wood: '#7E5C40', glass: '#3E4A4A'
   }
 };
 

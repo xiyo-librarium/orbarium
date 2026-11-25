@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { matte, hash } from './look.js';
-import { HOUSE_H, roofZ, roofBox, eavesDepth, houseOuterEdges, drainDirs, ACCENTS, WALLS, furnCells, FDIR as W_FDIR, pvLayout } from '/js/world.js';
+import { HOUSE_H, roofZ, roofBox, eavesDepth, houseOuterEdges, drainDirs, ACCENTS, WALLS, ROOFS, furnCells, FDIR as W_FDIR, pvLayout } from '/js/world.js';
 
 const T = 0.2;   // 壁の厚さ
 const DV = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] };
@@ -18,9 +18,12 @@ export function buildHouse(hs, P, at, opt = {}) {
   const box = (mat, cx, cy, cz, sx, sy, sz, rot = 0) => { const g = new THREE.BoxGeometry(sx, sz, sy); if (rot) g.rotateY(rot); g.translate(cx, cz, cy); add(mat, g); };
   const cyl = (mat, cx, cy, z0, r, hgt, seg = 14) => { const g = new THREE.CylinderGeometry(r, r, hgt, seg); g.translate(cx, z0 + hgt / 2, cy); add(mat, g); };
 
-  const M = WALLS[hs.wall] || WALLS.board, earth = hs.wall === 'bahareque' && hs.finish !== 'lime', lime = hs.wall === 'bahareque' && hs.finish === 'lime';
-  const accentHex = M.accent ? ACCENTS[(hs.accent ?? 0) % ACCENTS.length][0] : (M.frame || '#D9CFBC');
+  // 白い土壁（タイパ）は石灰の白。腰の帯（band の高さ）は白い線なしの塗り分け。色はその工法の色から
+  const M = WALLS[hs.wall] || WALLS.board, earth = hs.wall === 'bahareque' && hs.finish !== 'lime', lime = (hs.wall === 'bahareque' && hs.finish === 'lime') || hs.wall === 'taipa';
+  const AC = M.accents || ACCENTS, BAND = M.band || 0.9;
+  const accentHex = M.accent ? AC[(hs.accent ?? 0) % AC.length][0] : (M.frame || '#D9CFBC');
   const wallMat = earth ? matte({ color: P.plaster, vary: 0.07, freq: 0.9, patch: P.plasterPatch, patchAt: 0.66, bump: 0.45, bumpFreq: 1.8 })
+    : hs.wall === 'taipa' ? matte({ color: P.lime, vary: 0.03, freq: 1.3, patch: P.limePatch, patchAt: 0.84, bump: 0.16, bumpFreq: 2.4 })   // 毎年塗り重ねた石灰：なめらかで、うっすらむら
     : lime ? matte({ color: P.lime, vary: 0.05, freq: 1.0, patch: P.limePatch, patchAt: 0.74, bump: 0.45, bumpFreq: 2.0 })
     : matte({ color: M.color || '#C9A47A', vary: 0.12, freq: 2.5, bump: 0.3, bumpFreq: 5 });
   const accentMat = matte({ color: accentHex, vary: 0.04, freq: 1.5, bump: 0.12, bumpFreq: 2.5 });
@@ -59,8 +62,8 @@ export function buildHouse(hs, P, at, opt = {}) {
     // 腰壁（ソカロ）：外側に 3cm 出た色の帯と、上の白い線
     if (M.accent && op !== 'door') {
       const ox = cx + nx * (T / 2 + 0.015), oy = cy + ny * (T / 2 + 0.015);
-      box(accentMat, ox, oy, z + 0.45, along ? 1 : 0.03, along ? 0.03 : 1, 0.9);
-      box(trimMat, cx + nx * (T / 2 + 0.025), cy + ny * (T / 2 + 0.025), z + 0.915, along ? 1 : 0.05, along ? 0.05 : 1, 0.03);
+      box(accentMat, ox, oy, z + BAND / 2, along ? 1 : 0.03, along ? 0.03 : 1, BAND);
+      if (!M.band) box(trimMat, cx + nx * (T / 2 + 0.025), cy + ny * (T / 2 + 0.025), z + 0.915, along ? 1 : 0.05, along ? 0.05 : 1, 0.03);
     }
     // 妻壁：屋根が壁より高い辺は、屋根の線まで壁をのばす（両端は角を覆うよう少し長く）
     const p0 = along ? [ex, ey] : [ex, ey], p1 = along ? [ex + 1, ey] : [ex, ey + 1];
@@ -106,7 +109,7 @@ export function buildHouse(hs, P, at, opt = {}) {
   for (const [x, y] of cells) for (const [px, py, a, b] of [[x, y, [-1, 0], [0, -1]], [x + 1, y, [1, 0], [0, -1]], [x, y + 1, [-1, 0], [0, 1]], [x + 1, y + 1, [1, 0], [0, 1]]]) {
     if (has(x + a[0], y + a[1]) || has(x + b[0], y + b[1])) continue;
     cyl(wallMat, px, py, z, T / 2, (cut ? CUT : H) + 0.001);
-    if (M.accent) { cyl(accentMat, px, py, z, T / 2 + 0.03, 0.9); cyl(trimMat, px, py, z + 0.9, T / 2 + 0.04, 0.03); }
+    if (M.accent) { cyl(accentMat, px, py, z, T / 2 + 0.03, BAND); if (!M.band) cyl(trimMat, px, py, z + 0.9, T / 2 + 0.04, 0.03); }
   }
 
   // 基礎：石を積んだ帯。地面より下まで
@@ -187,7 +190,7 @@ export function buildHouse(hs, P, at, opt = {}) {
         const cxm = (XS[i] + XS[i + 1]) / 2, cym = (YS[j] + YS[j + 1]) / 2; if (!inRoof(cxm, cym)) continue;
         const a = j * W + i, b = a + 1, c = a + W, d = c + 1; if (flip) idx.push(a, b, c, b, d, c); else idx.push(a, c, b, b, c, d); }
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals(); return g; };
-    const tin = hs.roof === 'tin' || hs.roof === 'tinins';
+    const tin = hs.roof === 'tin' || hs.roof === 'tinins', tile = ROOFS[hs.roof]?.pat === 'teja';
     const deckMat = tin ? matte({ color: '#8E979C', vary: 0.1, freq: 2, rough: 0.6 }) : matte({ color: '#6E4636', vary: 0.1, freq: 2 });
     add(deckMat, deck(tin ? 0 : -0.12, false)); add(woodMat, deck(tin ? -0.06 : -0.18, true));
     // 鼻隠し：外周の板（屋根の線にそう）
@@ -199,8 +202,8 @@ export function buildHouse(hs, P, at, opt = {}) {
     const withRidge = (a, b) => { const pts = seg(a, b); if (shape !== 'gable') return pts; const k = ridgeAlongX ? 1 : 0; if ((a[k] - ridgeMid) * (b[k] - ridgeMid) < 0) { pts.push(ridgeAlongX ? [a[0], ridgeMid] : [ridgeMid, a[1]]); pts.sort((p1, p2) => (p1[k] - a[k]) * Math.sign(b[k] - a[k]) - (p2[k] - a[k]) * Math.sign(b[k] - a[k])); } return pts; };
     fascia(withRidge([X0, Y1], [X1, Y1])); fascia(withRidge([X1, Y1], [X1, Y0])); fascia(withRidge([X1, Y0], [X0, Y0])); fascia(withRidge([X0, Y0], [X0, Y1]));
     if (hs.gutter) gutters(X0, X1, Y0, Y1);
-    if (hs.pv) panels(X0, X1, Y0, Y1, p, shape, ridgeAlongX, hs.roof === 'teja' ? 0.2 : tin ? 0.08 : 0.14);
-    if (tin || shape === 'flat' || hs.roof !== 'teja') return;
+    if (hs.pv) panels(X0, X1, Y0, Y1, p, shape, ridgeAlongX, tile ? 0.2 : tin ? 0.08 : 0.14);
+    if (tin || shape === 'flat' || !tile) return;
     tiles(X0, X1, Y0, Y1, p, shape, ridgeAlongX);
   }
   // 雨どい：雨が落ちる軒にそって半円の樋。いちばん近いタンクへたてどいを下ろす

@@ -72,8 +72,74 @@ export const SITES = {
     enso: { nino: 0.2, nina: 0.2, ninoRain: 1.15, ninaRain: 0.8 },
     soilOM: 1.0, frostDepth: 0.75,
     terrain: 'taos', plotPrice: 100
+  },
+  /* ウブド（バリ島）：一年中暑く湿っていて、雨は多すぎるくらい。田んぼの水は村の組（スバック）で上から下へ分け合う。
+     外の人は土地を買えないので、25年の借地（値段はほかの土地と同じ一律） */
+  ubud: {
+    name: 'ウブド', sub: 'バリ島・ウブドの北の田んぼ・南緯8度', lat: -8.4925, lon: 115.258, elev: 250,
+    tmean: [26.0, 26.0, 26.1, 26.1, 25.7, 25.0, 24.4, 24.6, 25.2, 25.9, 26.1, 26.0],
+    tmin: [22.3, 22.3, 22.2, 22.0, 21.6, 20.9, 20.3, 20.4, 20.9, 21.6, 22.1, 22.3],
+    tmax: [30.5, 30.5, 30.8, 31.0, 30.6, 29.9, 29.3, 29.6, 30.3, 31.0, 31.0, 30.6],
+    rain: [330, 300, 260, 150, 110, 80, 60, 50, 70, 140, 220, 320],
+    rainDays: [21, 19, 18, 13, 10, 8, 7, 6, 8, 12, 16, 20],
+    sunHours: [5.0, 5.3, 5.8, 6.8, 7.2, 7.0, 7.4, 7.8, 7.6, 7.0, 6.0, 5.2],
+    quarters: ['1〜3月・雨の季節', '4〜6月・乾いていく季節', '7〜9月・乾いた季節', '10〜12月・雨が戻る季節'],
+    /* 仮の値。エルニーニョの年は乾く */
+    outage: { power: 0.6, water: 0.6, ninoWater: 1.2 },
+    enso: { nino: 0.2, nina: 0.2, ninoRain: 0.75, ninaRain: 1.2 },
+    soilOM: 3.0, quake: 0.015, frostDepth: 0, humid: true,
+    terrain: 'ubud', plotPrice: 100
+  },
+  /* アレンテージョ（ポルトガル内陸）：地中海の気候。冬に雨が降り、夏の4か月はほとんど降らない。
+     丘の上の農家には水道が来ていないので、夏は水を運んでもらう＝節水を覚える土地 */
+  alen: {
+    name: 'アレンテージョ', sub: 'ポルトガル内陸・エヴォラ郊外の丘・北緯38度', lat: 38.6, lon: -7.98, elev: 250,
+    tmean: [9.6, 10.6, 13.0, 14.6, 17.8, 21.9, 24.3, 24.5, 22.0, 17.6, 13.1, 10.6],
+    tmin: [5.2, 5.8, 7.4, 8.8, 11.4, 14.6, 16.3, 16.5, 15.3, 12.4, 8.7, 6.4],
+    tmax: [14.1, 15.5, 18.6, 20.4, 24.3, 29.3, 32.4, 32.6, 28.8, 22.9, 17.6, 14.7],
+    rain: [72, 60, 45, 60, 40, 14, 5, 5, 25, 68, 77, 90],
+    rainDays: [9, 8, 7, 8, 6, 2, 1, 1, 3, 8, 8, 10],
+    sunHours: [5.0, 6.0, 7.0, 8.0, 10.0, 11.5, 12.5, 11.5, 9.0, 7.0, 5.5, 4.8],
+    quarters: ['1〜3月・雨の冬', '4〜6月・乾いていく春', '7〜9月・雨のない夏', '10〜12月・雨が戻る秋'],
+    /* 仮の値。水道が来ていないので、足りない水は運んでもらう */
+    outage: { power: 0.4, water: 0, ninoWater: 0 }, haul: true,
+    soilOM: 1.2, quake: 0.003, frostDepth: 0,
+    terrain: 'alen', plotPrice: 100
+  },
+  /* 八ヶ岳の麓（日本の山あいの高原）：冬は−10℃を下回り、土が凍る。日本でいちばん晴れる土地のひとつ。空き家と畑 */
+  yama: {
+    name: '八ヶ岳の麓', sub: '八ヶ岳の南の裾野・北緯36度', lat: 35.88, lon: 138.4, elev: 1000,
+    tmean: [-1.5, -0.8, 3.0, 8.8, 13.6, 17.3, 21.0, 21.8, 18.0, 11.8, 6.0, 0.9],
+    tmin: [-7.5, -7.0, -3.0, 2.5, 7.5, 12.5, 16.8, 17.5, 13.8, 6.8, 0.5, -4.8],
+    tmax: [5.0, 5.8, 9.8, 15.5, 20.0, 22.5, 26.0, 27.2, 23.0, 17.8, 12.2, 7.2],
+    rain: [40, 45, 85, 90, 110, 160, 180, 160, 200, 140, 60, 35],
+    rainDays: [4, 5, 8, 9, 10, 13, 14, 11, 12, 9, 6, 4],
+    sunHours: [6.5, 6.5, 6.5, 6.5, 6.5, 5.0, 5.5, 6.0, 4.8, 5.0, 5.8, 6.3],
+    quarters: ['1〜3月・冬', '4〜6月・春と梅雨', '7〜9月・夏と台風', '10〜12月・秋から冬へ'],
+    /* 仮の値。雪と台風で、ときどき止まる */
+    outage: { power: 0.5, water: 0.3, ninoWater: 0.3 },
+    soilOM: 3.5, quake: 0.01, frostDepth: 0.6, humid: true,
+    terrain: 'yama', plotPrice: 100
   }
 };
+/* 次の土地への招待。章を終えた土地（after のどれか）と、覚えた技術（needs のすべて）がそろうと届く。
+   届くのは、今いる土地でめぐりができてから。もう行った土地と、もう届いた招待は除く */
+export const ROUTE = {
+  ubud: { after: ['med'] },
+  alen: { after: ['med'] },
+  yama: { after: ['ubud', 'alen'] },
+  taos: { needs: ['saving', 'greenhouse'] }   // 乾き（節水）と寒さ（冬越しの温室）を覚えてから
+};
+export const visited = (s) => new Set([s.site, ...(s.flags.history || []).map(h => h.site)]);
+export function landsDone(s) { return [...(s.flags.history || []).map(h => h.site), ...(s.flags['done_' + s.site] != null ? [s.site] : [])]; }
+export function invitesDue(s) {
+  if (s.flags['done_' + s.site] == null) return [];
+  const done = landsDone(s), been = visited(s), got = new Set((s.flags.invites || []).map(i => i.land));
+  return Object.entries(ROUTE).filter(([k, r]) => !been.has(k) && !got.has(k)
+    && (!r.after || r.after.some(a => done.includes(a))) && (!r.needs || r.needs.every(t => s.known.includes(t)))).map(([k]) => k);
+}
+/* 届いていて、まだ行っていない招待 */
+export const openInvites = (s) => { const been = visited(s); return (s.flags.invites || []).filter(i => !been.has(i.land)); };
 /* 決まった地点（区画はこのまわりの空き地から選ぶ）。applyReal で lat/lon は選んだ区画の中心になる */
 for (const k in SITES) { SITES[k].lat0 = SITES[k].lat; SITES[k].lon0 = SITES[k].lon; }
 
@@ -91,6 +157,15 @@ export function terrain(key) {
     } else if (key === 'taos') {
       // 南（下）に向かって下るゆるい斜面。日当たりがいい
       e = 2128 + 0.09 * (50 - y) + 0.5 * Math.sin(x / 7) + 0.3 * Math.cos(y / 5);
+    } else if (key === 'ubud') {
+      // 東の沢へ下るゆるい斜面（実データが取れなかったときだけ）
+      e = 248 + 0.12 * (50 - x) + 0.6 * Math.sin(y / 6);
+    } else if (key === 'alen') {
+      // なだらかにうねる丘
+      e = 255 + 1.2 * Math.sin(x / 14) * Math.cos(y / 17) + 0.04 * y;
+    } else if (key === 'yama') {
+      // 南へ下る裾野
+      e = 1005 + 0.15 * (50 - y) + 0.5 * Math.sin(x / 9);
     } else e = 20;
     z[y * n + x] = e;
   }
@@ -708,7 +783,7 @@ function triggers(s, rep) {
   if (!has('heap') && ev('lowN')) out.push({ id: 'heap', why: 'lowN' });
   if (!has('toilet') && has('heap') && s.turn >= 4) out.push({ id: 'toilet', why: 'sewer' });
   if (!has('grey') && (ev('tankempty') || ev('watercut'))) out.push({ id: 'grey', why: ev('tankempty') ? 'tankempty' : 'watercut' });
-  if (!has('saving') && site0(s).haul && (ev('haul') || ev('tankempty'))) out.push({ id: 'saving', why: 'saving' });   // 節水は、水が本当に高い土地（タオス）で覚える
+  if (!has('saving') && site0(s).haul && (ev('haul') || ev('tankempty'))) out.push({ id: 'saving', why: 'saving' });   // 節水は、水を運んでもらう土地（アレンテージョ・タオス）で覚える
   if (!has('mulch') && ev('dry')) out.push({ id: 'mulch', why: 'dry' });
   if (!has('terrace') && (ev('erosion') || (ev('dry') && has('mulch')))) out.push({ id: 'terrace', why: ev('erosion') ? 'erosion' : 'dry' });
   if (!has('offgrid') && ev('blackout')) out.push({ id: 'offgrid', why: 'blackout' });
@@ -733,7 +808,7 @@ export function foresight(s) {
   const site = SITES[s.site], out = [];
   if (site.outage?.power) out.push({ id: 'offgrid', text: `停電が年に${site.outage.power}回ほどある土地` });
   if (site.outage?.ninoWater) out.push({ id: 'grey', text: 'エルニーニョの年は雨が3割減り、断水が増える' });
-  if (site.haul) out.push({ id: 'grey', text: '水道がなく、水は運んでもらうと1m³あたり5,000円' });
+  if (site.haul) { out.push({ id: 'saving', text: '水道がなく、足りない水は運んでもらうと1m³あたり5,000円' }); out.push({ id: 'grey', text: '水道がなく、水は運んでもらうと1m³あたり5,000円' }); }
   const coldM = site.tmean.filter(t => t < 5).length;
   if (coldM) { out.push({ id: 'greenhouse', text: `平均気温が5℃を下回る月が${coldM}か月。そのあいだ外の畑は育たない` }); out.push({ id: 'insulation', text: `いちばん寒い月の平均 ${Math.min(...site.tmean)}℃。暖房の熱が逃げやすい` }); }
   if (site.frostDepth) out.push({ id: 'deep', text: `冬は地面が${site.frostDepth}mほどの深さまで凍る` });

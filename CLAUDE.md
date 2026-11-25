@@ -21,13 +21,14 @@
 
 ## 動かす
 - ローカル：`python3 -m http.server 8000 -d public`
-- URL の切り替え：`/`（地球儀から）、`?play`（続きから）、`?play&new=med`（メデジンを新しく）、`?shot` `?proto`（試験用）、`?globe=atlas`、`?travel=taos`、`&fast=1`（季節の天気の早回しを飛ばす）、`?wxper=ms`（早回しの1日の長さ）
+- URL の切り替え：`/`（地球儀から）、`?play`（続きから）、`?play&new=med`（メデジンを新しく）、`?shot` `?proto`（試験用）、`?globe=atlas`、`?travel=alen`（土地は med・ubud・alen・yama・taos）、`&fast=1`（季節の天気の早回しを飛ばす）、`?wxper=ms`（早回しの1日の長さ）
 - 保存のキー：`orbarium-next-1`、引き継ぎ `orbarium-next-carry`、地図帳 `orbarium-next-atlas`（前の版は別のキー）
 
 ## 確かめる
 - 決まりごと：`node tools/rules_test.mjs`、自動で遊ぶ：`node tools/bots.mjs`
 - 新しい版をブラウザで（Playwright。実データは `tools/mock_real.py` が差し替える。画像は /tmp/orb_flow/）：
-  - `python3 tools/next/flow_test.py`（地球儀→メール→メデジン→季節→タオスまで一周）
+  - `python3 tools/next/flow_test.py`（地球儀→メール→メデジン→季節→アレンテージョまで一周）、`invite_test.py`（章の終わりの招待→もう少しここにいる→［次の土地へ］→ノートのメール→ウブド）
+  - `roof_test.py r1 alen` のように土地を渡すと、その土地の工法で試す
   - `edit_test.py`（編集モード：仮→✕で戻る／✓で一度に払う）、`season_test.py`、`move_test.py`、`batt_ui.py`、`pick_test.py`、`roof_test.py`、`contig.py`（連続した窓・生け垣）
   - 引数に `phone` を含めるとスマホの画面幅で試す（例：`python3 tools/next/flow_test.py phone1`）
 - 前の版：`python3 tools/ui_test.py`、`python3 tools/cutoff_test.py`

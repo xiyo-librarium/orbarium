@@ -1,7 +1,7 @@
 /* ノートと季節の報告：めぐり・家計簿・予定・天気・ノート、メール、季節が過ぎたときの報告。
    文章と数字は今の版（engine / content）のものをそのまま使い、見た目だけ /next に合わせる */
 import * as E from '/js/engine.js';
-import { NOTES, LESSON, eventText, ATLAS, CHAPTER_END, LANDS, CLIMATE } from '/js/content.js';
+import { NOTES, LESSON, eventText, ATLAS, CHAPTER_END, LAND_INVITE, CLIMATE } from '/js/content.js';
 
 export const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 export const man = (v) => `${Math.round(v).toLocaleString('ja-JP')}万円`;
@@ -62,7 +62,7 @@ export function flowMini(fs) {
 }
 
 /* ---------- ノートの各ページ ---------- */
-export const TABS = [['web', 'めぐり'], ['book', '家計簿'], ['plan', '予定'], ['sky', '天気'], ['note', 'ノート']];
+export const TABS = [['web', 'めぐり'], ['book', '家計簿'], ['plan', '予定'], ['sky', '天気'], ['note', 'ノート'], ['mail', 'メール']];
 const KEY = [['land', '土地'], ['loose', '人・ゆるい'], ['tight', '人・きっちり'], ['shared', '共有の網'], ['ret', '戻す'], ['leak', '漏れる'], ['near', '近所'], ['far', '遠く']];
 export function pageWeb(s) {
   const rel = E.relations(s), good = rel.nodes.filter(x => x.good === true && x.v > 0.15), first = !s.log.length;
@@ -137,16 +137,32 @@ export function chapterMail(s, rep) {
   const heap = Object.values(w.blocks).some(b => b.t === 'heap'), ctoilet = !!(w.house && (w.house.furn || []).some(f => f.t === 'ctoilet'));
   return CHAPTER_END[s.site] ? CHAPTER_END[s.site]({ water: P(rep.waterSelf), food: P(rep.foodSelf), money: P(E.cycles(s)[3].closure), heap, ctoilet }) : null;
 }
-export const nextLands = (s) => Object.keys(LANDS).filter(k => k !== s.site);
+/* 次の土地からの招待：メールと［行く］（土地代つき。足りなければ押せない） */
+export function inviteHTML(s, inv) {
+  const price = E.SITES[inv.land]?.plotPrice || 0, m = LAND_INVITE[inv.land](man(price));
+  return mailHTML(m, { cls: 'in', date: inv.date, actions: `<button class="yes" data-go="${inv.land}" ${s.cash < price ? 'disabled title="お金が足りない"' : ''}>${esc(m.go)}${price ? `（${man(price)}）` : ''}</button>` });
+}
+const LOCK = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+/* ノートのメール：届いた招待（いつでも行ける）、行った土地、まだ届いていない招待（何がそろえば届くか） */
+export function pageMail(s) {
+  const been = E.visited(s), inv = s.flags.invites || [];
+  const open = inv.filter(i => !been.has(i.land)), went = inv.filter(i => been.has(i.land));
+  const lock = Object.entries(E.ROUTE).filter(([k]) => !been.has(k) && !inv.some(i => i.land === k));
+  const cond = (r) => [r.after ? `${r.after.map(a => E.SITES[a].name).join('か')}でめぐりができると` : '', r.needs ? `${r.needs.map(t => NOTES[t]?.name || t).join('と')}を覚えると` : ''].filter(Boolean).join('、');
+  return `<p class="sm">めぐりができた土地に、次の土地から招待が届く。</p>
+    ${open.length ? `<div class="invites">${open.map(i => inviteHTML(s, i)).join('')}</div>` : ''}
+    ${went.map(i => { const w = mailWho(LAND_INVITE[i.land]('')); return `<div class="went"><span class="mail-av" style="--h:${w.hue}">${esc(w.name.slice(0, 1))}</span><b>${esc(E.SITES[i.land].name)}</b><span>${i.land === s.site ? 'いまここ' : '暮らした'}</span></div>`; }).join('')}
+    ${lock.map(([, r]) => `<div class="lock">${LOCK}<b>？？？</b><span>${esc(cond(r))}</span></div>`).join('')}`;
+}
 // before：過ごす前、s：過ごした後、end：この季節で章の目標に届いたか
-export function reportHTML(s, before, rep, lessons, end) {
+export function reportHTML(s, before, rep, lessons, end, due = []) {
   const site = E.SITES[s.site], phase = rep.phase === 'nino' ? 'エルニーニョの年（雨が少ない）' : rep.phase === 'nina' ? 'ラニーニャの年（雨が多い）' : '';
   const evs = rep.events.map(e => ({ e, t: eventText(e) }));
   const mails = lessons.map(l => lessonMail(l, mailDate(before))).join('');
   let endHTML = '';
   if (end) {
-    const rel = E.relations(s), good = rel.nodes.filter(x => x.good === true && x.v > 0.15).map(x => x.name), more = nextLands(s).length > 0;
-    const cm = more ? chapterMail(s, rep) : null;
+    const rel = E.relations(s), good = rel.nodes.filter(x => x.good === true && x.v > 0.15).map(x => x.name), more = Object.keys(E.ROUTE).some(k => !E.visited(s).has(k));
+    const cm = chapterMail(s, rep);
     endHTML = (cm ? mailHTML(cm, { cls: 'in', date: mailDate(s) }) : '') + `<div class="ev good"><b>${esc(site.name)}で、めぐりができた（${(s.turn / 4).toFixed(1)}年）</b><span>東京では、水も食べものもエネルギーも、入口は遠くの網、出口は下水とごみだった。いまは ${good.length}の相手と豊かに関わっている：${esc(good.join('、'))}。</span>${more ? '<span class="k">学んだ技術と、所持金と、週の過ごし方は持っていける。置いたものは、この土地に残る。</span>' : ''}</div>`;
   }
   return `<header><h2>${rep.year}年 ${esc(site.quarters[rep.q])}が過ぎた</h2><span class="sm">雨 ${Math.round(rep.A.rain)}mm${phase ? ' · ' + phase : ''}</span></header>
@@ -156,7 +172,8 @@ export function reportHTML(s, before, rep, lessons, end) {
     ${mails ? `<div class="mails">${mails}</div>` : ''}
     <div class="evs">${evs.length ? evs.map(({ t }) => `<div class="ev ${t.tone || ''}"><span class="k">出来事</span><b>${esc(t.title)}</b><span>${esc(t.body)}</span>${choiceHTML(t.choice, s.flags)}</div>`).join('') : '<div class="ev"><b>穏やかな3か月だった</b><span>大きな出来事はなかった。</span></div>'}</div>
     ${s.cash < 0 ? '<div class="ev bad"><b>お金が足りない</b><span>赤字になった。予定で外貨の仕事を増やすか、しばらく何も建てずに過ごそう。</span></div>' : ''}
-    ${endHTML}`;
+    ${endHTML}
+    ${due.length ? `<div class="invites">${due.map(land => inviteHTML(s, (s.flags.invites || []).find(i => i.land === land) || { land, date: mailDate(s) })).join('')}</div>` : ''}`;
 }
 
 /* 着いたときの気候：気温の帯と雨、東京とくらべる */

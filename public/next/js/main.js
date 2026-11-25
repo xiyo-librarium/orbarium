@@ -9,7 +9,7 @@ import { createView } from './view.js';
 import { createStage } from './stage.js';
 import { buildGlobe, subsolar, ll, routeLine } from './globe.js';
 import * as BK from './book.js';
-import { ATLAS, NOTES, INVITE, LAND_INVITE } from '/js/content.js';
+import { ATLAS, NOTES, INVITE } from '/js/content.js';
 
 const W = E.W, $ = (s) => document.querySelector(s);
 const Q = new URLSearchParams(location.search);
@@ -25,8 +25,12 @@ const yen = (n) => `${Math.round(n * 10) / 10}万円`.replace('.0万', '万');
 /* その土地で新しく建てるときの工法。断熱したものは「断熱した壁」と「断熱したトタン屋根」 */
 const LOCAL = {
   med: { wall: 'bahareque', finish: 'earth', accent: 0, roof: 'teja', roofShape: 'gable', roofDir: 'ns', pitch: 0.5, eaves: 0.9, floor: 'baldosa' },
-  taos: { wall: 'adobe', roof: 'mud', roofShape: 'flat', floor: 'tierra', eaves: 0.16 }
+  taos: { wall: 'adobe', roof: 'mud', roofShape: 'flat', floor: 'tierra', eaves: 0.16 },
+  alen: { wall: 'taipa', accent: 0, roof: 'telha', roofShape: 'gable', roofDir: 'ew', pitch: 0.3, eaves: 0.5, floor: 'tijoleira' }
 };
+// 工法をまだ作っていない土地（ウブド・八ヶ岳の麓）は「板とトタン／断熱した」だけ
+const BASIC = { wall: 'board', roof: 'tin' };
+const localOf = () => LOCAL[SITE] || null;
 const INSUL = { wall: 'ins', roof: 'tinins' };
 
 /* 道具：6つと消しゴム。まだ移していない道具は並べるだけ */
@@ -71,13 +75,13 @@ async function boot() {
   if (!saved) { try { real = await loadRealPlot(S.lat0 ?? S.lat, S.lon0 ?? S.lon); E.applyReal(SITE, real); } catch (e) { console.warn('実データなし', e); } }
   const fresh = !saved;
   const s = saved || E.newGame({ site: SITE, seed: MODE === 'proto' ? 7 : Math.floor(Math.random() * 1e6), real,
-    ...(carry ? { cash: carry.cash, persons: carry.persons, known: carry.known, learned: carry.learned, year: carry.year, flags: { history: carry.history } } : {}) });
+    ...(carry ? { cash: carry.cash, persons: carry.persons, known: carry.known, learned: carry.learned, year: carry.year, flags: { history: carry.history, invites: carry.invites || [] } } : {}) });
   s.world.site = SITE;
   if (carry) { s.q = carry.q; localStorage.removeItem(CARRY); }
   if (MODE === 'proto') {
   // 見た目の試作：母屋をその土地の工法で建て替え、畑を少し
   const w0 = s.world, d0 = W.cloneHouse(w0.house);
-  Object.assign(d0, LOCAL[SITE] || LOCAL.med);
+  Object.assign(d0, localOf() || BASIC);
   let i = 0; for (const o of W.houseOuterEdges(d0)) { if (!d0.open[o.e] && i % 3 === 1) d0.open[o.e] = 'window'; i++; }
   W.buildHouse(s, d0);
   const cs = Object.keys(w0.house.cells).map(k => k.split(',').map(Number)), xs = cs.map(c => c[0]), ys = cs.map(c => c[1]);
@@ -234,7 +238,7 @@ async function boot() {
   const draftFor = (tr) => {
     const w = s.world, { out, xa, xb, ya, yb } = rectCells(tr), base = baseFor(out);
     const hs = out.map(([x, y]) => W.h(w, x, y)).sort((a, b) => a - b);
-    const d = base ? W.cloneHouse(base) : Object.assign(W.newHouse(hs[Math.floor(hs.length / 2)] ?? 0), LOCAL[SITE] || LOCAL.med, { id: 'new', use: 'store' });
+    const d = base ? W.cloneHouse(base) : Object.assign(W.newHouse(hs[Math.floor(hs.length / 2)] ?? 0), localOf() || BASIC, { id: 'new', use: 'store' });
     const st = out.map(([x, y]) => { if (W.buildingAt(w, x, y) === base && base) return 'have'; const p = W.cellProblem(w, d, x, y); return !p ? 'ok' : (p === '木がある' || p === 'やぶがある') ? 'tree' : p; });
     return { out, st, d, base, xa, xb, ya, yb };
   };
@@ -340,7 +344,7 @@ async function boot() {
     const t = scratch(); for (const [x, y] of cuts) W.cutTree(t, x, y);   // 床の形は、木を切ったことにして決める
     let d;
     if (D.base) d = W.cloneHouse(D.base);
-    else { d = W.newAnnex(t.world, D.d.z, 'store'); Object.assign(d, LOCAL[SITE] || LOCAL.med); }
+    else { d = W.newAnnex(t.world, D.d.z, 'store'); Object.assign(d, localOf() || BASIC); }
     const r = W.draftAddRect(t.world, d, D.xa, D.ya, D.xb, D.yb);
     if (!r.added) { toast('床を描けない（' + Object.keys(r.why).join('・') + '）'); return; }
     if (!D.base) { if (Object.keys(d.cells).length < 4) { toast('床は4m²（2×2m）より広く'); return; } autoOpen(d); }
@@ -728,8 +732,8 @@ async function boot() {
     const w = s.world, id = W.bid(b), n = Object.keys(b.cells).length, bx = W.roofBox(b);
     const use = id === 'main' ? 'live' : (b.use || 'store'), U = W.USES[use];
     const name = id === 'main' ? '母屋' : use === 'stay' ? '離れ' : use === 'grow' ? '温室' : '倉庫';
-    const ins = b.wall === INSUL.wall, L = LOCAL[SITE] || LOCAL.med, R = W.ROOFS[b.roof];
-    const method = ins ? 'ins' : b.wall === L.wall && b.roof === L.roof ? 'local' : b.wall === 'board' && (b.roof === 'tin' || b.roof === 'tinins') ? 'basic' : '';   // 今の工法（どれでもなければ印なし）
+    const ins = b.wall === INSUL.wall, L = localOf(), R = W.ROOFS[b.roof];
+    const method = ins ? 'ins' : L && b.wall === L.wall && b.roof === L.roof ? 'local' : b.wall === 'board' && (b.roof === 'tin' || b.roof === 'tinins') ? 'basic' : '';   // 今の工法（どれでもなければ印なし）
     const A = W.analyze(w, site(), s.persons.length), bb = A.byBuilding?.[id] || { area: 0, got: 0, tanks: 0 };
     const m3 = Math.round(bb.area * rainY / 1000), got = Math.round(bb.got * rainY / 1000);
     const rain = bb.got > 0 && bb.gut ? `<div class="flow">屋根で年 <b>${m3}m³</b> の雨を受け、雨どいからタンクへ。</div>`
@@ -756,7 +760,7 @@ async function boot() {
       ${id === 'main' ? '' : `<div class="row"><span>使い道</span>${seg('use', [['stay', '泊める'], ['store', 'しまう'], ['grow', '育てる']], use)}</div>`}
       ${remodelOf(id) ? `<div class="flow remodel">試している（まだお金はかからない）。${G.draft.err ? `<br><span class="bad">${BK.esc(G.draft.err)}</span>` : `改築すると約 <b>${yen(G.draft.cost || 0)}</b>。`}
         <div class="acts"><button data-act="rno">やめる（元どおり）</button><button class="yes" data-act="ryes" ${G.draft.err ? 'disabled' : ''}>改築する</button></div></div>` : ''}
-      <div class="row"><span>工法</span>${seg('method', [['basic', '板とトタン'], ['local', 'この土地の工法'], ['ins', '断熱した', !knows('insulation')]], method)}</div>
+      <div class="row"><span>工法</span>${seg('method', [['basic', '板とトタン'], ...(L ? [['local', 'この土地の工法']] : []), ['ins', '断熱した', !knows('insulation')]], method)}</div>
       <div class="row"><span>中</span><div><button class="wide" data-act="inside">${stage.cut ? '壁を戻す' : '中を見る・家具を動かす'}</button></div></div>
       ${roofRow}${fixtures}${power}${rain}
       <p class="note">${U.note}${!knows('insulation') ? ' 断熱は、季節を過ごして学ぶと選べる。' : ''}</p>`;
@@ -830,7 +834,7 @@ async function boot() {
     if (!p || p.kind !== 'building') return;
     const b = bOf(p.id), id = p.id, R = (fn) => remodel(id, (d) => fn(d) || null);
     if (k === 'use') { R((d) => { d.use = a; }); return; }
-    if (k === 'method') { const L = LOCAL[SITE] || LOCAL.med; R((d) => {
+    if (k === 'method') { const L = localOf() || BASIC; R((d) => {
         if (a === 'ins') Object.assign(d, INSUL); else if (a === 'basic') Object.assign(d, { wall: 'board', roof: 'tin' }); else Object.assign(d, { wall: L.wall, roof: L.roof, finish: L.finish });
         const R2 = W.ROOFS[d.roof];   // 瓦は傾けた屋根に、土の屋根は平らに（今の版と同じ）
         if (R2.pitched && (d.roofShape || 'flat') === 'flat') { d.roofShape = L.roofShape && L.roofShape !== 'flat' ? L.roofShape : 'gable'; d.roofDir = L.roofDir || 'ns'; d.pitch = Math.max(d.pitch || 0.3, L.pitch || 0.5); d.eaves = L.eaves ?? d.eaves; }
@@ -922,7 +926,7 @@ async function boot() {
   }
 
   /* ---------- 季節を過ごす：3か月を進め、報告を出す ---------- */
-  const seasonLabel = () => { const q = E.SITES[s.site].quarters[s.q]; $('#season').textContent = `${q.split('・')[0]}を過ごす`; $('#where').textContent = innerWidth > 640 ? `${S.name} · ${E.SITES[s.site].quarters[s.q]}` : S.name; };
+  const seasonLabel = () => { const q = E.SITES[s.site].quarters[s.q]; $('#season').textContent = `${q.split('・')[0]}を過ごす`; $('#where').textContent = innerWidth > 640 ? `${S.name} · ${E.SITES[s.site].quarters[s.q]}` : S.name; syncMail(); };
   function runSeason() {
     if (G.edit) { toast('✓決める か ✕ のあとで'); return; }
     const before = E.clone(s);
@@ -932,13 +936,16 @@ async function boot() {
     const goodN = E.relations(ns).nodes.filter(x => x.good === true && x.v > 0.15).length;
     const end = goodN >= BK.GOAL && ns.flags['done_' + ns.site] == null;
     if (end) ns.flags['done_' + ns.site] = ns.turn;
+    // 次の土地への招待（めぐりができた土地で、条件がそろったら届く）
+    const due = E.invitesDue(ns);
+    if (due.length) ns.flags.invites = [...(ns.flags.invites || []), ...due.map(land => ({ land, from: ns.site, date: BK.mailDate(ns) }))];
     // その3か月の天気（計算に使った毎日の雨と日差し）を早回しで見せてから、結果に入れ替えて報告
     const q = before.q, days = (ns.flags.weatherYear || []).filter(d => d.m >= q * 3 && d.m < q * 3 + 3);
     const finish = () => {
       for (const k of Object.keys(s)) delete s[k]; Object.assign(s, ns);   // 同じ入れ物のまま中身を入れ替える（舞台や道具が s を見ている）
       G.undo = []; G.redo = []; fCache = { sig: null, f: null };
       changed(); persist(); seasonLabel();
-      showReport(before, report, lessons, end);
+      showReport(before, report, lessons, end, due);
     };
     if (days.length && !Q.has('fast')) replayWeather(days, before.year, finish); else finish();
   }
@@ -992,40 +999,49 @@ async function boot() {
     };
     requestAnimationFrame(step);
   }
-  function showReport(before, rep, lessons, end) {
-    const more = end && BK.nextLands(s).length, cm = more ? BK.chapterMail(s, rep) : null;
-    $('#reportBody').innerHTML = BK.reportHTML(s, before, rep, lessons, end);
-    $('#reportAct').innerHTML = (cm ? `<button id="rNext">${BK.esc(cm.go)}</button>` : '') + `<button class="yes" id="rBack">${cm ? BK.esc(cm.stay) : '土地に戻る'}</button>`;
+  function showReport(before, rep, lessons, end, due = []) {
+    $('#reportBody').innerHTML = BK.reportHTML(s, before, rep, lessons, end, due);
+    $('#reportAct').innerHTML = `<button class="yes" id="rBack">${due.length ? 'もう少しここにいる' : '土地に戻る'}</button>`;
     $('#report').hidden = false; $('#rBack').focus();
     $('#rBack').onclick = () => { $('#report').hidden = true; };
-    if ($('#rNext')) $('#rNext').onclick = () => {
-      const to = BK.nextLands(s)[0], price = E.SITES[to].plotPrice || 0;
-      if (s.cash < price) { toast(`お金が足りない（土地は${BK.man(price)}）`); return; }
-      if (MODE !== 'play') { toast('試作の画面では、次の土地へは行かない'); return; }
-      localStorage.setItem(CARRY, JSON.stringify({ from: s.site, to, cash: s.cash - price, persons: s.persons, known: s.known, learned: s.learned, year: s.year, q: s.q,
-        history: [...(s.flags.history || []), { site: s.site, years: s.turn / 4, rel: E.relations(s).score }] }));
-      location.href = `${BASE}?travel=${to}`;
-    };
     $('#reportBody').querySelectorAll('[data-choice]').forEach(b2 => b2.onclick = () => {
       const [k, v2] = b2.dataset.choice.split(':'); if (k === 'surplus') s.flags.surplus = v2; if (k === 'pest') s.flags.pestHand = v2 === 'hand'; persist();
       b2.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b2));
     });
   }
 
-  /* ---------- ノート：めぐり・家計簿・予定・天気・ノート ---------- */
+  /* 次の土地へ：届いた招待の［行く］から。お金（土地代を引く）・人・学んだこと・年・これまでの土地・届いた招待を持ち越す */
+  function goLand(to) {
+    const price = E.SITES[to]?.plotPrice || 0;
+    if (MODE !== 'play') { toast('試作の画面では、次の土地へは行かない'); return; }
+    if (G.edit) { toast('✓決める か ✕ のあとで'); return; }
+    if (s.cash < price) { toast(`お金が足りない（土地は${BK.man(price)}）`); return; }
+    localStorage.setItem(CARRY, JSON.stringify({ from: s.site, to, cash: s.cash - price, persons: s.persons, known: s.known, learned: s.learned, year: s.year, q: s.q, invites: s.flags.invites || [],
+      history: [...(s.flags.history || []), { site: s.site, years: s.turn / 4, rel: E.relations(s).score }] }));
+    location.href = `${BASE}?travel=${to}`;
+  }
+  $('#reportBody').addEventListener('click', (e) => { const g = e.target.closest('[data-go]'); if (g && !g.disabled) goLand(g.dataset.go); });
+  // 届いていてまだ行っていない招待があれば、場所の札のとなりに［次の土地へ］
+  const syncMail = () => { const n = E.openInvites(s).length, b = $('#mailBtn'); b.hidden = MODE !== 'play' || !n;
+    b.innerHTML = `<svg viewBox="0 0 24 24"><rect x="3.5" y="6" width="17" height="12" rx="2"/><path d="M4 7l8 6 8-6"/></svg><span class="t">次の土地へ</span>${n > 1 ? `<b>${n}</b>` : ''}`; };
+  $('#mailBtn').onclick = () => openBook('mail');
+
+  /* ---------- ノート：めぐり・家計簿・予定・天気・ノート・メール ---------- */
   G.tab = 'web'; G.studied = -1;
   const openBook = (tab) => { if (tab) G.tab = tab; renderBook(); $('#sheet').hidden = false; };
   function renderBook() {
     $('#tabs').innerHTML = BK.TABS.map(([k, n]) => `<button data-tab="${k}" class="${G.tab === k ? 'on' : ''}">${n}</button>`).join('');
     const body = $('#sheetBody');
-    body.innerHTML = G.tab === 'web' ? BK.pageWeb(s) : G.tab === 'book' ? BK.pageBook(s) : G.tab === 'plan' ? BK.pagePlan(s) : G.tab === 'sky' ? BK.pageSky(s, G.studied !== s.turn) : BK.pageNote(s, atlasRead()) + (MODE === 'play' ? `<p><a href="${BASE}?globe=atlas&from=play">地球儀の図鑑を開く</a></p>` : '');
+    body.innerHTML = G.tab === 'mail' ? BK.pageMail(s) : G.tab === 'web' ? BK.pageWeb(s) : G.tab === 'book' ? BK.pageBook(s) : G.tab === 'plan' ? BK.pagePlan(s) : G.tab === 'sky' ? BK.pageSky(s, G.studied !== s.turn) : BK.pageNote(s, atlasRead()) + (MODE === 'play' ? `<p><a href="${BASE}?globe=atlas&from=play">地球儀の図鑑を開く</a></p>` : '');
     body.scrollTop = 0;
+    $('#tabs .on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
   $('#bookBtn').onclick = () => openBook();
   $('#sheetX').onclick = () => { $('#sheet').hidden = true; };
   $('#sheet').onclick = (e) => { if (e.target.id === 'sheet') $('#sheet').hidden = true; };
   $('#tabs').onclick = (e) => { const b2 = e.target.closest('[data-tab]'); if (!b2) return; G.tab = b2.dataset.tab; renderBook(); };
   $('#sheetBody').onclick = (e) => {
+    const g = e.target.closest('[data-go]'); if (g) { if (!g.disabled) goLand(g.dataset.go); return; }
     const c = e.target.closest('[data-cell]');
     if (c) { const [pi, di] = c.dataset.cell.split(',').map(Number), order = ['work', 'farm', 'rest'], v0 = s.persons[pi].week[di] === 'build' ? 'farm' : s.persons[pi].week[di];
       s.persons[pi].week[di] = order[(order.indexOf(v0) + 1) % 3]; fCache = { sig: null, f: null }; persist(); const top = $('#sheetBody').scrollTop; renderBook(); $('#sheetBody').scrollTop = top; return; }
@@ -1107,14 +1123,11 @@ async function bootGlobe(mode = 'title') {
   const fadeTo = (url) => { const f = document.createElement('div'); f.className = 'fade'; document.body.appendChild(f); requestAnimationFrame(() => f.classList.add('on')); setTimeout(() => location.replace(url), 650); };
   // 旅：出発地の上で、右上にメールの通知が届く。押すと画面の真ん中に広がって読める。［行く］で飛び、着いた所に虫ピンを刺す。
   // 着いた土地のデータは、読んでいるあいだに裏で取ってくる
+  // mail がなければ（招待はもう読んである）、出発地を見せてすぐ飛ぶ
   const travel = (from, to, mail, url) => {
     look(E.SITES[from].lat, E.SITES[from].lon);
     const S2 = E.SITES[to]; loadRealPlot(S2.lat0 ?? S2.lat, S2.lon0 ?? S2.lon).catch(() => null);
     $('#where').textContent = `${E.SITES[from].name}`; hint.textContent = '';
-    const who = BK.mailWho(mail), body = (Array.isArray(mail.body) ? mail.body : [mail.body]).join(' ');
-    const n = document.createElement('button'); n.className = 'notif'; n.setAttribute('aria-label', `${who.name}からのメール：${mail.subject}`);
-    n.innerHTML = `<span class="mail-av" style="--h:${who.hue}">${BK.esc(who.name.slice(0, 1))}</span><span class="nt"><span class="nh"><b>${BK.esc(who.name)}</b><span>今</span></span><span class="ns">${BK.esc(mail.subject)}</span><span class="np">${BK.esc(body)}</span></span>`;
-    setTimeout(() => { document.body.appendChild(n); requestAnimationFrame(() => requestAnimationFrame(() => n.classList.add('in'))); }, 900);
     const go = () => {
       $('#where').textContent = `${E.SITES[from].name}から、${S2.name}へ`;
       globe.add(routeLine([E.SITES[from], S2])); v.req();
@@ -1124,6 +1137,11 @@ async function bootGlobe(mode = 'title') {
         if (dest) globe.userData.stick(dest, 700, () => setTimeout(() => fadeTo(url), 450)); else fadeTo(url);
       });
     };
+    if (!mail) { setTimeout(go, 900); return; }
+    const who = BK.mailWho(mail), body = (Array.isArray(mail.body) ? mail.body : [mail.body]).join(' ');
+    const n = document.createElement('button'); n.className = 'notif'; n.setAttribute('aria-label', `${who.name}からのメール：${mail.subject}`);
+    n.innerHTML = `<span class="mail-av" style="--h:${who.hue}">${BK.esc(who.name.slice(0, 1))}</span><span class="nt"><span class="nh"><b>${BK.esc(who.name)}</b><span>今</span></span><span class="ns">${BK.esc(mail.subject)}</span><span class="np">${BK.esc(body)}</span></span>`;
+    setTimeout(() => { document.body.appendChild(n); requestAnimationFrame(() => requestAnimationFrame(() => n.classList.add('in'))); }, 900);
     n.onclick = () => {   // 通知の場所から、真ん中へ広がる
       const r0 = n.getBoundingClientRect(); n.classList.remove('in'); n.classList.add('opened');
       const ov = document.createElement('div'); ov.className = 'mailview';
@@ -1139,8 +1157,8 @@ async function bootGlobe(mode = 'title') {
     };
   };
   if (mode === 'travel') {
-    const price = E.SITES[toKey]?.plotPrice || 0;
-    travel(fromKey, toKey, LAND_INVITE[toKey] ? LAND_INVITE[toKey](BK.man(price)) : { from: 'ノート', subject: '次の土地へ', body: [''], go: '行く' }, `${BASE}?play&new=${toKey}`);
+    if (!E.SITES[toKey]) { location.replace(BASE); return; }
+    travel(fromKey, toKey, null, `${BASE}?play&new=${toKey}`);
   } else if (mode === 'atlas') {
     look(15, -40);
     $('#where').textContent = '地球儀で学ぶ';

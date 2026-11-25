@@ -41,13 +41,14 @@ try:
         page.click('#aback'); ready(page)
         page.click('#cont'); ready(page); shot(page, '8cont_play')
         print('resumed turn', page.evaluate("window.__next.s.turn"), 'url', page.url)
-        # 章の終わりの代わり：持ち越しを入れて、タオスへ
-        page.evaluate("""(() => { const s = window.__next.s; s.cash = 3000000; localStorage.setItem('orbarium-next-carry', JSON.stringify({ from: 'med', to: 'taos', cash: s.cash - 1000000, persons: s.persons, known: s.known, learned: s.learned, year: s.year, q: s.q, history: [{ site: 'med', years: 1, rel: 5 }] })); location.href = '/?travel=taos'; })()""")
-        page.wait_for_url('**travel=taos', timeout=20000); ready(page); shot(page, '9travel')
-        page.wait_for_selector('.notif.in', timeout=8000); shot(page, '9notif', 500); page.click('.notif'); page.wait_for_timeout(600)
-        print('travel mail', page.evaluate("document.querySelector('.mailview .mail-subj')?.textContent"), page.evaluate("document.querySelector('#go')?.textContent"))
-        page.click('#go'); page.wait_for_url('**/?play**', timeout=20000); ready(page); shot(page, '10taos')
-        print('taos', page.evaluate("window.__next.s.site"), 'cash', page.evaluate("window.__next.s.cash"), 'history', page.evaluate("JSON.stringify(window.__next.s.flags.history)"), 'carry left', page.evaluate("localStorage.getItem('orbarium-next-carry')"), 'climate', page.evaluate("document.querySelector('#reportBody h2')?.textContent"))
+        # 章の終わりの代わり：持ち越しを入れて、アレンテージョへ（招待は報告かノートで読んであるので、地球儀ではすぐ飛ぶ）
+        page.evaluate("""(() => { const s = window.__next.s; localStorage.setItem('orbarium-next-carry', JSON.stringify({ from: 'med', to: 'alen', cash: 200, persons: s.persons, known: s.known, learned: s.learned, year: s.year, q: s.q, invites: [{ land: 'ubud', from: 'med' }, { land: 'alen', from: 'med' }], history: [{ site: 'med', years: 1, rel: 5 }] })); location.href = '/?travel=alen'; })()""")
+        page.wait_for_url('**travel=alen', timeout=20000); ready(page); shot(page, '9travel', 1500)
+        print('travel notif', page.evaluate("!!document.querySelector('.notif')"))
+        page.wait_for_url('**/?play**', timeout=20000); ready(page); shot(page, '10alen')
+        print('alen', page.evaluate("window.__next.s.site"), 'cash', page.evaluate("window.__next.s.cash"), 'history', page.evaluate("JSON.stringify(window.__next.s.flags.history)"), 'invites', page.evaluate("JSON.stringify(window.__next.E.openInvites(window.__next.s).map(i=>i.land))"), 'carry left', page.evaluate("localStorage.getItem('orbarium-next-carry')"), 'climate', page.evaluate("document.querySelector('#reportBody h2')?.textContent"))
+        page.click('#rBack'); page.wait_for_timeout(300)
+        print('mailBtn', page.evaluate("!document.querySelector('#mailBtn').hidden"), page.evaluate("document.querySelector('#mailBtn').textContent"))
         print('ERRS', errs[:8])
 finally:
     srv.terminate()
