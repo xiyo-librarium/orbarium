@@ -1259,8 +1259,10 @@ async function bootGlobe(mode = 'title') {
       offX = off0 * (1 - sm(u / (A1 - 0.05))); lift(); if (gsh) gsh.material.opacity = 1 - sm((u - B0) / 0.2);
       v.req();
       if (!called && u >= A1 - 0.07) { called = true; done(); }
-      if (!fading && u >= B0) { fading = true; fade.classList.add('on'); }
-      if (u >= 1 && !gone && url) { gone = true; location.replace(url + '&look=desk'); }
+      if (!fading && u >= B0) { fading = true; fade.classList.add('on');
+        // 黒になりきってから土地の画面へ（カメラの動きの終わりではなく、暗転の終わりで。描画が間引かれても途中で切り替わらない）
+        const go2 = () => { if (!gone && url) { gone = true; location.replace(url + '&look=desk'); } };
+        fade.addEventListener('transitionend', go2, { once: true }); setTimeout(go2, ms * (1 - B0) + 400); }
       if (u < 1) requestAnimationFrame(step);
     };
     step();
