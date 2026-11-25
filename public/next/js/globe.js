@@ -34,7 +34,7 @@ export function globeTextures(rings, W = 4096, desk = false) {
 }
 
 /* 地球全体の標高（AWS Terrain Tiles、土地の画面と同じデータ。z=3 の 64 枚）から、陸の起伏の法線の画像（正距円筒）を作る。
-   陸だけ、低い所も起伏が見えるように平方根に近い曲線で。紙粘土らしく少しならす */
+   陸だけ、高さはほぼそのままの割合で（低い所を持ち上げすぎない）。紙粘土らしく少しならす */
 export async function loadRelief(z = 3, W = 2048) {
   const N = 2 ** z, S = N * 256, mc = document.createElement('canvas'); mc.width = mc.height = S; const mx = mc.getContext('2d');
   await Promise.all(Array.from({ length: N * N }, (_, k) => new Promise((res) => {
@@ -48,7 +48,7 @@ export async function loadRelief(z = 3, W = 2048) {
     const my = Math.min(S - 1, Math.max(0, Math.floor((1 - Math.log(Math.tan(Math.PI / 4 + lat / 2)) / Math.PI) / 2 * S)));
     for (let i = 0; i < W; i++) {
       const q = (my * S + Math.min(S - 1, Math.floor((i + 0.5) / W * S))) * 4, e = md[q] * 256 + md[q + 1] + md[q + 2] / 256 - 32768;
-      h[j * W + i] = e > 0 ? Math.min(1, Math.pow(e / 5200, 0.55)) : 0;
+      h[j * W + i] = e > 0 ? Math.min(1, Math.pow(e / 5200, 0.9)) : 0;   // 低い平地まで持ち上げると、海岸で崖になる（アマゾンの河口が丸く盛り上がって見えた）
     }
   }
   // 少しならす（紙粘土らしく、段差を消す）：横・縦に3回ずつ
@@ -58,7 +58,7 @@ export async function loadRelief(z = 3, W = 2048) {
     for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) h[j * W + i] = (tmp[Math.max(0, j - 1) * W + i] + tmp[j * W + i] + tmp[Math.min(H - 1, j + 1) * W + i]) / 3;
   }
   // 傾きから法線の画像を作る（凹凸＝bump と違い、寄っても薄まらない）。東西の間隔は緯度で縮むので割り戻す
-  const oc = document.createElement('canvas'); oc.width = W; oc.height = H; const ox = oc.getContext('2d'), od = ox.createImageData(W, H), K = W / 64;
+  const oc = document.createElement('canvas'); oc.width = W; oc.height = H; const ox = oc.getContext('2d'), od = ox.createImageData(W, H), K = W / 64 * 0.7;
   for (let j = 0; j < H; j++) {
     const cl = Math.max(0.2, Math.cos((90 - (j + 0.5) / H * 180) * Math.PI / 180));
     for (let i = 0; i < W; i++) {
