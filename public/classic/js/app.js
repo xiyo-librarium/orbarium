@@ -1,8 +1,8 @@
-import * as E from './engine.js';
-import { NOTES, LESSON, eventText, ATLAS, INVITE, LANDS, CLIMATE, CHAPTER_END, LAND_INVITE } from './content.js';
+import * as E from '/js/engine.js';
+import { NOTES, LESSON, eventText, ATLAS, INVITE, LANDS, CLIMATE, CHAPTER_END, LAND_INVITE } from '/js/content.js';
 import { createGlobe, flyTo, loadLand } from './globe.js';
-import { createView, sunVector, dirName, vegObjects } from './iso.js';
-import { loadRealPlot, mapsUrl } from './realsite.js';
+import { createView, sunVector, dirName, vegObjects } from '/js/iso.js';
+import { loadRealPlot, mapsUrl } from '/js/realsite.js';
 
 const KEY = 'orbarium-v5';   // v5：人の家のない区画を選び直し、植生をのせた
 const app = document.getElementById('app');

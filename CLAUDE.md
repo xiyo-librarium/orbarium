@@ -14,24 +14,24 @@
 
 ## 置き場所
 - `public/` がそのまま公開される静的サイト（ビルドなし、依存なし）。three.js r187 は `public/vendor/` に同梱し、importmap で読む。
-- 本番 `/` の中身は `public/next/`（`/next/` でも同じものが動く）。`public/index.html` は `public/next/index.html` の写しなので、片方を変えたらもう片方にも反映する。
-- 前の版は `/classic/`（`public/classic/index.html` が `/js/app.js` を読む）。
-- 計算の中心は両方の版で共有：`public/js/world.js`（土地・建物・見積もり・太陽光の向き）、`public/js/engine.js`（季節を進める）、`public/js/content.js`（メール・出来事・気候の文章）。
-- 新しい版の画面：`public/next/js/main.js`（操作・カード・編集・地球儀の流れ）、`stage.js`（敷地の3D）、`house.js`（家・屋根・雨樋・太陽光の見た目）、`globe.js`、`view.js`（光・天気）、`trees.js`、`book.js`（ノート・メール）、`next.css`。
+- 本番 `/` の入口は `public/index.html`、画面の中身は `public/game/`。前の置き場所 `/next/` への古いリンクは `public/_redirects` で `/` へ転送する。
+- 前の版は記念に `/classic/` に残す。前の版だけの物は `public/classic/`（`index.html`・`classic.css`・`js/app.js`・`js/globe.js`）にまとめてある。消さない。
+- 計算の中心は本番と前の版で共有（`public/js/`）：`public/js/world.js`（土地・建物・見積もり・太陽光の向き）、`public/js/engine.js`（季節を進める）、`public/js/content.js`（メール・出来事・気候の文章）。 日差しの向き（`public/js/iso.js` の `sunVector`・`dirName`）も共有。
+- 画面：`public/game/main.js`（操作・カード・編集・地球儀の流れ）、`stage.js`（敷地の3D）、`house.js`（家・屋根・雨樋・太陽光の見た目）、`globe.js`、`view.js`（光・天気）、`trees.js`、`book.js`（ノート・メール）、`game.css`。
 
 ## 動かす
 - ローカル：`python3 -m http.server 8000 -d public`
-- URL の切り替え：`/`（地球儀から）、`?play`（続きから）、`?play&new=med`（メデジンを新しく）、`?shot` `?proto`（試験用）、`?globe=atlas`、`?travel=alen`（土地は med・ubud・alen・yama・taos）、`&look=desk`（試験中の机の地球儀。`&glow=0〜1` で明るさ、`&flyms=` で飛ぶ時間）、`&fast=1`（季節の天気の早回しを飛ばす）、`?wxper=ms`（早回しの1日の長さ）
-- 保存のキー：`orbarium-next-1`、引き継ぎ `orbarium-next-carry`、地図帳 `orbarium-next-atlas`（前の版は別のキー）
+- URL の切り替え：`/`（地球儀から）、`?play`（続きから）、`?play&new=med`（メデジンを新しく）、`?shot` `?proto`（試験用）、`?globe=atlas`、`?travel=alen`（土地は med・ubud・alen・yama・taos）、`&glow=0〜1`（地球儀の明るさを試す）、`&flyms=`（地球儀の飛ぶ時間を試す）、`&in=dark`（土地の画面を黒から明ける。地球儀から来たとき）、`&fast=1`（季節の天気の早回しを飛ばす）、`?wxper=ms`（早回しの1日の長さ）
+- 保存のキー：`orbarium-1`、引き継ぎ `orbarium-carry`、地図帳 `orbarium-atlas`（前の版は別のキー）。前のキー `orbarium-next-…` は、開いたときに新しいキーへ移して消す
 
 ## 確かめる
 - 決まりごと：`node tools/rules_test.mjs`、自動で遊ぶ：`node tools/bots.mjs`
-- 新しい版をブラウザで（Playwright。実データは `tools/mock_real.py` が差し替える。画像は /tmp/orb_flow/）：
-  - `python3 tools/next/flow_test.py`（地球儀→メール→メデジン→季節→アレンテージョまで一周）、`invite_test.py`（章の終わりの招待→もう少しここにいる→［次の土地へ］→ノートのメール→ウブド）、`room_test.py`（壁を下げて床の線をなぞる→間仕切りと自動の扉→間仕切りを押して扉に→✓）
-  - `globe_look.py`（地球儀の見た目くらべ：今／机の地球儀の明るさ3段と、寄っていくコマ）
+- 本番の画面をブラウザで（Playwright。実データは `tools/mock_real.py` が差し替える。画像は /tmp/orb_flow/）：
+  - `python3 tools/browser/flow_test.py`（地球儀→メール→メデジン→季節→アレンテージョまで一周）、`invite_test.py`（章の終わりの招待→もう少しここにいる→［次の土地へ］→ノートのメール→ウブド）、`room_test.py`（壁を下げて床の線をなぞる→間仕切りと自動の扉→間仕切りを押して扉に→✓）
+  - `globe_look.py`（地球儀の明るさ3段と、寄っていく動きのコマと動画）
   - `roof_test.py r1 alen` のように土地を渡すと、その土地の工法で試す
   - `edit_test.py`（編集モード：仮→✕で戻る／✓で一度に払う）、`season_test.py`、`move_test.py`、`batt_ui.py`、`pick_test.py`、`roof_test.py`、`contig.py`（連続した窓・生け垣）
-  - 引数に `phone` を含めるとスマホの画面幅で試す（例：`python3 tools/next/flow_test.py phone1`）
+  - 引数に `phone` を含めるとスマホの画面幅で試す（例：`python3 tools/browser/flow_test.py phone1`）
 - 前の版：`python3 tools/ui_test.py`、`python3 tools/cutoff_test.py`
 - 画面を変えたら、スクリーンショットを自分の目で見てから出す。
 

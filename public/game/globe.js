@@ -139,7 +139,7 @@ function pinShadow(pin, sun) {
 }
 
 export function buildGlobe(rings, pins = [], route = null, opt = {}) {
-  const desk = !!opt.desk, glow = desk ? (opt.glow ?? 0) : null, g = new THREE.Group(), T = globeTextures(rings, 4096, desk), lived = opt.lived || [];
+  const desk = opt.desk !== false, glow = desk ? (opt.glow ?? 0) : null, g = new THREE.Group(), T = globeTextures(rings, 4096, desk), lived = opt.lived || [];
   // 海：なめらかで少しつやがある。陸：紙粘土のようなつや消しで、海より少しだけ盛り上がる。
   // 机の地球儀（試験中）：海も塗った紙のようなつや消しで、刷毛むらだけ。陸はもう少しでこぼこ
   // 机の地球儀：むらは地球儀に貼りつける（local。回しても流れない）。陸の起伏は作り物のむらではなく実際の標高（setRelief）

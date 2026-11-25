@@ -15,12 +15,12 @@ try:
         page = ctx.new_page()
         errs = []; page.on('pageerror', lambda e: errs.append('PE ' + str(e))); page.on('console', lambda m: errs.append(m.text[:200]) if m.type == 'error' else None)
         mock_real.install(page)
-        page.goto('http://localhost:8808/next/?shot=1')
-        page.wait_for_function('window.__next && window.__next.v && window.__next.v.lastDraw', timeout=120000)
-        page.evaluate("(()=>{const n=window.__next,h=n.house(),b=n.E.W.roofBox(h);n.flyNear({x:(b.X0+b.X1)/2,y:h.z,z:(b.Y0+b.Y1)/2})})()")
-        page.wait_for_timeout(300); page.wait_for_function('!window.__next.v.flying()', timeout=60000); page.wait_for_timeout(600)
+        page.goto('http://localhost:8808/?shot=1')
+        page.wait_for_function('window.__orb && window.__orb.v && window.__orb.v.lastDraw', timeout=120000)
+        page.evaluate("(()=>{const n=window.__orb,h=n.house(),b=n.E.W.roofBox(h);n.flyNear({x:(b.X0+b.X1)/2,y:h.z,z:(b.Y0+b.Y1)/2})})()")
+        page.wait_for_timeout(300); page.wait_for_function('!window.__orb.v.flying()', timeout=60000); page.wait_for_timeout(600)
         # 家具がじゃまになる外壁で、画面に見えている（カメラ側を向いた）ものを探す
-        info = page.evaluate("""(()=>{const n=window.__next,W=n.E.W,h=n.house(),cam=n.v.camera.position; const out=[];
+        info = page.evaluate("""(()=>{const n=window.__orb,W=n.E.W,h=n.house(),cam=n.v.camera.position; const out=[];
           for (const o of W.houseOuterEdges(h)) { if (h.open[o.e]) continue; const [t,r]=o.e.split(':'),[ex,ey]=r.split(',').map(Number),al=t==='h';
             const mx=al?ex+0.5:ex, my=al?ey:ey+0.5, nv={n:[0,-1],s:[0,1],w:[-1,0],e:[1,0]}[o.dir]; const face=(cam.x-mx)*nv[0]+(cam.z-my)*nv[1];
             if (face<=0) continue; const d=W.cloneHouse(h); d.open[o.e]='door'; const bad=d.furn.filter((f,i)=>W.furnProblem(d,f,i)).map(f=>f.t);
@@ -35,18 +35,18 @@ try:
         print('note', page.evaluate("document.querySelector('.pick:not(.furnbar) .pick-n').innerText"))
         shot(page, 'p1pick')
         page.click('.pick:not(.furnbar) [data-p="door"]'); page.wait_for_timeout(600)
-        print('toast', page.evaluate("document.querySelector('#toast').textContent"), 'open', page.evaluate("JSON.stringify(window.__next.house().open)"))
-        print('problems', page.evaluate("JSON.stringify(window.__next.E.W.houseProblems(window.__next.house()))"))
+        print('toast', page.evaluate("document.querySelector('#toast').textContent"), 'open', page.evaluate("JSON.stringify(window.__orb.house().open)"))
+        print('problems', page.evaluate("JSON.stringify(window.__orb.E.W.houseProblems(window.__orb.house()))"))
         shot(page, 'p2door')
         page.click('.pick:not(.furnbar) [data-p="x"]'); page.wait_for_timeout(200)
-        print('draft before confirm', page.evaluate("window.__next.G.draft && window.__next.G.draft.what"), 'cash', page.evaluate("Math.round(window.__next.s.cash*10)/10"))
+        print('draft before confirm', page.evaluate("window.__orb.G.draft && window.__orb.G.draft.what"), 'cash', page.evaluate("Math.round(window.__orb.s.cash*10)/10"))
         page.click('#draftYes'); page.wait_for_timeout(600)
-        print('after confirm', page.evaluate("document.querySelector('#toast').textContent"), 'open', page.evaluate("JSON.stringify(window.__next.house().open)"))
+        print('after confirm', page.evaluate("document.querySelector('#toast').textContent"), 'open', page.evaluate("JSON.stringify(window.__orb.house().open)"))
         # 中を見る
         page.click('#cut'); page.wait_for_timeout(400)
-        page.evaluate("(()=>{const n=window.__next,v=n.v,c=v.controls.target.clone();v.lookAt(c,%s,55,60)})()" % ('16' if PHONE else '11'))
+        page.evaluate("(()=>{const n=window.__orb,v=n.v,c=v.controls.target.clone();v.lookAt(c,%s,55,60)})()" % ('16' if PHONE else '11'))
         page.wait_for_timeout(1500); shot(page, 'p3cut')
-        f = page.evaluate("""(()=>{const n=window.__next,W=n.E.W,h=n.house(); const i=h.furn.findIndex(f=>f.t==='bed'); const cs=W.furnCells(h.furn[i]); const cx=cs.reduce((a,c)=>a+c[0]+0.5,0)/cs.length, cy=cs.reduce((a,c)=>a+c[1]+0.5,0)/cs.length;
+        f = page.evaluate("""(()=>{const n=window.__orb,W=n.E.W,h=n.house(); const i=h.furn.findIndex(f=>f.t==='bed'); const cs=W.furnCells(h.furn[i]); const cx=cs.reduce((a,c)=>a+c[0]+0.5,0)/cs.length, cy=cs.reduce((a,c)=>a+c[1]+0.5,0)/cs.length;
            const V=n.v.camera.position.constructor, sc=n.toScreen(new V(cx,h.z+0.45,cy));
            // 空いた床のマス
            const occ=new Set(h.furn.flatMap(f=>W.furnCells(f).map(c=>c.join(',')))); let free=null;
@@ -57,14 +57,14 @@ try:
         (page.tap if PHONE else page.click)('#c', position={'x': f['x'], 'y': f['y']}); page.wait_for_timeout(500)
         print('fbar', page.evaluate("!document.querySelector('.furnbar').hidden"), page.evaluate("document.querySelector('.furnbar').innerText.replace(/\\n/g,' / ')"))
         shot(page, 'p4furn')
-        print('cam0', page.evaluate("window.__next.v.camera.position.toArray().map(x=>x.toFixed(2)).join(',')"))
+        print('cam0', page.evaluate("window.__orb.v.camera.position.toArray().map(x=>x.toFixed(2)).join(',')"))
         page.click('.furnbar [data-f="rot"]'); page.wait_for_timeout(500)
-        print('after rot', page.evaluate("JSON.stringify(window.__next.house().furn[%d])" % f['i']), page.evaluate("document.querySelector('#toast').textContent"))
+        print('after rot', page.evaluate("JSON.stringify(window.__orb.house().furn[%d])" % f['i']), page.evaluate("document.querySelector('#toast').textContent"))
         # 引きずる（マウス）
         if f['free']:
-            f2 = page.evaluate("""(()=>{const n=window.__next,W=n.E.W,h=n.house(),i=%d; const cs=W.furnCells(h.furn[i]); const V=n.v.camera.position.constructor; const sc=n.toScreen(new V(cs[0][0]+0.5,h.z+0.45,cs[0][1]+0.5)); return {x:sc.x,y:sc.y,cells:cs}})()""" % f['i'])
+            f2 = page.evaluate("""(()=>{const n=window.__orb,W=n.E.W,h=n.house(),i=%d; const cs=W.furnCells(h.furn[i]); const V=n.v.camera.position.constructor; const sc=n.toScreen(new V(cs[0][0]+0.5,h.z+0.45,cs[0][1]+0.5)); return {x:sc.x,y:sc.y,cells:cs}})()""" % f['i'])
             # 置ける場所：頭のマスごと動かす先
-            dest = page.evaluate("""(()=>{const n=window.__next,W=n.E.W,h=n.house(),i=%d,f=h.furn[i]; for (const k in h.cells){const [x,y]=k.split(',').map(Number); if (x===f.x&&y===f.y) continue; const g={...f,x,y}; if(!W.furnProblem(h,g,i)){const V=n.v.camera.position.constructor; const s=n.toScreen(new V(x+0.5,h.z,y+0.5)); if (s.x>20&&s.y>90&&s.y<%d) return {x,y,sx:s.x,sy:s.y};}} return null})()""" % (f['i'], H - 160))
+            dest = page.evaluate("""(()=>{const n=window.__orb,W=n.E.W,h=n.house(),i=%d,f=h.furn[i]; for (const k in h.cells){const [x,y]=k.split(',').map(Number); if (x===f.x&&y===f.y) continue; const g={...f,x,y}; if(!W.furnProblem(h,g,i)){const V=n.v.camera.position.constructor; const s=n.toScreen(new V(x+0.5,h.z,y+0.5)); if (s.x>20&&s.y>90&&s.y<%d) return {x,y,sx:s.x,sy:s.y};}} return null})()""" % (f['i'], H - 160))
             print('drag dest', dest)
             if dest:
                 if PHONE:
@@ -77,8 +77,8 @@ try:
                     page.mouse.move(f2['x'], f2['y']); page.mouse.down(); page.mouse.move((f2['x'] + dest['sx']) / 2, (f2['y'] + dest['sy']) / 2, steps=5); page.mouse.move(dest['sx'], dest['sy'], steps=8)
                     page.wait_for_timeout(300); shot(page, 'p5drag', 300)
                     page.mouse.up(); page.wait_for_timeout(600)
-                print('camera moved?', page.evaluate("window.__next.v.camera.position.toArray().map(x=>x.toFixed(2)).join(',')"))
-                print('after drag', page.evaluate("JSON.stringify(window.__next.house().furn[%d])" % f['i']), page.evaluate("document.querySelector('#toast').textContent"))
+                print('camera moved?', page.evaluate("window.__orb.v.camera.position.toArray().map(x=>x.toFixed(2)).join(',')"))
+                print('after drag', page.evaluate("JSON.stringify(window.__orb.house().furn[%d])" % f['i']), page.evaluate("document.querySelector('#toast').textContent"))
                 shot(page, 'p6dropped')
         # 壁を下げたまま壁を押す
         print('ERRS', errs[:8])

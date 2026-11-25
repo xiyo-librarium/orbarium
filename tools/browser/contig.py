@@ -7,16 +7,16 @@ import mock_real
 tag = sys.argv[1] if len(sys.argv) > 1 else 'e1'; W, H = 1280, 820
 srv = subprocess.Popen([sys.executable, '-m', 'http.server', '8821', '-d', os.path.join(HERE, '..', '..', 'public')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1)
-CAM = "([dx,dy,dz])=>{const n=window.__next,v=n.v,h=n.house(),b=n.E.W.roofBox(h),cx=(b.X0+b.X1)/2,cy=(b.Y0+b.Y1)/2; v.controls.target.set(cx,h.z+1.2,cy+1.5); v.camera.position.set(cx+dx,h.z+1.2+dy,cy+dz); v.controls.update(); v.req();}"
+CAM = "([dx,dy,dz])=>{const n=window.__orb,v=n.v,h=n.house(),b=n.E.W.roofBox(h),cx=(b.X0+b.X1)/2,cy=(b.Y0+b.Y1)/2; v.controls.target.set(cx,h.z+1.2,cy+1.5); v.camera.position.set(cx+dx,h.z+1.2+dy,cy+dz); v.controls.update(); v.req();}"
 try:
     with sync_playwright() as p:
         b = p.chromium.launch(args=['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'])
         page = b.new_context(viewport={'width': W, 'height': H}).new_page()
         errs = []; page.on('pageerror', lambda e: errs.append('PE ' + str(e)))
         mock_real.install(page)
-        page.goto('http://localhost:8821/next/?shot=1&fast=1')
-        page.wait_for_function('window.__next && window.__next.v && window.__next.v.lastDraw', timeout=120000)
-        print(page.evaluate("""(()=>{const n=window.__next,W=n.E.W,s=n.s,h=n.house(),b=W.roofBox(h); const d=W.cloneHouse(h);
+        page.goto('http://localhost:8821/?shot=1&fast=1')
+        page.wait_for_function('window.__orb && window.__orb.v && window.__orb.v.lastDraw', timeout=120000)
+        print(page.evaluate("""(()=>{const n=window.__orb,W=n.E.W,s=n.s,h=n.house(),b=W.roofBox(h); const d=W.cloneHouse(h);
           // 南の壁：窓3つつづき＋両開きの扉
           const south=W.houseOuterEdges(d).filter(o=>o.dir==='s').map(o=>o.e).sort(); for (const e of Object.keys(d.open)) if (south.includes(e)) delete d.open[e];
           south.slice(0,3).forEach(e=>d.open[e]='window'); 

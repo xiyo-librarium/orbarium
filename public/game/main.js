@@ -1,4 +1,4 @@
-/* Orbarium /next：地図⇄近く、下の道具、押した物の横のカード、取り消し・やり直し。
+/* Orbarium：地図⇄近く、下の道具、押した物の横のカード、取り消し・やり直し。
    計算の世界（engine / world）はそのまま使い、見た目と操作だけを作り直す */
 import * as THREE from 'three';
 import * as E from '/js/engine.js';
@@ -13,15 +13,17 @@ import { ATLAS, NOTES, INVITE } from '/js/content.js';
 
 const W = E.W, $ = (s) => document.querySelector(s);
 const Q = new URLSearchParams(location.search);
-const BASE = location.pathname.startsWith('/next') ? '/next/' : '/';   // 本番は /、前の置き場所 /next/ でも動く
+const BASE = '/';
 // 開き方：proto＝見た目の試作（?shot・?proto）、play＝遊ぶ（?play、?play&new=med で新しく）、それ以外は地球（はじまり・旅・図鑑）
 const MODE = Q.has('globe') || Q.has('travel') ? 'globe' : Q.has('shot') || Q.has('proto') ? 'proto' : Q.has('play') ? 'play' : 'globe';
-// 机の地球儀（試験中）：読み込みのあいだは黒で覆っておき、全部そろって最初に描けたら明ける。
-// 土地の画面は地球儀が暗転したのと同じ黒から、地球儀の画面は山脈まで読み込んでから
-if ((MODE === 'play' || MODE === 'globe') && Q.get('look') === 'desk') { const cv = document.createElement('div'); cv.className = 'fade black on'; cv.id = 'deskIn'; document.body.appendChild(cv); }
-const CARRY = 'orbarium-next-carry', ATLAS_READ = 'orbarium-next-atlas';
+// 読み込みのあいだは黒で覆っておき、全部そろって最初に描けたら明ける。
+// 地球儀の画面は山脈まで読み込んでから、土地の画面は地球儀から来たとき（&in=dark）に、地球儀が暗転したのと同じ黒から
+if (MODE === 'globe' || (MODE === 'play' && Q.has('in'))) { const cv = document.createElement('div'); cv.className = 'fade black on'; cv.id = 'deskIn'; document.body.appendChild(cv); }
+const CARRY = 'orbarium-carry', ATLAS_READ = 'orbarium-atlas';
+// 保存のキーの引っ越し（前は orbarium-next-…）。新しいキーが空なら前のものを移して、前のものは消す
+try { for (const [o, n] of [['orbarium-next-1', 'orbarium-1'], ['orbarium-next-carry', CARRY], ['orbarium-next-atlas', ATLAS_READ]]) { const v0 = localStorage.getItem(o); if (v0 != null) { if (localStorage.getItem(n) == null) localStorage.setItem(n, v0); localStorage.removeItem(o); } } } catch { }
 let SITE = Q.get('site') || 'med';
-const loadSave = () => { try { const v0 = localStorage.getItem('orbarium-next-1'); return v0 ? E.load(v0) : null; } catch { return null; } };
+const loadSave = () => { try { const v0 = localStorage.getItem('orbarium-1'); return v0 ? E.load(v0) : null; } catch { return null; } };
 const atlasRead = () => { try { return JSON.parse(localStorage.getItem(ATLAS_READ) || '[]'); } catch { return []; } };
 const yen = (n) => `${Math.round(n * 10) / 10}万円`.replace('.0万', '万');
 
@@ -60,7 +62,7 @@ const TOOLS = [
 ];
 // 種類ごとに要る知識（ノートにないものは選べない）
 const SUBLEARN = { tree: { tree: 'hedge', hedge: 'hedge' }, water: { tank: null, pond: 'pond', filter: 'grey', pump: null }, shed: { heap: 'heap', coop: 'chicken' }, terrain: { up: null, down: null, level: null, stone: 'terrace' } };
-const SAVE = 'orbarium-next-1';
+const SAVE = 'orbarium-1';
 const TOUCH = matchMedia('(pointer: coarse)').matches;
 const HINT_NEAR = TOUCH ? '物を押すと詳しく、引きずると動く。壁を押すと窓や扉に。1本指で回す・2本指で寄る' : '物を押すと詳しく、ドラッグで動く。壁を押すと窓や扉に。ドラッグで回す・ホイールで寄る';
 const HINT_CUT = TOUCH ? '床の線をなぞると間仕切り。家具は引きずると動く。壁を押すと窓や扉に' : '床の線をなぞると間仕切り。家具はドラッグで動く。壁を押すと窓や扉に';
@@ -914,7 +916,7 @@ async function boot() {
     if (k === 'use') { R((d) => { d.use = a; }); return; }
     if (k === 'method') { const L = localOf() || BASIC; R((d) => {
         if (a === 'ins') Object.assign(d, INSUL); else if (a === 'basic') Object.assign(d, { wall: 'board', roof: 'tin' }); else Object.assign(d, { wall: L.wall, roof: L.roof, finish: L.finish });
-        const R2 = W.ROOFS[d.roof];   // 瓦は傾けた屋根に、土の屋根は平らに（今の版と同じ）
+        const R2 = W.ROOFS[d.roof];   // 瓦は傾けた屋根に、土の屋根は平らに
         if (R2.pitched && (d.roofShape || 'flat') === 'flat') { d.roofShape = L.roofShape && L.roofShape !== 'flat' ? L.roofShape : 'gable'; d.roofDir = L.roofDir || 'ns'; d.pitch = Math.max(d.pitch || 0.3, L.pitch || 0.5); d.eaves = L.eaves ?? d.eaves; }
         if (R2.flat) { d.roofShape = 'flat'; d.eaves = 0.16; } else if (W.eavesDepth(d) < 0.3) d.eaves = 0.6; }); return; }
     if (k === 'pitch') { const i = W.PITCHES.findIndex(([q]) => Math.abs(q - (b.pitch || 0.3)) < 0.01), j = Math.max(0, Math.min(W.PITCHES.length - 1, (i < 0 ? 1 : i) + +a)); if (j === i) return; R((d) => { d.pitch = W.PITCHES[j][0]; d.roofShape = d.roofShape && d.roofShape !== 'flat' ? d.roofShape : 'gable'; }); return; }
@@ -1143,21 +1145,19 @@ async function boot() {
     if (fresh) { persist(); history.replaceState(null, '', `${BASE}?play`); $('#reportBody').innerHTML = BK.climateHTML(s); $('#reportAct').innerHTML = '<button class="yes" id="rBack">この土地で暮らしを始める</button>'; $('#report').hidden = false; $('#rBack').onclick = () => { $('#report').hidden = true; }; }
   }
   v.start();
-  // 机の地球儀から来たとき（試験中）：最初に描けたら、暗がりが明ける
+  // 地球儀から来たとき：最初に描けたら、暗がりが明ける
   { const cv = $('#deskIn'); if (cv) { const wait = () => { if (v.lastDraw) { setTimeout(() => cv.classList.remove('on'), 120); setTimeout(() => cv.remove(), 1200); } else requestAnimationFrame(wait); }; wait(); } }
-  window.__next = { s, E, v, stage, setHour, G, act, toScreen, select, setTool, flyNear, toMap, center, house: () => s.world.house, traced, setDraft, flowsNow, runSeason, openBook, setSub: (t, k) => { G.sub[t] = k; renderSubs(); setHint(); } };
+  window.__orb = { s, E, v, stage, setHour, G, act, toScreen, select, setTool, flyNear, toMap, center, house: () => s.world.house, traced, setDraft, flowsNow, runSeason, openBook, setSub: (t, k) => { G.sub[t] = k; renderSubs(); setHint(); } };
 }
 
 /* 地球：はじまり（題名）、旅（招いてくれた人のメールを読んで［行く］→ 飛ぶ）、図鑑（ピンを押して読む）。
    昼と夜の境目は今の本物の太陽。印は町の単位（細かい位置は出さない） */
 async function bootGlobe(mode = 'title') {
-  const reliefP = Q.get('look') === 'desk' ? loadRelief().catch(() => null) : null;   // 山脈の標高は海岸線と並べて読み始める
+  const reliefP = loadRelief().catch(() => null);   // 山脈の標高は海岸線と並べて読み始める
   const rings = await (await fetch('/data/land110.json')).json();
   const v = createView($('#c'), { keep: Q.has('shot') });
-  // 机の地球儀（試験中：&look=desk）。暗く沈んだ色から、めぐりができた土地が増えるほど明るく鮮やかに（&glow=0〜1 で上書き）
-  const DESK = Q.get('look') === 'desk';
-  v.setPalette({ ...PALETTES.med, sky: DESK ? ['#1C2123', '#2C3133'] : ['#D9DEDB', '#EFEADF'] });
-  if (DESK) document.body.classList.add('desk');
+  // 机の上の地球儀。暗く沈んだ色から、めぐりができた土地が増えるほど明るく鮮やかに（&glow=0〜1 で上書き。試験用）
+  document.body.classList.add('desk');
   v.scene.fog = null; v.scene.environmentIntensity = 0.45; v.ao.enabled = false; v.dof.enabled = false; v.sun.castShadow = false;
   for (const id of ['#cash', '#undo', '#redo', '#bookBtn', '#cut', '#toMap']) $(id).style.display = 'none';
   document.querySelector('.sun').style.display = 'none';
@@ -1179,11 +1179,11 @@ async function bootGlobe(mode = 'title') {
   if (mode === 'travel') pins.push({ ...at(toKey), main: true, color: PIN.lived, hidden: true, id: 'dest' });
   if (mode === 'atlas') { const read = atlasRead(); pins = pins.concat(ATLAS.map(a => ({ lat: a.lat, lon: a.lon, id: a.id, color: read.includes(a.id) ? PIN.read : PIN.unread }))); }
   const ss = subsolar(new Date()), sd = ll(ss.lat, ss.lon).normalize();
-  const GLOW = DESK ? (Q.has('glow') ? Math.max(0, Math.min(1, +Q.get('glow'))) : Math.min(1, LV.length / 5)) : 1;
-  if (DESK) v.setPalette({ ...PALETTES.med, sky: ['#' + new THREE.Color('#1C2123').lerp(new THREE.Color('#4A5250'), GLOW).getHexString(), '#' + new THREE.Color('#2C3133').lerp(new THREE.Color('#6B706A'), GLOW).getHexString()] });
-  const globe = buildGlobe(rings, pins, route, { lived: LV, req: () => v.req(), sun: sd, desk: DESK, glow: GLOW });
+  const GLOW = Q.has('glow') ? Math.max(0, Math.min(1, +Q.get('glow'))) : Math.min(1, LV.length / 5);
+  v.setPalette({ ...PALETTES.med, sky: ['#' + new THREE.Color('#1C2123').lerp(new THREE.Color('#4A5250'), GLOW).getHexString(), '#' + new THREE.Color('#2C3133').lerp(new THREE.Color('#6B706A'), GLOW).getHexString()] });
+  const globe = buildGlobe(rings, pins, route, { lived: LV, req: () => v.req(), sun: sd, desk: true, glow: GLOW });
   // 実際の標高の起伏（&relief= で強さを試す）。つるつるの地球儀を先に見せないよう、届くまで待ってから始める（8秒で届かなければ先に出し、あとから足す）
-  if (DESK) {
+  {
     const put = (tex) => { if (tex && !globe.userData.reliefSet) { globe.userData.reliefSet = true; globe.userData.setRelief(tex, +(Q.get('relief') || 1)); } };
     reliefP.then(put); put(await Promise.race([reliefP, new Promise(r => setTimeout(() => r(null), 8000))]));
   }
@@ -1194,7 +1194,7 @@ async function bootGlobe(mode = 'title') {
   globe.userData.atm.material.uniforms.s.value.copy(sd);
   // 机の地球儀：宇宙の太陽ではなく部屋の光。いつも見ている側の左上から、やわらかく。下には接地影
   let gsh = null;
-  if (DESK) {
+  {
     v.scene.environmentIntensity = 0.32 + 0.25 * GLOW; v.sun.intensity = 2.3 + 0.9 * GLOW; v.renderer.toneMappingExposure = 0.82 + 0.3 * GLOW; v.sun.color.set('#FFF3E4');
     // 接地影：地球の少し下・少し奥に、こちらを向いた楕円の影（地球が手前を隠す）
     const sc = document.createElement('canvas'); sc.width = sc.height = 128; const sx = sc.getContext('2d'), gr = sx.createRadialGradient(64, 64, 0, 64, 64, 64);
@@ -1208,29 +1208,16 @@ async function bootGlobe(mode = 'title') {
       r0();
     };
   }
-  const WIDE = () => DESK && (v.camera.aspect || 1) > 1.25;   // 横長の画面：地球を大きく、左へ寄せ、カードは右
+  const WIDE = () => (v.camera.aspect || 1) > 1.25;   // 横長の画面：地球を大きく、左へ寄せ、カードは右
   const fit = () => { const a = v.camera.aspect || 1; return (WIDE() ? 1.2 : 1.3) / Math.tan(THREE.MathUtils.degToRad(v.camera.fov / 2)) / Math.min(1, a); };
   let offX = 0.13;
   const look = (lat, lon, d = fit()) => { v.camera.position.copy(ll(lat, lon, 1).normalize().multiplyScalar(d)); v.camera.lookAt(0, 0, 0); c.update(); v.req(); };
   // 縦長の画面：下にカードが来るので、地球を少し上に寄せる
   const lift = () => { const r = $('#c').getBoundingClientRect(), w = r.width, h = r.height; if (w / h < 0.8) v.camera.setViewOffset(w, h, 0, h * 0.15, w, h); else if (WIDE() && offX > 0.001) v.camera.setViewOffset(w, h, w * offX, 0, w, h); else v.camera.clearViewOffset(); v.camera.updateProjectionMatrix(); v.req(); };
-  if (DESK) document.body.classList.toggle('deskwide', (innerWidth / innerHeight) > 1.25);
+  document.body.classList.toggle('deskwide', (innerWidth / innerHeight) > 1.25);
   v.resize(); lift(); addEventListener('resize', () => setTimeout(lift, 0)); c.maxDistance = Math.max(7, fit() * 1.5);
   const hint = $('#hint');
-  // 飛ぶ：大円にそって向きを移し、途中で少し引いて、最後に寄る
-  const fly = (A, B, ms, done) => {
-    const a = ll(A.lat, A.lon, 1).normalize(), b = ll(B.lat, B.lon, 1).normalize(), ang = Math.max(1e-4, a.angleTo(b)), d0 = v.camera.position.length(), t0 = performance.now();
-    c.enabled = false; c.autoRotate = false; c.minDistance = 1.2; c.enableDamping = false;
-    const step = () => {
-      const u = Math.min(1, (performance.now() - t0) / ms), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
-      const dir = a.clone().multiplyScalar(Math.sin((1 - e) * ang)).add(b.clone().multiplyScalar(Math.sin(e * ang))).divideScalar(Math.sin(ang)).normalize();
-      const dist = u < 0.75 ? d0 * (1 + 0.22 * Math.sin(Math.PI * Math.min(1, e / 0.9))) : d0 * (1 - 0.55 * (u - 0.75) / 0.25);
-      v.camera.position.copy(dir.multiplyScalar(dist)); v.camera.lookAt(0, 0, 0); v.req();
-      if (u < 1) requestAnimationFrame(step); else done();
-    };
-    step();
-  };
-  // 机の地球儀の寄り方：手で回す地球儀。地球儀そのものが軸のまわりに勢いよく回り出し、少し行き過ぎて戻る。
+  // 寄り方：手で回す地球儀。地球儀そのものが軸のまわりに勢いよく回り出し、少し行き過ぎて戻る。
   // 回りきる前から顔を近づけ始め、行き先を画面の中心に置いたまま寄る。斜めに傾けるのは最後の3割だけ。
   // 寄りきる少し前にピンが刺さり、暗転する（土地の画面は同じ暗がりから明ける）
   const flyDesk = (A, B, ms, done, url) => {
@@ -1261,13 +1248,12 @@ async function bootGlobe(mode = 'title') {
       if (!called && u >= A1 - 0.07) { called = true; done(); }
       if (!fading && u >= B0) { fading = true; fade.classList.add('on');
         // 黒になりきってから土地の画面へ（カメラの動きの終わりではなく、暗転の終わりで。描画が間引かれても途中で切り替わらない）
-        const go2 = () => { if (!gone && url) { gone = true; location.replace(url + '&look=desk'); } };
+        const go2 = () => { if (!gone && url) { gone = true; location.replace(url + '&in=dark'); } };
         fade.addEventListener('transitionend', go2, { once: true }); setTimeout(go2, ms * (1 - B0) + 400); }
       if (u < 1) requestAnimationFrame(step);
     };
     step();
   };
-  const fadeTo = (url) => { const f = document.createElement('div'); f.className = 'fade'; document.body.appendChild(f); requestAnimationFrame(() => f.classList.add('on')); setTimeout(() => location.replace(url), 650); };
   // 旅：出発地の上で、右上にメールの通知が届く。押すと画面の真ん中に広がって読める。［行く］で飛び、着いた所に虫ピンを刺す。
   // 着いた土地のデータは、読んでいるあいだに裏で取ってくる
   // mail がなければ（招待はもう読んである）、出発地を見せてすぐ飛ぶ
@@ -1278,16 +1264,14 @@ async function bootGlobe(mode = 'title') {
     const go = () => {
       $('#where').textContent = `${E.SITES[from].name}から、${S2.name}へ`;
       globe.add(routeLine([E.SITES[from], S2])); v.req();
-      const out = () => fadeTo(url);
-      const ms = Q.has('flyms') ? +Q.get('flyms') : DESK ? 4600 : 3600;   // flyms：試験で動きを撮るときだけ長く
+      const ms = Q.has('flyms') ? +Q.get('flyms') : 4600;   // flyms：試験で動きを撮るときだけ長く
       const arrive = (then) => {
         $('#where').textContent = `${S2.name}・標高${S2.elev.toLocaleString()}m`;
         const dest = globe.userData.pins.find(m => m.userData.pin.id === 'dest');
-        if (dest) globe.userData.stick(dest, DESK ? 500 : 700, then); else then();
+        if (dest) globe.userData.stick(dest, 500, then); else then();
       };
-      // 机の地球儀：真上に来たらピンが刺さり、寄りながら暗転して、寄りきったら土地の画面へ（flyDesk が進める）
-      if (DESK) flyDesk(E.SITES[from], S2, ms, () => arrive(() => {}), url);
-      else fly(E.SITES[from], S2, ms, () => arrive(() => setTimeout(out, 450)));
+      // 真上に来たらピンが刺さり、寄りながら暗転して、黒になりきったら土地の画面へ（flyDesk が進める）
+      flyDesk(E.SITES[from], S2, ms, () => arrive(() => {}), url);
     };
     if (!mail) { setTimeout(go, 900); return; }
     const who = BK.mailWho(mail), body = (Array.isArray(mail.body) ? mail.body : [mail.body]).join(' ');
@@ -1333,7 +1317,7 @@ async function bootGlobe(mode = 'title') {
         <div class="acts"><button class="yes" id="read">${read.includes(a.id) ? '読んだ' : 'ノートに書く'}</button><button id="alist">一覧へ</button></div>`;
       $('#read').onclick = () => {
         const r2 = atlasRead(); if (!r2.includes(a.id)) { r2.push(a.id); localStorage.setItem(ATLAS_READ, JSON.stringify(r2)); }
-        if (canLearn) { const ns = E.learn(saved, a.tech, 'atlas'); Object.assign(saved, ns); try { localStorage.setItem('orbarium-next-1', E.save(saved)); } catch { /* 保存できない */ } }
+        if (canLearn) { const ns = E.learn(saved, a.tech, 'atlas'); Object.assign(saved, ns); try { localStorage.setItem(SAVE, E.save(saved)); } catch { /* 保存できない */ } }
         list();
       };
       $('#alist').onclick = list;
@@ -1351,7 +1335,7 @@ async function bootGlobe(mode = 'title') {
   } else {
     // はじまり：ゆっくり回る地球に題名。つづきから／はじめから／図鑑
     if (saved) look(E.SITES[saved.site].lat, E.SITES[saved.site].lon - 25); else look(28, 150); c.autoRotate = true; c.autoRotateSpeed = 0.35;
-    $('#where').textContent = DESK ? '地球' : '地球 · いまの太陽';
+    $('#where').textContent = '地球';
     const card = document.createElement('div'); card.className = 'title-card';
     card.innerHTML = `<h1>Orbarium</h1><p>本物の土地で、水・食べもの・エネルギー・お金をめぐらせる</p>
       <div class="btns">${saved ? `<button class="yes" id="cont">つづきから（${saved.year}年・${BK.esc(E.SITES[saved.site].name)}）</button>` : ''}<button class="${saved ? '' : 'yes'}" id="newg">はじめから</button><button id="atl">地球儀で学ぶ</button></div>
@@ -1365,7 +1349,7 @@ async function bootGlobe(mode = 'title') {
       travel('tokyo', 'med', INVITE, `${BASE}?play&new=med`);
     };
   }
-  v.start(); window.__next = { v, mode, globe };
+  v.start(); window.__orb = { v, mode, globe };
   { const cv = $('#deskIn'); if (cv) { const wait = () => { if (v.lastDraw) { setTimeout(() => cv.classList.remove('on'), 150); setTimeout(() => cv.remove(), 1200); } else requestAnimationFrame(wait); }; wait(); } }
 }
 

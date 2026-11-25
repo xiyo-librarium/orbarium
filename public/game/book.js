@@ -1,5 +1,5 @@
 /* ノートと季節の報告：めぐり・家計簿・予定・天気・ノート、メール、季節が過ぎたときの報告。
-   文章と数字は今の版（engine / content）のものをそのまま使い、見た目だけ /next に合わせる */
+   文章と数字は共通の計算（engine / content）のものをそのまま使う */
 import * as E from '/js/engine.js';
 import { NOTES, LESSON, eventText, ATLAS, CHAPTER_END, LAND_INVITE, CLIMATE } from '/js/content.js';
 
@@ -8,7 +8,7 @@ export const man = (v) => `${Math.round(v).toLocaleString('ja-JP')}万円`;
 const pct = (v) => `${Math.round(v * 100)}%`;
 export const GOAL = 10;   // この章の目標：豊かに関わる相手の数
 
-/* 学んだときに、どこで使えるようになったか（/next の道具の名前で） */
+/* 学んだときに、どこで使えるようになったか（道具の名前で） */
 export const MODHINT = {
   heap: '［小屋］で堆肥小屋が作れる', mulch: '［畑］で畑を押すとマルチが敷ける', greenhouse: '［畑］で畑を押すと覆い（小さな温室）がかけられる',
   hedge: '［木］で果樹と生け垣が植えられる', chicken: '［小屋］でニワトリ小屋が置ける', pond: '［水］で池が掘れる', grey: '［水］で排水の庭が作れる',
