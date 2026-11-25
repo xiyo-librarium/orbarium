@@ -21,14 +21,19 @@ try:
         for name, q in [('now', ''), ('desk0', '&look=desk&glow=0'), ('desk05', '&look=desk&glow=0.5'), ('desk1', '&look=desk&glow=1')]:
             pg = page_of(1440, 860); pg.goto(f'{U}/?x=1{q}'); ready(pg); pg.screenshot(path=f'/tmp/orb_flow/globe_{name}.png'); print(name, pg.errs[:3]); pg.close()
         pg = page_of(390, 844, 2); pg.goto(f'{U}/?x=1&look=desk&glow=0'); ready(pg); pg.screenshot(path='/tmp/orb_flow/globe_desk0_phone.png'); pg.close()
-        # 旅：住んだ3つの土地が色づく。寄っていくコマ（今の見た目と机）
-        for name, q in [('travel_now', ''), ('travel_desk', '&look=desk&glow=0.6')]:
-            # 動きを撮るため、飛ぶ時間を 24 秒にのばす（flyms）。コマは 0.5〜25 秒
-            pg = page_of(1440, 860); pg.goto(U + '/?x=1'); pg.evaluate(LIVED); pg.goto(f'{U}/?travel=yama{q}&flyms=24000')
+        # 旅：住んだ3つの土地が色づく。動きを撮るため、飛ぶ時間を 130 秒にのばし（flyms。この環境では1コマ撮るのに数秒かかる）、撮れるだけコマを撮る
+        # （/tmp/orb_flow/globe_travel_<名前>_NN.png。ffmpeg があれば 12 コマ/秒の動画 globe_travel_<名前>.mp4 にする＝ほぼ本来の速さ）
+        for name, q in [('desk', '&look=desk&glow=0.6')]:
+            pg = page_of(1200, 720); pg.goto(U + '/?x=1'); pg.evaluate(LIVED); pg.goto(f'{U}/?travel=yama{q}&flyms=130000')
             pg.wait_for_function('window.__next && window.__next.v && window.__next.v.lastDraw', timeout=120000)
-            t0 = time.time()
-            for i, ms in enumerate([500, 6000, 12000, 15500, 18500, 21500, 24500, 26800]):
-                pg.wait_for_timeout(max(0, int(ms - (time.time() - t0) * 1000))); pg.screenshot(path=f'/tmp/orb_flow/globe_{name}_{i}.png')
-            print(name, pg.errs[:3]); pg.close()
+            t0 = time.time(); i = 0
+            while time.time() - t0 < 150 and '?travel' in pg.url:
+                try: pg.screenshot(path=f'/tmp/orb_flow/globe_travel_{name}_{i:02d}.png'); i += 1
+                except Exception: break
+                pg.wait_for_timeout(450)
+            print(name, 'frames', i, pg.errs[:3])
+            if subprocess.run(['which', 'ffmpeg'], capture_output=True).returncode == 0:
+                subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-framerate', '12', '-i', f'/tmp/orb_flow/globe_travel_{name}_%02d.png', '-vf', 'scale=960:-2', '-pix_fmt', 'yuv420p', f'/tmp/orb_flow/globe_travel_{name}.mp4'])
+            pg.close()
 finally:
     srv.terminate()

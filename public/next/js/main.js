@@ -16,6 +16,8 @@ const Q = new URLSearchParams(location.search);
 const BASE = location.pathname.startsWith('/next') ? '/next/' : '/';   // 本番は /、前の置き場所 /next/ でも動く
 // 開き方：proto＝見た目の試作（?shot・?proto）、play＝遊ぶ（?play、?play&new=med で新しく）、それ以外は地球（はじまり・旅・図鑑）
 const MODE = Q.has('globe') || Q.has('travel') ? 'globe' : Q.has('shot') || Q.has('proto') ? 'proto' : Q.has('play') ? 'play' : 'globe';
+// 机の地球儀から来たとき（試験中）：読み込みのあいだから、地球儀が閉じたのと同じ暗がりで覆っておき、最初に描けたら明ける
+if (MODE === 'play' && Q.get('look') === 'desk') { const cv = document.createElement('div'); cv.className = 'fade dark on'; cv.id = 'deskIn'; document.body.appendChild(cv); }
 const CARRY = 'orbarium-next-carry', ATLAS_READ = 'orbarium-next-atlas';
 let SITE = Q.get('site') || 'med';
 const loadSave = () => { try { const v0 = localStorage.getItem('orbarium-next-1'); return v0 ? E.load(v0) : null; } catch { return null; } };
@@ -1140,6 +1142,8 @@ async function boot() {
     if (fresh) { persist(); history.replaceState(null, '', `${BASE}?play`); $('#reportBody').innerHTML = BK.climateHTML(s); $('#reportAct').innerHTML = '<button class="yes" id="rBack">この土地で暮らしを始める</button>'; $('#report').hidden = false; $('#rBack').onclick = () => { $('#report').hidden = true; }; }
   }
   v.start();
+  // 机の地球儀から来たとき（試験中）：最初に描けたら、暗がりが明ける
+  { const cv = $('#deskIn'); if (cv) { const wait = () => { if (v.lastDraw) { setTimeout(() => cv.classList.remove('on'), 120); setTimeout(() => cv.remove(), 1200); } else requestAnimationFrame(wait); }; wait(); } }
   window.__next = { s, E, v, stage, setHour, G, act, toScreen, select, setTool, flyNear, toMap, center, house: () => s.world.house, traced, setDraft, flowsNow, runSeason, openBook, setSub: (t, k) => { G.sub[t] = k; renderSubs(); setHint(); } };
 }
 
@@ -1219,34 +1223,47 @@ async function bootGlobe(mode = 'title') {
     };
     step();
   };
-  // 机の地球儀の寄り方：まず地球を回して行き先を正面に（引かない）。次に見る先を球の中心から行き先へ移しながら、
-  // 真上から土地の画面と同じ斜めの角度へ傾けて寄る。寄るほど行き先にピントが合い、まわりがぼける。最後は行き先を中心に丸く閉じる
+  // 机の地球儀の寄り方：手で回す地球儀。地球儀そのものが軸のまわりに勢いよく回り出し、少し行き過ぎて戻る。
+  // 回りきる前から顔を近づけ始め、行き先を画面の中心に置いたまま寄る。斜めに傾けるのは最後の3割だけ。
+  // 寄りきる少し前にピンが刺さり、行き先へ向かって、ふちのぼけた暗がりが閉じる（土地の画面は同じ暗がりから明ける）
   const flyDesk = (A, B, ms, done) => {
-    const a = ll(A.lat, A.lon, 1).normalize(), b = ll(B.lat, B.lon, 1).normalize(), ang = Math.max(1e-4, a.angleTo(b)), d0 = v.camera.position.length(), t0 = performance.now(), T1 = ms * 0.55;
-    c.enabled = false; c.autoRotate = false; c.enableDamping = false; c.minDistance = 0.001; c.maxDistance = 100; c.minPolarAngle = 0; c.maxPolarAngle = Math.PI; v.camera.near = 0.004; v.camera.updateProjectionMatrix();   // 回す決まり（近さ・角度の制限）が寄るのを押し戻さないように
-    const P = b.clone(), east = new THREE.Vector3(0, 1, 0).cross(P).normalize(), north = P.clone().cross(east).normalize(), tilt = THREE.MathUtils.degToRad(50), dEnd = 0.3;
-    const endDir = P.clone().multiplyScalar(Math.cos(tilt)).addScaledVector(north, -Math.sin(tilt)).normalize(), off0 = offX;
-    const ease = (u) => u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+    c.enabled = false; c.autoRotate = false; c.enableDamping = false; c.minDistance = 0.001; c.maxDistance = 100; c.minPolarAngle = 0; c.maxPolarAngle = Math.PI;   // 回す決まりが寄るのを押し戻さないように
+    v.camera.near = 0.004; v.camera.updateProjectionMatrix();
+    const Y = new THREE.Vector3(0, 1, 0), az = (p) => Math.atan2(p.x, p.z), sm = (u) => { u = Math.max(0, Math.min(1, u)); return u * u * u * (u * (u * 6 - 15) + 10); };
+    const bL = ll(B.lat, B.lon, 1).normalize(), C0 = v.camera.position.clone(), d0 = C0.length(), camAz = az(C0), e0 = Math.asin(C0.y / d0), e1 = Math.asin(bL.y);
+    const rot0 = globe.rotation.y; let dAz = camAz - az(bL.clone().applyAxisAngle(Y, rot0)); dAz = Math.atan2(Math.sin(dAz), Math.cos(dAz)); const rot1 = rot0 + dAz;
+    // 減衰ばね（行き過ぎは4%ほど）
+    const Z = 0.72, Wn = 8.5, Wd = Wn * Math.sqrt(1 - Z * Z), spin = (u) => u <= 0 ? 0 : 1 - Math.exp(-Z * Wn * u) * (Math.cos(Wd * u) + Z / Math.sqrt(1 - Z * Z) * Math.sin(Wd * u));
+    const P1 = bL.clone().applyAxisAngle(Y, rot1), east = Y.clone().cross(P1).normalize(), north = P1.clone().cross(east).normalize(), tilt = THREE.MathUtils.degToRad(50);
+    const endDir = P1.clone().multiplyScalar(Math.cos(tilt)).addScaledVector(north, -Math.sin(tilt)).normalize(), dEnd = 0.3, off0 = offX, t0 = performance.now();
+    let called = false;
     const step = () => {
-      const t = performance.now() - t0;
-      if (t < T1) {
-        const e = ease(t / T1), dir = a.clone().multiplyScalar(Math.sin((1 - e) * ang)).add(b.clone().multiplyScalar(Math.sin(e * ang))).divideScalar(Math.sin(ang)).normalize();
-        v.camera.position.copy(dir.multiplyScalar(d0)); c.target.set(0, 0, 0); v.camera.lookAt(0, 0, 0);
-      } else {
-        const u = Math.min(1, (t - T1) / (ms - T1)), e = ease(u);
-        const tg = P.clone().multiplyScalar(e), od = P.clone().lerp(endDir, e).normalize(), r = d0 * Math.pow(dEnd / d0, e);
-        c.target.copy(tg); v.camera.position.copy(tg).addScaledVector(od, r); v.camera.lookAt(tg);
-        v.focusPoint = P; v.dof.enabled = e > 0.05; v.blur = 0.05 * e;
-        offX = off0 * (1 - e); lift(); if (gsh) gsh.material.opacity = 1 - Math.min(1, e * 2.5);
-      }
-      v.req(); if (t < ms) requestAnimationFrame(step); else done();
+      const u = Math.min(1, (performance.now() - t0) / ms);
+      globe.userData.setSpin(rot0 + dAz * spin(u / 0.7));
+      const e = e0 + (e1 - e0) * sm(u / 0.55), D = new THREE.Vector3(Math.sin(camAz) * Math.cos(e), Math.sin(e), Math.cos(camAz) * Math.cos(e));
+      const p = sm((u - 0.2) / 0.8), q = sm((u - 0.45) / 0.35), tp = sm((u - 0.68) / 0.32);
+      const Pw = bL.clone().applyAxisAngle(Y, globe.rotation.y), tg = Pw.clone().multiplyScalar(q);
+      const dc = d0 * Math.pow((1 + dEnd) / d0, p), r = dc - q, od = D.clone().lerp(endDir, tp).normalize();
+      c.target.copy(tg); v.camera.position.copy(tg).addScaledVector(od, r); v.camera.lookAt(tg);
+      v.focusPoint = Pw; v.dof.enabled = true; v.blur = 0.045 * p;
+      offX = off0 * (1 - sm(u / 0.5)); lift(); if (gsh) gsh.material.opacity = 1 - sm(u / 0.45);
+      v.req();
+      if (!called && u >= 0.84) { called = true; done(); }
+      if (u < 1) requestAnimationFrame(step);
     };
     step();
   };
+  // ふちのぼけた暗がりが、行き先へ向かって閉じる
   const irisTo = (url, P) => {
-    const R = $('#c').getBoundingClientRect(), s2 = P.clone().project(v.camera), x = (s2.x + 1) / 2 * R.width, y = (1 - s2.y) / 2 * R.height;
-    const f = document.createElement('div'); f.className = 'iris'; f.style.left = x + 'px'; f.style.top = y + 'px'; document.body.appendChild(f);
-    requestAnimationFrame(() => requestAnimationFrame(() => f.classList.add('on'))); setTimeout(() => location.replace(url), 720);
+    const R = $('#c').getBoundingClientRect(), s2 = P.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), globe.rotation.y).project(v.camera), x = (s2.x + 1) / 2 * R.width, y = (1 - s2.y) / 2 * R.height;
+    const f = document.createElement('div'); f.className = 'iris'; document.body.appendChild(f);
+    const M = Math.hypot(innerWidth, innerHeight) * 1.1, t0 = performance.now(), T = 950;
+    const step = () => {
+      const u = Math.min(1, (performance.now() - t0) / T), e = u * u * (3 - 2 * u), rr = M * (1 - e), fe = 40 + M * 0.35 * (1 - e);
+      f.style.background = `radial-gradient(circle at ${x}px ${y}px, rgba(28,33,35,0) ${Math.max(0, rr - fe)}px, rgba(28,33,35,${0.35 + 0.65 * e}) ${rr}px)`;
+      if (u < 1) requestAnimationFrame(step); else location.replace(url + '&look=desk');
+    };
+    step();
   };
   const fadeTo = (url) => { const f = document.createElement('div'); f.className = 'fade'; document.body.appendChild(f); requestAnimationFrame(() => f.classList.add('on')); setTimeout(() => location.replace(url), 650); };
   // 旅：出発地の上で、右上にメールの通知が届く。押すと画面の真ん中に広がって読める。［行く］で飛び、着いた所に虫ピンを刺す。
@@ -1263,7 +1280,7 @@ async function bootGlobe(mode = 'title') {
       (DESK ? flyDesk : fly)(E.SITES[from], S2, Q.has('flyms') ? +Q.get('flyms') : DESK ? 4200 : 3600, () => {   // flyms：試験で動きを撮るときだけ長く
         $('#where').textContent = `${S2.name}・標高${S2.elev.toLocaleString()}m`;
         const dest = globe.userData.pins.find(m => m.userData.pin.id === 'dest');
-        if (dest) globe.userData.stick(dest, 700, () => setTimeout(out, 450)); else out();
+        if (dest) globe.userData.stick(dest, DESK ? 600 : 700, () => DESK ? out() : setTimeout(out, 450)); else out();
       });
     };
     if (!mail) { setTimeout(go, 900); return; }

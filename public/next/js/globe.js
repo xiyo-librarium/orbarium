@@ -37,6 +37,7 @@ export function globeTextures(rings, W = 4096, desk = false) {
    住んだ年が長いほど広く（9°＋1年3°、28°まで）。ふちは少しにじませる */
 function colorize(m, lived, paper = '#E6E1D5', ref = 0.3, glow = null) {
   const L = lived.slice(0, 8), U = { uLP: { value: Array.from({ length: 8 }, (_, i) => { const q = L[i]; if (!q) return new THREE.Vector4(0, 0, 0, 0); const d = ll(q.lat, q.lon).normalize(), r = Math.min(28, 9 + 3 * (q.years || 0)) * Math.PI / 180; return new THREE.Vector4(d.x, d.y, d.z, r); }) }, uLN: { value: L.length }, uPaper: { value: new THREE.Color(paper) }, uRef: { value: ref }, uGlow: { value: glow ?? 1 }, uDesk: { value: glow == null ? 0 : 1 } };
+  m.userData.lp = U.uLP.value.map(v4 => v4.clone()); m.userData.uLP = U.uLP;   // 地球儀の上の向き（回したら setSpin で回す）
   const prev = m.onBeforeCompile;
   m.onBeforeCompile = (sh, r) => {
     prev(sh, r); Object.assign(sh.uniforms, U);
@@ -116,6 +117,12 @@ export function buildGlobe(rings, pins = [], route = null, opt = {}) {
     fragmentShader: 'uniform vec3 c; uniform vec3 s; varying vec3 vN; varying vec3 vW; void main(){ float f = pow(1.0 - abs(vN.z), 2.2); float day = smoothstep(-0.35, 0.4, dot(vW, normalize(s))); gl_FragColor = vec4(c * f * (0.25 + 0.9 * day), f * 0.8); }'
   }));
   g.add(atm); g.userData.atm = atm; atm.visible = !desk;   // 机の地球儀には大気の光る縁はない
+  // 地球儀そのものを軸のまわりに回す（机の地球儀の寄り方）。色づきは世界の向きで計算しているので、住んだ所の向きも一緒に回す
+  g.userData.setSpin = (a) => {
+    g.rotation.y = a; const Y = new THREE.Vector3(0, 1, 0), tmp = new THREE.Vector3();
+    for (const mat of [sea.material, landM]) { const U2 = mat.userData.lp, live = mat.userData.uLP; if (!U2 || !live) continue;
+      U2.forEach((v4, i) => { tmp.set(v4.x, v4.y, v4.z).applyAxisAngle(Y, a); live.value[i].set(tmp.x, tmp.y, tmp.z, v4.w); }); }
+  };
   // 印：虫ピン。g.userData.pins に覚えておき、刺す動き（stick）に使う
   g.userData.pins = pins.map(p => { const m = insectPin(p, p.hidden ? 1.35 : 1); m.visible = !p.hidden; g.add(m); const sh = pinShadow(m, opt.sun); sh.visible = !p.hidden; m.userData.shadow = sh; g.add(sh); return m; });
   g.userData.stick = (pin, ms = 650, done) => {   // 上から刺さる
