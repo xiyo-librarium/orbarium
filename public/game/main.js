@@ -1192,19 +1192,13 @@ async function bootGlobe(mode = 'title') {
   v.camera.near = 0.05; v.camera.far = 50; v.camera.fov = 30; v.camera.updateProjectionMatrix();
   v.sun.position.copy(sd).multiplyScalar(10); v.sun.target.position.set(0, 0, 0); v.sun.color.set('#FFF1DE'); v.sun.intensity = 3.2;
   globe.userData.atm.material.uniforms.s.value.copy(sd);
-  // 机の地球儀：宇宙の太陽ではなく部屋の光。いつも見ている側の左上から、やわらかく。下には接地影
-  let gsh = null;
+  // 机の地球儀：宇宙の太陽ではなく部屋の光。いつも見ている側の左上から、やわらかく。影は落とさず、宙に浮かんで見せる
   {
     v.scene.environmentIntensity = 0.32 + 0.25 * GLOW; v.sun.intensity = 2.3 + 0.9 * GLOW; v.renderer.toneMappingExposure = 0.82 + 0.3 * GLOW; v.sun.color.set('#FFF3E4');
-    // 接地影：地球の少し下・少し奥に、こちらを向いた楕円の影（地球が手前を隠す）
-    const sc = document.createElement('canvas'); sc.width = sc.height = 128; const sx = sc.getContext('2d'), gr = sx.createRadialGradient(64, 64, 0, 64, 64, 64);
-    gr.addColorStop(0, 'rgba(0,0,0,.62)'); gr.addColorStop(0.55, 'rgba(0,0,0,.28)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); sx.fillStyle = gr; sx.fillRect(0, 0, 128, 128);
-    gsh = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(sc), transparent: true, depthWrite: false, opacity: 1 })); v.scene.add(gsh);
     const r0 = v.render;
     v.render = () => {
       const cam = v.camera, up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion), rt = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion), back = cam.position.clone().sub(c.target).normalize();
       v.sun.position.copy(c.target).add(back.clone().multiplyScalar(0.55).add(up.clone().multiplyScalar(0.75)).add(rt.multiplyScalar(-0.55)).normalize().multiplyScalar(10)); v.sun.target.position.copy(c.target);
-      gsh.position.copy(up).multiplyScalar(-1.08).addScaledVector(back, -0.5); gsh.scale.set(2.1, 0.32, 1);
       r0();
     };
   }
@@ -1243,7 +1237,7 @@ async function bootGlobe(mode = 'title') {
       const dc = d0 * Math.pow((1 + dEnd) / d0, p), r = dc - q, od = D.clone().lerp(endDir, tp).normalize();
       c.target.copy(tg); v.camera.position.copy(tg).addScaledVector(od, r); v.camera.lookAt(tg);
       v.focusPoint = Pw; v.dof.enabled = true; v.blur = 0.045 * p;
-      offX = off0 * (1 - sm(u / (A1 - 0.05))); lift(); if (gsh) gsh.material.opacity = 1 - sm((u - B0) / 0.2);
+      offX = off0 * (1 - sm(u / (A1 - 0.05))); lift();
       v.req();
       if (!called && u >= A1 - 0.07) { called = true; done(); }
       if (!fading && u >= B0) { fading = true; fade.classList.add('on');
