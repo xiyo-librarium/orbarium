@@ -342,3 +342,16 @@ body.deskwide .title-card .btns { justify-content: flex-start; }
 .sun input { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 999px; background: linear-gradient(90deg, #1E2A4A 0%, #2E3E6E 20%, #E7A27C 26%, #F3DFA8 34%, #F6EBC8 50%, #F3DFA8 66%, #E79565 74%, #34437A 80%, #1E2A4A 100%); outline: none; }
 .sun input::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 2px solid var(--accent); box-shadow: 0 1px 4px rgba(0, 0, 0, .25); cursor: pointer; }
 .sun input::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid var(--accent); cursor: pointer; }
+/* パネルはいつも同じ高さ（目次→ひとつ） */
+.ui2 .card { height: 270px; max-height: none; overflow-y: auto; }
+.card h3 .bk { border: 0; background: rgba(35, 48, 44, .07); border-radius: 50%; width: 28px; height: 28px; font-size: 20px; line-height: 1; margin-right: 6px; cursor: pointer; color: var(--ink); flex-shrink: 0; }
+.tgrid.big { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.tgrid.big button { padding: 12px 4px 9px; gap: 3px; }
+.tgrid.big button svg { width: 30px; height: 30px; }
+.tgrid.big button span { font-size: 13px; font-weight: 600; }
+.tgrid.big button em { font-style: normal; font-size: 11.5px; color: var(--sub); }
+.card .legend { display: flex; align-items: center; gap: 6px; font-size: 12.5px; margin: 10px 0 2px; }
+.card .legend i { width: 14px; height: 14px; border-radius: 50%; display: inline-block; margin-left: 8px; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15); }
+.card .legend i:first-child { margin-left: 0; }
+.card .legend .lw { background: #fff; box-shadow: 0 0 0 2px #6E8B5B; } .card .legend .lo { background: #8CC7EC; } .card .legend .ld { background: #A06A3A; }
+@media (max-width: 640px) { .ui2 .card { height: 40vh; } .tgrid.big { grid-template-columns: repeat(3, 1fr); } }

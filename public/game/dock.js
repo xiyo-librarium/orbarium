@@ -28,6 +28,19 @@ export const TOOL_ICON = {
   pond: '<path d="M3 14c2.5 4 15.5 4 18 0"/><path d="M5 14c2-1.5 12-1.5 14 0"/><path d="M8 10c1-1 2-1 3 0M13 8c1-1 2-1 3 0"/>',
   filter: '<path d="M7 4c-1.5 2-2.5 3.5-2.5 5a2.5 2.5 0 0 0 5 0c0-1.5-1-3-2.5-5z"/><path d="M17 12c-1.5 2-2.5 3.5-2.5 5a2.5 2.5 0 0 0 5 0c0-1.5-1-3-2.5-5z"/><path d="M10 9.5c2 0 3 .8 4 2.5"/><circle cx="17" cy="17" r=".7" fill="currentColor"/><circle cx="16" cy="15.5" r=".5" fill="currentColor"/>'
 };
+// パネルの目次のタイル
+Object.assign(TOOL_ICON, {
+  t_floor: '<path d="M3 16l9-5 9 5-9 5z"/><path d="M7.5 13.5l9 5M16.5 13.5l-9 5" opacity=".5"/><path d="M12 3v5M9.5 5.5 12 3l2.5 2.5"/>',
+  t_method: '<rect x="4" y="5" width="16" height="14" rx="1"/><path d="M4 10h16M4 14.5h16M9 5v5M15 10v4.5M9 14.5V19"/>',
+  t_roof: '<path d="M2.5 13 12 5l9.5 8"/><path d="M6 11v8h12v-8"/><path d="M12 5V2.5"/>',
+  t_open: '<rect x="4" y="4" width="10" height="16"/><rect x="6.5" y="7" width="5" height="5"/><path d="M17 20V8h4v12"/><circle cx="18" cy="14.5" r=".6" fill="currentColor"/>',
+  t_deep: '<path d="M3 9h18"/><path d="M6 9v11M18 9v11M12 9v11"/><path d="M3 20h18" stroke-dasharray="2 2"/><path d="M6 4h12v5H6z"/>',
+  t_use: '<path d="M3 20h18"/><path d="M5 20v-8l7-5 7 5v8"/><path d="M9 20v-5h6v5"/>',
+  t_part: '<rect x="3" y="4" width="18" height="16"/><path d="M12 4v6M12 14v6"/><path d="M14.5 12h0" stroke-linecap="round" stroke-width="2.4"/>',
+  t_water: '<path d="M7 4v5a5 5 0 0 0 10 0V4"/><path d="M12 14v6M8 20h8"/><path d="M10 7c0 1 .8 2 2 2"/>',
+  t_stove: '<path d="M4 20h16"/><path d="M5 20V10h14v10"/><path d="M9 20v-4a3 3 0 0 1 6 0v4"/><path d="M12 7c-1-1-1-2 0-3 1 1 1 2 0 3z"/>',
+  t_furn: '<path d="M4 12h16v4H4z"/><path d="M5 16v3M19 16v3"/><path d="M6 12V8h12v4"/>'
+});
 // 丸ごとの道具。tool/sub は main の道具（なぞる・押す）に渡す。act は main で受ける
 export const CAT_TOOLS = {
   house: [{ id: 'build', name: '建てる', tool: 'house', how: 'なぞる' }],

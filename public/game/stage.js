@@ -101,7 +101,7 @@ export function createStage(v, s, P) {
       st.sig.blocks = sigBlocks;
     }
     // 壊す・外す物（編集前にあって今ない）：青い点線で残す。地形を変えたマスは青い枠
-    const sigGone = sigBase + JSON.stringify(bs.map(b => W.bid(b))) + JSON.stringify(Object.keys(w.blocks)) + sigLand.length;
+    const sigGone = sigBase + JSON.stringify(bs.map(b => [W.bid(b), Object.keys(b.cells).length])) + JSON.stringify(Object.keys(w.blocks)) + sigLand.length;
     if (sigGone !== st.sig.gone) {
       let gg = null;
       if (st.base) {
@@ -111,6 +111,10 @@ export function createStage(v, s, P) {
         if (Object.keys(gone).length) gg.add(dashed(buildBlocks({ ...st.base, blocks: gone }, st.landObj, P, { lat: E.SITES[s.site]?.lat })));
         const pts = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { if (w.H[y * N + x] === st.base.H[y * N + x] || W.buildingAt(w, x, y)) continue; const z = st.at(x + 0.5, y + 0.5) + 0.04, a = 0.06, b2 = 0.94;
           pts.push(x + a, z, y + a, x + b2, z, y + a, x + b2, z, y + a, x + b2, z, y + b2, x + b2, z, y + b2, x + a, z, y + b2, x + a, z, y + b2, x + a, z, y + a); }
+        // 増えた床：青い太めの枠（どこが広がったか）
+        { const had = new Set(); for (const b0 of bs0) for (const k in b0.cells) had.add(k);
+          for (const b of bs) for (const k in b.cells) { if (had.has(k)) continue; const [x, y] = k.split(',').map(Number), z = b.z + 0.07;
+            for (const a of [0.04, 0.1]) { const b2 = 1 - a; pts.push(x + a, z, y + a, x + b2, z, y + a, x + b2, z, y + a, x + b2, z, y + b2, x + b2, z, y + b2, x + a, z, y + b2, x + a, z, y + b2, x + a, z, y + a); } } }
         if (pts.length) { const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); gg.add(new THREE.LineSegments(lg, lineM)); }
       }
       swap('gone', gg); st.sig.gone = sigGone;

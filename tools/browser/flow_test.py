@@ -44,7 +44,8 @@ try:
         # 章の終わりの代わり：持ち越しを入れて、アレンテージョへ（招待は報告かノートで読んであるので、地球儀ではすぐ飛ぶ）
         page.evaluate("""(() => { const s = window.__orb.s; localStorage.setItem('orbarium-carry', JSON.stringify({ from: 'med', to: 'alen', cash: 200, persons: s.persons, known: s.known, learned: s.learned, year: s.year, q: s.q, invites: [{ land: 'ubud', from: 'med' }, { land: 'alen', from: 'med' }], history: [{ site: 'med', years: 1, rel: 5 }] })); location.href = '/?travel=alen'; })()""")
         page.wait_for_url('**travel=alen', timeout=20000); ready(page); shot(page, '9travel', 1500)
-        print('travel notif', page.evaluate("!!document.querySelector('.notif')"))
+        try: print('travel notif', page.evaluate("!!document.querySelector('.notif')"))
+        except Exception: print('travel notif (もう土地へ移っていた)')
         page.wait_for_url('**/?play**', timeout=60000); ready(page); shot(page, '10alen')
         print('alen', page.evaluate("window.__orb.s.site"), 'cash', page.evaluate("window.__orb.s.cash"), 'history', page.evaluate("JSON.stringify(window.__orb.s.flags.history)"), 'invites', page.evaluate("JSON.stringify(window.__orb.E.openInvites(window.__orb.s).map(i=>i.land))"), 'carry left', page.evaluate("localStorage.getItem('orbarium-carry')"), 'climate', page.evaluate("document.querySelector('#reportBody h2')?.textContent"))
         page.click('#rBack'); page.wait_for_timeout(300)
