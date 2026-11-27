@@ -194,8 +194,8 @@ export function buildGutter(s, x, y) {
   const price = gutterPrice(r.perimeter); if (price > s.cash + 1e-9) return 'お金が足りない';
   s.cash -= price; spend(w, price, 0); for (const b of r.blocks) w.blocks[K(b.x, b.y, b.z)].gut = 1; return null;
 }
-/* 動かせる設備（タンク・ポンプ・太陽光・ニワトリ小屋・沈殿槽）。手間賃だけ */
-export const MOVABLE = ['tank', 'pump', 'pv', 'coop', 'settle'], MOVE_PRICE = 0.3;
+/* 動かせる設備（タンク・ポンプ・太陽光・ニワトリ小屋・沈殿槽）。使い回せるので、動かすのはただ */
+export const MOVABLE = ['tank', 'pump', 'pv', 'coop', 'settle'], MOVE_PRICE = 0;
 export function moveBlock(s, from, to) {
   const w = s.world, kf = K(...from), b = w.blocks[kf]; if (!b) return '何もない';
   if (!MOVABLE.includes(BLOCKS[b.t].kind)) return 'これは動かせない';
@@ -1056,14 +1056,67 @@ export function buildBuilding(s, d) {
   if (i >= 0) list[i] = cloneHouse(d); else list.push(cloneHouse(d));
   return null;
 }
-/* 離れを壊す：片づけの手間（床1m²あたり0.4万円）。母屋は壊せない */
-export const DEMOLISH_M2 = 0.4;
+/* 離れを壊す：壊すのはただ（11/27）。母屋は壊せない */
+export const DEMOLISH_M2 = 0;
 export function removeBuilding(s, id) {
   const w = s.world; if (id === 'main') return '母屋は壊せない（使い道は変えられない）';
   const list = w.annex || [], i = list.findIndex(b => b.id === id); if (i < 0) return '建物がない';
   const cost = Object.keys(list[i].cells).length * DEMOLISH_M2; if (cost > s.cash + 1e-9) return 'お金が足りない';
   s.cash -= cost; spend(w, cost, 0); list.splice(i, 1);
   return null;
+}
+/* 編集の値段：編集前 w0 と今 w1 の差だけで数える。途中で何度変えても、A→B→A はただ（11/27）。
+   足すのも替えるのも新しく作る分の全額。壊す・外すのはただ。外した材料はとっておかないが、
+   タンク・電池・太陽光パネルなど動かせる設備は使い回す（数が増えた分だけ払う） */
+const REUSE = ['tank', 'pump', 'pv', 'batt', 'coop', 'settle'];
+export function editCost(w0, w1) {
+  const lines = [], add = (label, cost, local, key) => { if (cost > 1e-6) lines.push({ label, cost, local: Math.min(cost, local), key }); };
+  // 建物：編集前の同じ建物から今の形へ（太陽光と電池は下で敷地全体の数として）
+  const B0 = {}; for (const b of buildings(w0)) B0[bid(b)] = b;
+  const inB1 = new Set();
+  let pv0 = 0, pv1 = 0, bt0 = 0, bt1 = 0;
+  for (const b of buildings(w0)) { pv0 += b.pv || 0; bt0 += b.batt || 0; }
+  for (const b of buildings(w1)) {
+    pv1 += b.pv || 0; bt1 += b.batt || 0;
+    for (const k in b.cells) inB1.add(k);
+    const b0 = B0[bid(b)];
+    if (b0 && JSON.stringify(b0) === JSON.stringify(b)) continue;
+    const est = estimate(w0, b0 ? { ...b0, pv: b.pv, batt: b.batt } : null, { ...b, pv: b0 ? b.pv : 0, batt: b0 ? b.batt : 0 });
+    for (const l of est.lines) add(l.label, l.cost, l.local, 'b:' + bid(b));
+  }
+  // ブロック：動かせる設備は数で、ほかは同じ場所に同じ物がなければ新しく
+  const cnt0 = {}, cnt1 = {};
+  // 太陽光パネルと電池は、屋根の上でも地面でも家の中でも同じ1枚・1台（屋根から地面へ移すのはただ）
+  for (const k in w0.blocks) { const t = w0.blocks[k].t, kd = BLOCKS[t].kind; if (kd === 'pv') pv0++; else if (kd === 'batt') bt0++; else if (REUSE.includes(kd)) cnt0[t] = (cnt0[t] || 0) + 1; }
+  const newB = {};
+  for (const k in w1.blocks) {
+    const b = w1.blocks[k], d = BLOCKS[b.t], b0 = w0.blocks[k];
+    if (d.kind === 'pv') { pv1++; continue; } if (d.kind === 'batt') { bt1++; continue; }
+    if (REUSE.includes(d.kind)) { cnt1[b.t] = (cnt1[b.t] || 0) + 1; continue; }
+    if (!b0 || b0.t !== b.t) newB[b.t] = (newB[b.t] || 0) + 1;
+    if (d.kind === 'bed') for (const [m, p, loc] of [['s', 0.15, 1], ['g', 1.2, 0], ['m', 0.01, 0]]) if (b[m] && !(b0 && b0.t === b.t && b0[m])) add(m === 'g' ? '畑の覆い' : m === 'm' ? '畑のマルチ' : '畑の石', p, loc ? p : 0, 'mark:' + m);
+  }
+  const blockLine = (t, n) => { const d = BLOCKS[t], c = n * (d.cost + d.labor * 1.5); add(`${d.name}${n > 1 ? ` ×${n}` : ''}`, c, n * ((d.local ? d.cost : 0) + d.labor * 1.5), 't:' + t); };
+  for (const t in newB) blockLine(t, newB[t]);
+  for (const t in cnt1) { const n = cnt1[t] - (cnt0[t] || 0); if (n > 0) blockLine(t, n); }
+  { const n = pv1 - pv0; if (n > 0) add(`太陽光パネル ×${n}`, n * PV_PRICE, n * PV_PRICE * LABOR, 'pv'); }
+  { const n = bt1 - bt0; if (n > 0) add(`蓄電池 ×${n}`, n * BATT_PRICE, n * BATT_PRICE * LABOR, 'batt'); }
+  // 木を切る：編集前にあって今ない木・茂み・植えた木
+  { const v1 = new Set(vegObjects(w1).map(o => o.kind + ':' + o.cx + ',' + o.cy)); let c = 0;
+    for (const o of vegObjects(w0)) if (!v1.has(o.kind + ':' + o.cx + ',' + o.cy)) c += CUT[o.kind].cost;
+    for (const k in w0.blocks) { const t = w0.blocks[k].t; if ((t === 'tree' || t === 'hedge') && !(w1.blocks[k] && w1.blocks[k].t === t)) c += CUT[t].cost; }
+    add('木とやぶを切る', c, c, 'cut'); }
+  // 地形：建物の床の下（建物の見積もりに入っている）を除いて、掘った・盛った分
+  { let dig = 0, fil = 0;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { if (inB1.has(ck(x, y))) continue; const d = w1.H[idx(x, y)] - w0.H[idx(x, y)]; if (d < 0) dig -= d; else fil += d; }
+    add('掘る', dig * DIG_LABOR * 1.5, dig * DIG_LABOR * 1.5, 'dig');
+    const buy = Math.max(0, fil - dig - (w0.earth || 0)) * EARTH_PRICE;
+    add('盛る', fil * FILL_LABOR * 1.5 + buy, fil * FILL_LABOR * 1.5 + buy, 'fill'); }
+  // 石垣
+  { let c = 0; for (const k in (w1.stone || {})) if (!(w0.stone || {})[k]) { const [x, y] = k.split(',').map(Number); c += dropArea(w1, x, y) * STONE_PRICE; }
+    add('石垣', c, c, 'stone'); }
+  const total = lines.reduce((a, l) => a + l.cost, 0), local = lines.reduce((a, l) => a + l.local, 0);
+  return { lines, total, local, far: total - local };
 }
 /* 最初の小さな家（4×3m）：斜面の上のほうの平らな段に、等高線に沿って長く。扉は外が同じ段の短い辺、窓は低い側の長い辺に2つ */
 export function findHouseSpot(w, L = 4, S = 3, margin = 6) {

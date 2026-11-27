@@ -251,7 +251,7 @@ body.editing #cash { background: #FFF1D3; border-color: rgba(214, 160, 62, .6); 
 body.editing #season { display: none; }
 .draftbar.editbar { gap: 10px; padding: 7px 8px; border-color: rgba(214, 160, 62, .7); }
 .editbar #draftTxt { flex: 1; display: flex; align-items: center; gap: 4px 12px; flex-wrap: wrap; font-size: 12.5px; min-width: 0; }
-.editbar .ecost { font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; } .editbar .ecost.pay { color: #8A5E22; }
+.editbar .ecost { font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; } .editbar .ecost.pay { color: #8A5E22; } .editbar .ecost.short { color: var(--bad, #B4442E); } .editbar .yes:disabled { opacity: .4; }
 .editbar button.no { width: 38px; height: 38px; padding: 0; border-radius: 50%; font-size: 16px; flex-shrink: 0; }
 .editbar button.yes { flex-shrink: 0; padding: 9px 16px; }
 @media (max-width: 640px) { .draftbar.editbar { flex-direction: row; align-items: center; } }
@@ -302,3 +302,43 @@ body.desk #where { background: rgba(255, 255, 255, .1); color: #E8E6DF; border-c
 body.deskwide .title-card { left: auto; right: max(4vw, 24px); bottom: auto; top: 50%; transform: translateY(-50%); width: min(400px, 34vw); text-align: left; padding: 28px 28px 22px; }
 body.deskwide .title-card .btns { justify-content: flex-start; }
 .fade.black { z-index: 60; background: #0E1011; transition: opacity .85s ease-in-out; }
+
+/* ---------- 新しい操作（?proto・&ui=2）：下の5つの丸、下半分の窓、今の道具 ---------- */
+.ui2 #tools, .ui2 #subs, .ui2 #hint, .ui2 #cut { display: none !important; }
+.dock { display: flex; gap: 12px; padding: 2px 6px 4px; }
+.dock button { width: 54px; height: 54px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: grid; place-items: center; box-shadow: 0 4px 14px rgba(30, 40, 35, .14); cursor: pointer; color: var(--ink);
+  transition: transform .42s cubic-bezier(.2, .9, .25, 1.25), opacity .3s, background .2s, color .2s; }
+.dock button svg { width: 26px; height: 26px; }
+.dock button:nth-child(2) { transition-delay: .04s; } .dock button:nth-child(3) { transition-delay: .08s; } .dock button:nth-child(4) { transition-delay: .12s; } .dock button:nth-child(5) { transition-delay: .16s; }
+.dock.off { pointer-events: none; } .dock.off button { transform: translateY(110px); opacity: 0; }
+.dock button.on { background: #6E8B5B; border-color: #6E8B5B; color: #fff; transform: translateY(-5px); transition-delay: 0s; }
+.toolpill { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid rgba(110, 139, 91, .55); border-radius: 999px; padding: 5px 6px 5px 12px; font-size: 13px; box-shadow: 0 4px 14px rgba(30, 40, 35, .12); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.toolpill svg { width: 20px; height: 20px; color: #4F6B3F; }
+.toolpill span { color: var(--sub); font-size: 12px; }
+.toolpill .x { border: 0; background: rgba(35, 48, 44, .07); border-radius: 50%; width: 26px; height: 26px; font-size: 16px; line-height: 1; cursor: pointer; color: var(--sub); }
+.ui2 .card { left: 50% !important; right: auto; top: auto !important; transform: translateX(-50%); width: min(560px, calc(100% - 16px)); max-height: min(50vh, 480px); border-radius: 18px; animation: sheetup .28s cubic-bezier(.2, .9, .3, 1); }
+@keyframes sheetup { from { transform: translate(-50%, 24px); opacity: 0; } to { transform: translateX(-50%); opacity: 1; } }
+.ui2 .card .row { grid-template-columns: 72px 1fr; }
+.tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 6px; margin-top: 10px; }
+.card h3 + .tgrid { margin-top: 8px; }
+.tgrid button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 2px 7px; border: 1px solid var(--line); background: rgba(255, 255, 255, .7); border-radius: 14px; font-size: 11.5px; color: var(--ink); cursor: pointer; }
+.tgrid button svg { width: 26px; height: 26px; color: #4F6B3F; }
+.tgrid button.on { background: rgba(110, 139, 91, .16); border-color: rgba(110, 139, 91, .6); }
+.tgrid button.locked { opacity: .38; }
+.card .choice { display: flex; gap: 8px; margin-top: 8px; }
+.card .choice button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 9px; border: 1px solid rgba(110, 139, 91, .6); background: #fff; border-radius: 12px; cursor: pointer; font-size: 13px; }
+.card .acts2 { display: flex; justify-content: flex-end; margin-top: 8px; }
+.ui2 .draftbar { flex-direction: row !important; align-items: center !important; gap: 6px; padding: 6px 6px 6px 8px; }
+.ui2 .draftbar #draftTxt { flex: 1; min-width: 0; }
+.ui2 .draftbar .icon { width: 34px; height: 34px; flex-shrink: 0; display: grid; place-items: center; border: 1px solid var(--line); background: rgba(255, 255, 255, .7); border-radius: 50%; padding: 0; }
+.ui2 .draftbar .icon:disabled { opacity: .3; }
+.ui2 .draftbar .no { width: 34px; height: 34px; padding: 0; flex-shrink: 0; }
+@media (max-width: 640px) {
+  .dock { gap: 9px; } .dock button { width: 50px; height: 50px; }
+  .ui2 .card { max-height: 48vh; }
+  .ui2 .draftbar #draftTxt { font-size: 12px; }
+}
+/* 時刻：つまみの下に、夜・朝焼け・昼・夕焼け・夜の帯 */
+.sun input { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 999px; background: linear-gradient(90deg, #1E2A4A 0%, #2E3E6E 20%, #E7A27C 26%, #F3DFA8 34%, #F6EBC8 50%, #F3DFA8 66%, #E79565 74%, #34437A 80%, #1E2A4A 100%); outline: none; }
+.sun input::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 2px solid var(--accent); box-shadow: 0 1px 4px rgba(0, 0, 0, .25); cursor: pointer; }
+.sun input::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid var(--accent); cursor: pointer; }

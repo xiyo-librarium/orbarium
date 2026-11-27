@@ -21,7 +21,7 @@
 
 ## 動かす
 - ローカル：`python3 -m http.server 8000 -d public`
-- URL の切り替え：`/`（地球儀から）、`?play`（続きから）、`?play&new=med`（メデジンを新しく）、`?shot` `?proto`（試験用）、`?globe=atlas`、`?travel=alen`（土地は med・ubud・alen・yama・taos）、`&glow=0〜1`（地球儀の明るさを試す）、`&flyms=`（地球儀の飛ぶ時間を試す）、`&in=dark`（土地の画面を黒から明ける。地球儀から来たとき）、`&fast=1`（季節の天気の早回しを飛ばす）、`?wxper=ms`（早回しの1日の長さ）
+- URL の切り替え：`/`（地球儀から）、`?play`（続きから）、`?play&new=med`（メデジンを新しく）、`?shot` `?proto`（試験用。?proto は新しい操作の試作も）、`&ui=2`（遊ぶ画面で新しい操作）、`?globe=atlas`、`?travel=alen`（土地は med・ubud・alen・yama・taos）、`&glow=0〜1`（地球儀の明るさを試す）、`&flyms=`（地球儀の飛ぶ時間を試す）、`&in=dark`（土地の画面を黒から明ける。地球儀から来たとき）、`&fast=1`（季節の天気の早回しを飛ばす）、`?wxper=ms`（早回しの1日の長さ）
 - 保存のキー：`orbarium-1`、引き継ぎ `orbarium-carry`、地図帳 `orbarium-atlas`（前の版は別のキー）。前のキー `orbarium-next-…` は、開いたときに新しいキーへ移して消す
 
 ## 確かめる
@@ -46,6 +46,7 @@
 - 座標：world の x → three の x、world の y（南向き）→ three の z、高さ → three の y。
 - ブロックは `{ t, at: s.turn }` を `"x,y,z"` のキーで持つ。置く・外す・動かすは `W.put` / `W.remove` / `W.moveBlock`。
 - 編集はすべて仮：`act()` が編集を始め、編集中は保存しない。`endEdit(true)` で元に戻す履歴を1つにまとめて払い、`endEdit(false)` で元に戻す。
+- 値段は1歩ごとに払わない：`act()` の中では所持金を大きくして試し、終わったら `settle()` が `W.editCost(編集前, 今)` で数え直す。新しく値段のかかる操作を足したら editCost にも足す。
 - 3Dで押した物は `userData.pick` の種類（building・tank・batt・pump・coop・beds…）で見分ける。家具や置いた物を引きずるときは、カメラが回らないよう捕捉の段階で止める。
 - 家の中の壁は建物の `inner`（`"h:x,y"` の辺に 'wall' か 'door'）。部屋は `W.rooms(d)`。壁を下げているとき、床の上のドラッグは間仕切り（家具の上なら家具、床の外なら視点）
 - 太陽光は屋根の向きと傾きで月ごとの割合（`pvFactor`）が変わり、engine で `pvF[d.m]` を掛ける。

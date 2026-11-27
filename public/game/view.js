@@ -7,7 +7,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
-import { skyLight, glow } from './look.js';
+import { skyLight, glow, lamps } from './look.js';
 
 export function createView(canvas, opt = {}) {
   const mobile = matchMedia('(pointer: coarse)').matches;
@@ -71,12 +71,14 @@ export function createView(canvas, opt = {}) {
     if (scene.fog) scene.fog.color.copy(base.fog).lerp(grayFog, 0.7 * wk); v.req(); };
   v.setWeather = (k) => { wk = Math.max(0, Math.min(1, k)); applyWeather(); };
   v.setSun = (dir, elevDeg, am = true) => {
-    const d = new THREE.Vector3(dir[0], Math.max(0.05, dir[2]), dir[1]).normalize();
+    // 日が沈んだら、光は月（太陽の反対側の高い所から、青く弱く）へ移していく
+    const sd = new THREE.Vector3(dir[0], Math.max(0.05, dir[2]), dir[1]).normalize(), md = new THREE.Vector3(-dir[0] * 0.55, 0.8, -dir[1] * 0.55 + 0.25).normalize();
+    const mk = Math.max(0, Math.min(1, -elevDeg / 7)), d = sd.clone().lerp(md, mk).normalize();
     const L = skyLight(v.P, elevDeg, am);
     sun.color.copy(L.sun); base = { sunK: L.sunK, env: L.env, exp: L.exposure, fog: L.fog.clone() };
     envWant = L;   // 環境の光は次に描く前に焼き直す（スライダーを動かしている間も1回/コマ）
     applyWeather();   // 曇り・雨のときは日差しを弱め、霞を灰色に（朝夕は少し明るめに写す、は exposure で）
-    glow.set(L.day);
+    glow.set(L.day); lamps.set(L.night);
     sun.target.position.copy(v.focus); sun.position.copy(v.focus).addScaledVector(d, 80);
     const cam = sun.shadow.camera; cam.left = -v.span; cam.right = v.span; cam.top = v.span; cam.bottom = -v.span; cam.near = 20; cam.far = 170; cam.updateProjectionMatrix();
     v.req();

@@ -12,7 +12,30 @@ const W = E.W;
 function dispose(o) { o.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) (Array.isArray(c.material) ? c.material : [c.material]).forEach(m => m.dispose()); }); }
 
 export function createStage(v, s, P) {
-  const N = W.N, st = { land: null, trees: null, houses: null, blocks: null, ghost: null, sig: {}, cut: false, draft: null };
+  const N = W.N, st = { land: null, trees: null, houses: null, blocks: null, ghost: null, gone: null, sig: {}, cut: false, draft: null, base: null };
+  // 仮（まだ決めていない）物は設計図のように：素材の色を淡く透かして、青い線で縁どる。壊す物は青い点線だけ残す（st.base＝編集前の世界）
+  const BLUE = new THREE.Color('#2F6FB8'), lineM = new THREE.LineBasicMaterial({ color: BLUE, transparent: true, opacity: 0.85, depthTest: true });
+  const dashM = new THREE.LineDashedMaterial({ color: BLUE, dashSize: 0.18, gapSize: 0.12, transparent: true, opacity: 0.9 });
+  const blueprint = (g) => {
+    const made = new Map(), meshes = [];
+    g.traverse(o => { if (o.isMesh && o.material) meshes.push(o); });
+    for (const o of meshes) {
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      o.material = ms.map(m => { if (made.has(m)) return made.get(m); if (!m.visible) { made.set(m, m); return m; }
+        const c = (m.color ? m.color.clone() : new THREE.Color('#ffffff')).lerp(new THREE.Color('#CFE2F5'), 0.45);
+        const n = new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, transparent: true, opacity: 0.62, vertexColors: !!m.vertexColors, emissive: new THREE.Color('#3E7BC4'), emissiveIntensity: 0.12, side: m.side });
+        made.set(m, n); return n; });
+      if (!Array.isArray(o.material) || o.material.length === 1) o.material = Array.isArray(o.material) ? o.material[0] : o.material;
+      o.castShadow = false;
+      if (!o.isInstancedMesh && o.geometry && o.geometry.attributes.position.count < 60000) { const l = new THREE.LineSegments(new THREE.EdgesGeometry(o.geometry, 28), lineM); l.raycast = () => {}; o.add(l); }
+    }
+  };
+  const dashed = (g) => {
+    const out = new THREE.Group(), meshes = []; g.updateMatrixWorld(true);
+    g.traverse(o => { if (o.isMesh && !o.isInstancedMesh && o.geometry && o.material && o.material.visible !== false) meshes.push(o); });
+    for (const o of meshes) { const l = new THREE.LineSegments(new THREE.EdgesGeometry(o.geometry, 28), dashM); l.applyMatrix4(o.matrixWorld); l.computeLineDistances(); out.add(l); }
+    dispose(g); return out;
+  };
   // 下書き：白い模型のように描く（まだ建っていない）
   const ghostify = (g) => { const gm = new THREE.MeshStandardMaterial({ color: '#F3EFE6', roughness: 0.95, emissive: '#3A3630', emissiveIntensity: 0.08 });
     g.traverse(o => { if (!o.isMesh) return; (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); o.material = gm; if (o.isInstancedMesh) o.instanceColor = null; }); };
@@ -29,14 +52,16 @@ export function createStage(v, s, P) {
     const blockedCell = new Set(Object.keys(lw.blocks).map(k => k.split(',').slice(0, 2).join(',')));
     const bedLevel = bedLevelOf(lw);
     const sigLand = JSON.stringify([Array.from(lw.H), bedLevel, w.H0 ? Array.from(w.H0).length : 0, [...blockedCell].sort(), bs.map(b => [Object.keys(b.cells), b.z])]);
-    const sigHouse = JSON.stringify([bs, W.blocksOf(w, 'tank').map(t => [t.x, t.y, t.z]), st.cut, st.draft && st.draft.d && [st.draft.d, st.draft.hideId, st.draft.real]]);
+    const bs0 = st.base ? W.buildings(st.base) : null, B0 = {}; if (bs0) for (const b of bs0) B0[W.bid(b)] = JSON.stringify(b);
+    const sigBase = st.base ? JSON.stringify([bs0, st.base.blocks, Array.from(st.base.H)]).length + ':' + Object.keys(B0).join() : '';
+    const sigHouse = JSON.stringify([bs, W.blocksOf(w, 'tank').map(t => [t.x, t.y, t.z]), st.cut, st.draft && st.draft.d && [st.draft.d, st.draft.hideId, st.draft.real], B0]);
     const fed = W.blocksOf(w, 'tank').length ? W.analyze(w, E.SITES[s.site], s.persons.length).fedKeys : [];   // 雨が入るタンク（水の窓を青く、つながりの管を描く）
-    const sigBlocks = JSON.stringify(w.blocks) + sigLand.length + fed.join(' ') + JSON.stringify(bs.map(b => Object.keys(b.cells)));
+    const sigBlocks = JSON.stringify(w.blocks) + sigLand.length + fed.join(' ') + JSON.stringify(bs.map(b => Object.keys(b.cells))) + (st.base ? JSON.stringify(st.base.blocks) : '');
     const cutCells = new Set(st.draft ? st.draft.cut : []);
     const sigTrees = JSON.stringify([w.veg, [...blockedCell].sort(), bs.map(b => [Object.keys(b.cells), b.z]), [...cutCells], st.draft && st.draft.d && Object.keys(st.draft.d.cells)]);
     let changed = false;
     if (sigLand !== st.sig.land) {
-      // 排水の庭は、掘った穴を砂利と砂で埋めた高さで描き、砂利の色を塗る。池の底は泥の色
+      // 浄化設備は、掘った穴を砂利と砂で埋めた高さで描き、砂利の色を塗る。池の底は泥の色
       const Hr = Array.from(lw.H), paint = {};
       for (const k in lw.blocks) { const D = BLOCKS[lw.blocks[k].t]; if (!D) continue; const [x, y, z] = k.split(',').map(Number);
         if (D.kind === 'media') { Hr[y * N + x] = Math.max(Hr[y * N + x], z + 1); paint[`${x},${y}`] = '#B9AE90'; }
@@ -49,7 +74,7 @@ export function createStage(v, s, P) {
     if (sigHouse !== st.sig.house || changed) {
       const g = new THREE.Group();
       const tanks = W.blocksOf(w, 'tank').map(t => ({ x: t.x, y: t.y, z: t.z }));
-      for (const b of bs) { if (st.draft && W.bid(b) === st.draft.hideId) continue; const hg = buildHouse(b, P, st.at, { tanks, cut: st.cut, lat: E.SITES[s.site]?.lat, free: (x, y) => !W.buildingAt(w, x, y) && !Object.keys(w.blocks).some(k => k.startsWith(`${x},${y},`)) }); hg.userData.pick = { kind: 'building', id: W.bid(b) }; g.add(hg); }
+      for (const b of bs) { if (st.draft && W.bid(b) === st.draft.hideId) continue; const hg = buildHouse(b, P, st.at, { tanks, cut: st.cut, lat: E.SITES[s.site]?.lat, free: (x, y) => !W.buildingAt(w, x, y) && !Object.keys(w.blocks).some(k => k.startsWith(`${x},${y},`)) }); hg.userData.pick = { kind: 'building', id: W.bid(b) }; if (st.base && B0[W.bid(b)] !== JSON.stringify(b)) blueprint(hg); g.add(hg); }
       if (st.draft && st.draft.d) { const hg = buildHouse(st.draft.d, P, st.at, { tanks, cut: st.cut, lat: E.SITES[s.site]?.lat, free: (x, y) => !W.buildingAt(w, x, y) && !Object.keys(w.blocks).some(k => k.startsWith(`${x},${y},`)) });
         // 改築の下書きは本物の見た目で（押すと建物として扱う）。新しい建物の下書きは白い模型
         if (st.draft.real && st.draft.hideId) hg.userData.pick = { kind: 'building', id: st.draft.hideId }; else { ghostify(hg); hg.userData.pick = { kind: 'draft' }; } g.add(hg); }
@@ -64,7 +89,32 @@ export function createStage(v, s, P) {
       const tg = buildTrees([...W.vegObjects(w), ...planted(w)], st.at, P, { skip: (t) => !t.planted && (!!W.buildingAt(w, t.cx, t.cy) || blockedCell.has(`${t.cx},${t.cy}`) || nearHouse(t) || cutCells.has(`${t.cx},${t.cy}`) || nearDraft(t)) });
       tg.userData.pick = { kind: 'trees' }; swap('trees', tg); st.sig.trees = sigTrees;
     }
-    if (sigBlocks !== st.sig.blocks || changed) { swap('blocks', buildBlocks(w, st.landObj, P, { fed })); st.sig.blocks = sigBlocks; }
+    if (sigBlocks !== st.sig.blocks || changed) {
+      const bo = { fed, lat: E.SITES[s.site]?.lat };
+      if (!st.base) swap('blocks', buildBlocks(w, st.landObj, P, bo));
+      else {
+        const same = {}, nu = {}; for (const k in w.blocks) { const b0 = st.base.blocks[k]; (b0 && b0.t === w.blocks[k].t && JSON.stringify({ ...b0, at: 0 }) === JSON.stringify({ ...w.blocks[k], at: 0 }) ? same : nu)[k] = w.blocks[k]; }
+        const g = new THREE.Group(); g.add(buildBlocks({ ...w, blocks: same }, st.landObj, P, bo));
+        if (Object.keys(nu).length) { const gn = buildBlocks({ ...w, blocks: nu }, st.landObj, P, bo); blueprint(gn); g.add(gn); }
+        swap('blocks', g);
+      }
+      st.sig.blocks = sigBlocks;
+    }
+    // 壊す・外す物（編集前にあって今ない）：青い点線で残す。地形を変えたマスは青い枠
+    const sigGone = sigBase + JSON.stringify(bs.map(b => W.bid(b))) + JSON.stringify(Object.keys(w.blocks)) + sigLand.length;
+    if (sigGone !== st.sig.gone) {
+      let gg = null;
+      if (st.base) {
+        gg = new THREE.Group(); const ids = new Set(bs.map(b => W.bid(b)));
+        for (const b0 of bs0) if (!ids.has(W.bid(b0))) gg.add(dashed(buildHouse(b0, P, st.at, { tanks: [], cut: false, lat: E.SITES[s.site]?.lat, free: () => true })));
+        const gone = {}; for (const k in st.base.blocks) if (!w.blocks[k] || w.blocks[k].t !== st.base.blocks[k].t) gone[k] = st.base.blocks[k];
+        if (Object.keys(gone).length) gg.add(dashed(buildBlocks({ ...st.base, blocks: gone }, st.landObj, P, { lat: E.SITES[s.site]?.lat })));
+        const pts = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { if (w.H[y * N + x] === st.base.H[y * N + x] || W.buildingAt(w, x, y)) continue; const z = st.at(x + 0.5, y + 0.5) + 0.04, a = 0.06, b2 = 0.94;
+          pts.push(x + a, z, y + a, x + b2, z, y + a, x + b2, z, y + a, x + b2, z, y + b2, x + b2, z, y + b2, x + a, z, y + b2, x + a, z, y + b2, x + a, z, y + a); }
+        if (pts.length) { const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); gg.add(new THREE.LineSegments(lg, lineM)); }
+      }
+      swap('gone', gg); st.sig.gone = sigGone;
+    }
     // 下書きの置き物（畑・木・小屋・池…）：白い模型で
     const sigGhost = JSON.stringify(st.draft && st.draft.blocks ? [Object.keys(st.draft.blocks), st.draft.real] : null) + sigLand;
     if (sigGhost !== st.sig.ghost) {
@@ -100,9 +150,9 @@ export function createStage(v, s, P) {
 /* 畑とタンク（この試作では形だけ）。
    畑は段々：上の面はその段の高さで平ら（少し盛り上がる）、ふちに板。下り側は段差の土の壁（石垣があれば石） */
 export function buildBlocks(w, land, P, bo = {}) {
-  const at = land.at, g = new THREE.Group();
+  const at = land.at, g = new THREE.Group(), N0 = W.N;
   const leaf = matte({ color: '#ffffff', vary: 0.15, freq: 5, bump: 0.6, bumpFreq: 8, rough: 0.85, spec: 0.4 }); leaf.emissive = new THREE.Color('#25331C'); leaf.emissiveIntensity = 0.4;
-  const plants = [], tanks = [], beds = [], heaps = [], coops = [], ponds = [], media = [], reeds = [], pumps = [], batts = [], settles = [];
+  const plants = [], tanks = [], beds = [], heaps = [], coops = [], ponds = [], media = [], reeds = [], pumps = [], batts = [], settles = [], pvs = [];
   for (const k in w.blocks) {
     const [x, y, z] = k.split(',').map(Number), b = w.blocks[k], D = BLOCKS[b.t]; if (!D) continue;
     if (D.kind === 'bed') beds.push({ x, y, z, stone: !!(b.s || (w.stone && w.stone[`${x},${y}`])), mulch: !!b.m, cover: !!b.g });
@@ -115,6 +165,7 @@ export function buildBlocks(w, land, P, bo = {}) {
     else if (D.kind === 'plant') reeds.push({ x, y, z, t: D.plant });
     else if (D.kind === 'pump') pumps.push({ x, y, z });
     else if (D.kind === 'settle') settles.push({ x, y, z });
+    else if (D.kind === 'pv' && !W.buildingAt(w, x, y)) pvs.push({ x, y, z });
   }
   const pickAt = (m, kind, extra = {}) => { m.userData.pick = { kind, ...extra }; return m; };
   if (beds.length) {
@@ -210,6 +261,17 @@ export function buildBlocks(w, land, P, bo = {}) {
       const off = side[0] || side[1] ? 0.5 - 0.1 - 0.17 - 0.03 : 0; m.position.set(bt.x + 0.5 + side[0] * off, bt.z, bt.y + 0.5 + side[1] * off);
       m.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } }); m.userData.pick = { kind: 'batt', x: bt.x, y: bt.y, z: bt.z }; g.add(m);
     } }
+  // 地面の太陽光：赤道の側へ傾けた架台に1枚（年の発電は engine で同じ傾き 0.4 として数える）
+  if (pvs.length) { const eq = (bo.lat ?? 6) >= 0 ? 1 : -1, tilt = 0.4, panel = matte({ color: '#2B3B55', vary: 0.03, freq: 3, rough: 0.32, spec: 0.9 }), frame = matte({ color: '#A9AEB1', vary: 0.02, freq: 3, rough: 0.5 }), line = new THREE.MeshBasicMaterial({ color: '#8EA3C2' });
+    for (const q of pvs) {
+      const m = new THREE.Group(), pn = new THREE.Group(); pn.rotation.x = eq * tilt; pn.position.y = 0.78; m.add(pn);
+      pn.add(new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.035, 1.28), frame));
+      const face = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.02, 1.22), panel); face.position.y = 0.012; pn.add(face);
+      for (const zz of [-0.2, 0.2]) { const l = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.024, 0.012), line); l.position.set(0, 0.014, zz * 1.5); pn.add(l); }
+      for (const xs of [-0.4, 0.4]) for (const zs of [-1, 1]) { const hgt = 0.78 - zs * eq * 0.46 * Math.tan(tilt); const post = new THREE.Mesh(new THREE.BoxGeometry(0.04, hgt, 0.04), frame); post.position.set(xs, hgt / 2, zs * 0.46); m.add(post); }
+      m.position.set(q.x + 0.5, q.z, q.y + 0.5);
+      m.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; }); m.userData.pick = { kind: 'pvg', x: q.x, y: q.y, z: q.z }; g.add(m);
+    } }
   const wood = matte({ color: P.wood, vary: 0.2, freq: 4, bump: 0.4, bumpFreq: 9 }), tin = matte({ color: '#9AA09F', vary: 0.08, freq: 2, rough: 0.6 });
   const boxAt = (arr, mat, cx, cy, cz, sx, sy, sz, rx = 0) => { const gg = new THREE.BoxGeometry(sx, sz, sy); if (rx) gg.rotateX(rx); gg.translate(cx, cz, cy); arr.push(gg); };
   const mesh = (geos, mat) => { const m = new THREE.Mesh(mergeGeometries(geos.map(x => { const n2 = x.index ? x.toNonIndexed() : x; if (n2.getAttribute('uv')) n2.deleteAttribute('uv'); return n2; })), mat); m.castShadow = m.receiveShadow = true; return m; };
@@ -256,11 +318,22 @@ export function buildBlocks(w, land, P, bo = {}) {
     const wm = new THREE.MeshStandardMaterial({ color: '#4F8088', roughness: 0.12, transparent: true, opacity: 0.88 });
     const pm = new THREE.Mesh(pg, wm); pm.receiveShadow = true; g.add(pickAt(pm, 'pond'));
   }
-  // 排水の庭：掘った穴に砂利と砂を入れ、上にヨシやカンナ
+  // 浄化設備：掘った穴に砂利と砂を入れ、上にヨシやカンナ
   if (media.length) {   // 砂利の面は地面に塗ってある。押せるように、薄い当たりの板だけ置く
     const geos = []; const top = new Map(); for (const m of media) { const k = `${m.x},${m.y}`; if (!top.has(k) || top.get(k).z < m.z) top.set(k, m); }
     for (const m of top.values()) boxAt(geos, null, m.x + 0.5, m.y + 0.5, at(m.x + 0.5, m.y + 0.5) + 0.02, 1, 1, 0.02);
     const hit = mesh(geos, new THREE.MeshBasicMaterial({ visible: false })); hit.castShadow = hit.receiveShadow = false; g.add(pickAt(hit, 'filter'));
+    // 微生物の働きは見えないので、水の色で見せる：家に近い入口は濁った茶、奥へ流れるほど澄んだ青。小さな泡は入口ほど多い
+    const hc = w.house ? (() => { const ks = Object.keys(w.house.cells).map(k => k.split(',').map(Number)); return [ks.reduce((a, c) => a + c[0], 0) / ks.length, ks.reduce((a, c) => a + c[1], 0) / ks.length]; })() : [N0 / 2, N0 / 2];
+    const cells = [...top.values()], ds = cells.map(m => Math.hypot(m.x + 0.5 - hc[0], m.y + 0.5 - hc[1])), d0 = Math.min(...ds), d1 = Math.max(...ds);
+    const film = new THREE.InstancedMesh(new THREE.BoxGeometry(0.98, 0.012, 0.98), new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.5, metalness: 0, transparent: true, opacity: 0.8 }), cells.length);
+    const bub = [], mt = new THREE.Matrix4(), c = new THREE.Color(), dirty = new THREE.Color('#5E4123'), clear = new THREE.Color('#3E8FC0');
+    cells.forEach((m, i) => { const t = d1 > d0 ? (ds[i] - d0) / (d1 - d0) : 0.5, z = at(m.x + 0.5, m.y + 0.5) + 0.035;
+      mt.makeTranslation(m.x + 0.5, z, m.y + 0.5); film.setMatrixAt(i, mt); film.setColorAt(i, c.copy(dirty).lerp(clear, t));
+      const nb = Math.round(7 - t * 5); for (let k = 0; k < nb; k++) bub.push([m.x + 0.12 + hash(m.x, m.y, 200 + k) * 0.76, z + 0.012, m.y + 0.12 + hash(m.y, m.x, 230 + k) * 0.76, 0.6 + hash(k, m.x, 260) * 0.8]); });
+    film.receiveShadow = true; g.add(pickAt(film, 'filter'));
+    if (bub.length) { const bm = new THREE.InstancedMesh(new THREE.SphereGeometry(0.03, 6, 4), new THREE.MeshStandardMaterial({ color: '#F4F8F6', roughness: 0.25, transparent: true, opacity: 0.85 }), bub.length);
+      bub.forEach(([x, z, y, r], i) => { mt.makeScale(r, r * 0.7, r).setPosition(x, z, y); bm.setMatrixAt(i, mt); }); g.add(pickAt(bm, 'filter')); }
   }
   if (reeds.length) {
     const cone = new THREE.ConeGeometry(0.035, 1, 5); cone.translate(0, 0.5, 0);

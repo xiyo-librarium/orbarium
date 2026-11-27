@@ -92,6 +92,8 @@ export const PALETTES = {
    朝は淡くさわやかに（黄〜桃）、夕方は濃く（橙〜あかね）。高さ（度）ごとの色を、間はなめらかにつなぐ */
 const TOD = {
   am: [
+    { e: -18, sun: '#A9C0F2', k: 0.8, sky: '#3A4E8A', hor: '#2C3A64', gnd: '#1A2030', env: 0.42, top: '#0D1630' },
+    { e: -6, sun: '#9FB0E4', k: 0.6, sky: '#5C74BC', hor: '#A99CC4', gnd: '#3E4260', env: 0.6, top: '#2E4580' },
     { e: 0, sun: '#FFA07C', k: 2.5, sky: '#8E9CCB', hor: '#F5C6B4', gnd: '#8A7262', env: 0.56, top: '#9FB1D2' },
     { e: 7, sun: '#FFBE8C', k: 3.0, sky: '#9DACD0', hor: '#F6D5BE', gnd: '#94806A', env: 0.58, top: '#AEC0D8' },
     { e: 18, sun: '#FFD8AA', k: 3.6, sky: '#AFBFD8', hor: '#F3E0CB', env: 0.58, top: '#B7C9DA' },
@@ -99,6 +101,8 @@ const TOD = {
     { e: 60, sun: '#FFF6EA', k: 4.4, env: 0.6 }
   ],
   pm: [
+    { e: -18, sun: '#A9C0F2', k: 0.8, sky: '#3A4E8A', hor: '#2C3A64', gnd: '#1A2030', env: 0.42, top: '#0D1630' },
+    { e: -6, sun: '#9FB0E4', k: 0.6, sky: '#5A70B8', hor: '#BC97B4', gnd: '#40405E', env: 0.6, top: '#2C417C' },
     { e: 0, sun: '#FF7A44', k: 2.4, sky: '#7C86BA', hor: '#F2AA7C', gnd: '#8C6A52', env: 0.54, top: '#909EC6' },
     { e: 7, sun: '#FF9C58', k: 2.9, sky: '#8E99C2', hor: '#F4BF8E', gnd: '#957659', env: 0.57, top: '#A3B2D0' },
     { e: 18, sun: '#FFBF7E', k: 3.5, sky: '#A4B0CC', hor: '#F2D2A8', env: 0.58, top: '#B2C2D4' },
@@ -107,22 +111,28 @@ const TOD = {
   ]
 };
 export function skyLight(P, elevDeg, am) {
-  const K = am ? TOD.am : TOD.pm, e = Math.max(0, elevDeg);
+  const K = am ? TOD.am : TOD.pm, e = Math.max(-18, elevDeg);
   let i = 0; while (i < K.length - 2 && e > K[i + 1].e) i++;
   const A = K[i], B = K[i + 1], t = Math.max(0, Math.min(1, (e - A.e) / (B.e - A.e))), s = t * t * (3 - 2 * t);
   const mix = (a, b) => new THREE.Color(a).lerp(new THREE.Color(b), s);
   // 空と地平の色は、日が高ければその土地の色。低いほど時刻の色を強く
-  const w = 1 - Math.max(0, Math.min(1, e / 60)), ww = w * w * (3 - 2 * w);
+  const w = 1 - Math.max(0, Math.min(1, e / 60)), ww = w * w * (3 - 2 * w), night = Math.max(0, Math.min(1, (2 - e) / 10));   // 日の入り前から明かりが灯りはじめる
   const tint = (key, base) => mix(A[key] ?? base, B[key] ?? base).lerp(new THREE.Color(base), 1 - ww);
   return {
     sun: mix(A.sun, B.sun), sunK: A.k + (B.k - A.k) * s, env: A.env + (B.env - A.env) * s,
     hemiSky: tint('sky', P.hemiSky), horizon: tint('hor', P.fog), hemiGround: tint('gnd', P.hemiGround),
-    skyTop: tint('top', P.sky[0]), skyBottom: tint('hor', P.sky[1]), fog: tint('hor', P.fog), day: 1 - 0.45 * ww, exposure: 0.95 + 0.2 * ww
+    skyTop: tint('top', P.sky[0]), skyBottom: tint('hor', P.sky[1]), fog: tint('hor', P.fog), day: (1 - 0.45 * ww) * Math.max(0.15, Math.min(1, (e + 8) / 8)), exposure: (0.95 + 0.2 * ww) * (1 - 0.18 * night), night
   };
 }
 
 /* 葉の「透ける光」は昼の明るさに合わせる（夕方に葉だけ光って見えないように） */
 export const glow = { mats: [], set(k) { for (const [m, base] of this.mats) m.emissiveIntensity = base * k; } };
+
+/* 窓の明かり：日が沈むと家の中が灯る（ガラスを暖かく光らせる） */
+const LAMP = new THREE.Color('#FFC16E');
+export const lamps = { k: 0, mats: new Set(),
+  add(m) { m.emissive = LAMP.clone(); m.emissiveIntensity = this.k * 1.8; this.mats.add(m); m.addEventListener('dispose', () => this.mats.delete(m)); },
+  set(k) { this.k = k; for (const m of this.mats) m.emissiveIntensity = k * 1.8; } };
 
 /* 同じ場所なら毎回同じ乱数 */
 export function hash(x, y = 0, k = 0) { let n = (Math.floor(x * 73.1) * 374761393 + Math.floor(y * 91.7) * 668265263 + k * 2147483647) | 0; n = (n ^ (n >>> 13)) * 1274126177; return ((n ^ (n >>> 16)) >>> 0) / 4294967295; }

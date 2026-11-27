@@ -156,4 +156,22 @@ check('林の落ち葉で炭素が足りる', S.compost.buy < 0.01);
   W.draftAddRect({ ...E.newGame({ seed: 1 }).world }, d, 0, 0, 0, 0);
   check('床を減らすと、行き場のない間仕切りは外れる', Object.keys(d.inner).length === 0);
 }
+// 編集の値段：編集前と今の差だけ。A→B→A はただ、A→B→C は C の分だけ（11/27）
+{
+  const s0 = E.newGame({ seed: 3 }), w0 = JSON.parse(JSON.stringify(s0.world)), clone = (x) => JSON.parse(JSON.stringify(x));
+  const roofTo = (w, r) => { const t = { ...s0, world: clone(w), cash: 1e7 }; const d = W.cloneHouse(t.world.house); d.roof = r; const e = W.buildBuilding(t, d); if (e) throw new Error(e); return t.world; };
+  const r0 = w0.house.roof, rB = r0 === 'tin' ? 'tinins' : 'tin', rC = 'green';
+  const wB = roofTo(w0, rB), wA = roofTo(wB, r0), wC = roofTo(wB, rC);
+  check(`屋根 A→B→A はただ（${W.editCost(w0, wA).total.toFixed(2)}）`, W.editCost(w0, wA).total < 1e-6);
+  const direct = W.editCost(w0, roofTo(w0, rC)).total, via = W.editCost(w0, wC).total;
+  check(`屋根 A→B→C は A→C と同じ（${via.toFixed(1)}＝${direct.toFixed(1)}）`, Math.abs(via - direct) < 1e-6 && direct > 0);
+  const t = { ...s0, world: clone(w0), cash: 1e7 }, tx = 20, ty = 40; W.put(t, tx, ty, W.h(t.world, tx, ty), 'tank', 'hire');
+  const c1 = W.editCost(w0, t.world).total;
+  W.moveBlock(t, [tx, ty, W.h(t.world, tx, ty)], [tx + 2, ty, W.h(t.world, tx + 2, ty)]);
+  check(`タンクは置いた分だけ、動かすのはただ（${c1.toFixed(1)}）`, Math.abs(W.editCost(w0, t.world).total - c1) < 1e-6 && c1 > 0);
+  W.remove(t, tx + 2, ty, W.h(t.world, tx + 2, ty));
+  check('置いて外すとただ', W.editCost(w0, t.world).total < 1e-6);
+  W.dig(t, 10, 10, 'hire'); W.fill(t, 10, 10, 'hire');
+  check('掘って埋め戻すとただ', W.editCost(w0, t.world).total < 1e-6);
+}
 console.log(ok.map(x => '  ✓ ' + x).join('\n')); if (ng.length) { console.log(ng.map(x => '  ✗ ' + x).join('\n')); process.exit(1); }

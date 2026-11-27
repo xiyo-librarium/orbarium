@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { matte, hash } from './look.js';
+import { matte, hash, lamps } from './look.js';
 import { HOUSE_H, roofZ, roofBox, eavesDepth, houseOuterEdges, drainDirs, ACCENTS, WALLS, ROOFS, furnCells, FDIR as W_FDIR, pvLayout } from '/js/world.js';
 
 const T = 0.2;   // 壁の厚さ
@@ -29,7 +29,7 @@ export function buildHouse(hs, P, at, opt = {}) {
   const accentMat = matte({ color: accentHex, vary: 0.04, freq: 1.5, bump: 0.12, bumpFreq: 2.5 });
   const trimMat = matte({ color: P.lime, vary: 0.04, freq: 2, bump: 0.2 });
   const woodMat = matte({ color: P.wood, vary: 0.16, freq: 4, bump: 0.5, bumpFreq: 8 });
-  const glassMat = new THREE.MeshStandardMaterial({ color: P.glass, roughness: 0.18, metalness: 0.0, envMapIntensity: 1.4 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: P.glass, roughness: 0.18, metalness: 0.0, envMapIntensity: 1.4 }); lamps.add(glassMat);
   const floorMat = matte({ color: '#B0664A', vary: 0.12, freq: 3 });
   const mortarMat = matte({ color: '#8F897D', vary: 0.1, freq: 3, bump: 0.6, bumpFreq: 6 });
 
