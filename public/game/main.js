@@ -477,6 +477,8 @@ async function boot() {
   }
   function wallTap(p) {
     const b = bOf(p.id); if (!b) return;
+    // 新しい操作：窓と扉は［部屋］で（壁を下げているときだけ壁の選択肢を出す）。外から押した家は［家］の窓
+    if (UI2 && !stage.cut) { closePick(); select(p); return; }
     { const ie = nearestInner(b, p.point); if (ie) { openPick({ id: p.id, e: ie, inner: true }); return; } }
     const e = nearestEdge(b, p.point, p.normal, stage.cut);
     if (!e) { if (stage.cut) { const h = furnHit(p); if (h) { selectFurn(h); return; } } select(p); return; }
@@ -492,8 +494,8 @@ async function boot() {
   let PK = null;
   const pkHouse = () => PK && (PK.draft ? G.draft?.house?.d : bOf(PK.id));
   const edgeMid = (b, e) => { const [t, r] = e.split(':'), [ex, ey] = r.split(',').map(Number), along = t === 'h'; return { along, x: along ? ex + 0.5 : ex, y: along ? ey : ey + 0.5 }; };
-  function openPick(o) { select(null); selectFurn(null); PK = o; renderPick(); }
-  function closePick() { PK = null; pk.hidden = true; wallMark.visible = false; v.req(); }
+  function openPick(o) { if (!UI2) select(null); else if (innerWidth <= 640) { card.hidden = true; document.body.classList.remove('carded'); } selectFurn(null); PK = o; renderPick(); }   // 新しい操作：広い画面では［部屋］の窓は開いたまま、スマホでは壁の選択肢と入れかえる
+  function closePick() { const was = !!PK; PK = null; pk.hidden = true; wallMark.visible = false; v.req(); if (UI2 && was && card.hidden && G.cat && !G.tool) renderCard(); }
   const IOPTS = [['wall', '間仕切り', '部屋を分ける。'], ['door', '扉', '部屋と部屋を行き来する。'], ['none', '外す', 'ひとつの部屋に戻す。']];
   function innerOptions(b, e) {
     const cur = (b.inner || {})[e] || 'none';
@@ -524,7 +526,7 @@ async function boot() {
     pk.innerHTML = `<div class="pick-h"><b>${PK.inner ? '家の中の壁' : 'この壁'}</b><span class="sub">${PK.inner ? `${W.rooms(b).length}部屋` : PK.draft ? '下書き' : W.WALLS[b.wall].name}</span><button class="x" data-p="x" aria-label="閉じる">×</button></div>
       <div class="pick-o">${opts.map(o => `<button data-p="${o.t || 'wall'}" class="${o.cur ? 'on' : ''}" ${o.lock || o.why ? 'disabled' : ''} title="${BK.esc(o.why || o.note)}"><i class="op op-${o.t || 'wall'}"></i><b>${o.name}</b><span>${price(o)}</span></button>`).join('')}</div>
       <p class="pick-n">${BK.esc(cur.note)}${opts.filter(o => o.why && !o.lock).map(o => `<br><span class="bad">${o.name}：${BK.esc(o.why)}</span>`).join('')}${opts.find(o => o.t === 'door' && !o.cur && o.moved?.length && !o.why) ? `<br>扉にすると、${opts.find(o => o.t === 'door').moved.join('・')}を近くへよける` : ''}</p>
-      ${PK.draft ? '' : '<button class="pick-more" data-p="more">建物ぜんたい（工法・屋根・設備）</button>'}`;
+      ${PK.draft || UI2 ? '' : '<button class="pick-more" data-p="more">建物ぜんたい（工法・屋根・設備）</button>'}`;
     pk.hidden = false;
     const m = edgeMid(b, PK.e), h = stage.cut ? 1.12 : W.HOUSE_H + 0.04, th = PK.inner ? 0.2 : 0.32;
     wallMark.scale.set(m.along ? 1.04 : th, h, m.along ? th : 1.04); wallMark.position.set(m.x, b.z + h / 2, m.y); wallMark.visible = true; v.req();
@@ -875,7 +877,7 @@ async function boot() {
     const insNote = !knows('insulation') ? ' 断熱は、季節を過ごして学ぶと選べる。' : '';
     // 新しい操作では、丸ごとに分けて見せる（家：外側と屋根と基礎／部屋：中／設備：太陽光と電池）
     if (part === 'house') return head + useRow + remodelRow + methodRow + roofRow + deepRow + rain + (id === 'main' ? '' : `<div class="acts2"><button class="wide" data-act="erase">壊す</button></div>`) + (insNote ? `<p class="note">${insNote.trim()}</p>` : '');
-    if (part === 'room') return head + useRow + roomsRow + fixtures + `<p class="note">${U.note}</p>`;
+    if (part === 'room') return head + useRow + roomsRow + fixtures + `<p class="note">${UI2 ? '壁を押すと窓・扉。床をなぞると間仕切り。' : U.note}</p>`;
     if (part === 'equip') return `<h3>太陽光と蓄電池<span class="sub" style="margin:0">${name}</span><button class="x" data-act="close" aria-label="閉じる">×</button></h3>` + (pvRows + battRow || `<p class="note">停電を知ると選べる。</p>`);
     return head + useRow + remodelRow + methodRow + roomsRow + `
       <div class="row"><span>中</span><div><button class="wide" data-act="inside">${stage.cut ? '壁を戻す' : '中を見る・家具を動かす'}</button></div></div>
@@ -994,6 +996,12 @@ async function boot() {
     const bar = $('#draft'); bar.insertBefore($('#undo'), $('#draftYes')); bar.insertBefore($('#redo'), $('#draftYes'));
   }
   G.cat = null; G.item = null; G.pvOpen = false;
+  // 窓が下半分をふさぐので、見ている所を窓の上の空いた所の真ん中へ上げる
+  const liftView = () => { if (!UI2) return; const H = innerHeight; let top = H;
+    if (!card.hidden) top = Math.min(top, card.getBoundingClientRect().top);
+    if (!pk.hidden && innerWidth <= 640) top = Math.min(top, pk.getBoundingClientRect().top);   // スマホの壁の選択肢も下から出る
+    v.setLift(Math.min(H * 0.3, Math.max(0, (H - top) / 2))); };
+  if (UI2) { for (const el of [card, pk]) { new MutationObserver(liftView).observe(el, { attributes: true, attributeFilter: ['hidden'] }); new ResizeObserver(liftView).observe(el); } }
   const itemOK = (it) => it.tool ? (it.sub ? subOK(it.tool, it.sub) : true) : knows(it.learn);
   const itemOf = (id) => Object.values(CAT_TOOLS).flat().find(x => x.id === id);
   function catTools(c) {

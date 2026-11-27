@@ -89,7 +89,7 @@ export function createView(canvas, opt = {}) {
     camera.position.set(target.x + dist * Math.sin(p) * Math.cos(a), target.y + dist * Math.cos(p), target.z + dist * Math.sin(p) * Math.sin(a));
     controls.update(); v.req();
   };
-  v.resize = () => { const w = canvas.clientWidth, h = canvas.clientHeight; renderer.setSize(w, h, false); composer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); v.req(); };
+  v.resize = () => { const w = canvas.clientWidth, h = canvas.clientHeight; renderer.setSize(w, h, false); composer.setSize(w, h); camera.aspect = w / h; if (lift >= 0.5) camera.setViewOffset(w, h, 0, lift, w, h); camera.updateProjectionMatrix(); v.req(); };
   v.req = () => { v.need = true; };
   v.render = () => {
     if (envWant) { const L = envWant; envWant = null; setEnv(L.hemiSky, L.horizon, L.hemiGround);
@@ -125,9 +125,20 @@ export function createView(canvas, opt = {}) {
     return true;
   };
   v.distance = () => camera.position.distanceTo(controls.target);
+  // 下に窓が開いているあいだは、見ている所を窓の上の空いた所の真ん中へ持ち上げる（なめらかに）
+  let lift = 0, liftTo = 0, liftFrom = 0, liftT0 = 0;
+  v.setLift = (px) => { px = Math.max(0, Math.round(px)); if (px === liftTo) return; liftFrom = lift; liftTo = px; liftT0 = performance.now(); v.req(); };
+  const stepLift = () => {
+    if (lift === liftTo) return false;
+    const u = Math.min(1, (performance.now() - liftT0) / 380), e = 1 - Math.pow(1 - u, 3);   // 時間で動かす（遅い端末でもコマ数がふえない）
+    lift = u >= 1 ? liftTo : liftFrom + (liftTo - liftFrom) * e;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (lift < 0.5) camera.clearViewOffset(); else camera.setViewOffset(w, h, 0, lift, w, h);
+    return true;
+  };
   controls.addEventListener('change', v.req);
   addEventListener('resize', v.resize);
-  const loop = () => { requestAnimationFrame(loop); const flying = stepFly(); const moving = flying ? false : controls.update(); if (v.need || moving || flying) { v.need = false; v.render(); if (v.onFrame) v.onFrame(); } };
+  const loop = () => { requestAnimationFrame(loop); const flying = stepFly(), lifting = stepLift(); const moving = flying ? false : controls.update(); if (v.need || moving || flying || lifting) { v.need = false; v.render(); if (v.onFrame) v.onFrame(); } };
   v.start = () => { v.resize(); loop(); };
   return v;
 }
